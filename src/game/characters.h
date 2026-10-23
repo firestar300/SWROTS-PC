@@ -19,6 +19,10 @@ const char* RegisteredClassName(const char* name);
 // given, in the game's spelling.
 bool SetPlayerClass(const char* className, bool checked = true);
 
+// A picture loaded from its file (the disc's, or one under mods\), its path without .stx, e.g.
+// "interfc\\front_end\\s_selduel_lukehead": the engine's texture (as the menus and the HUD draw), or null.
+void* LoadPictureFile(const char* path);
+
 // The class set with SetPlayerClass, or null.
 const char* PlayerClass();
 

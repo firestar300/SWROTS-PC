@@ -22,6 +22,7 @@
 
 #include "core/log.h"
 #include "core/patch.h"
+#include "game/characters.h"
 #include "game/customchars.h"
 #include "game/game.h"
 #include "game/menus.h"
@@ -43,6 +44,9 @@ struct ExtraFighter {
                          // fights itself (the game's fighters have one for player 2 always)
     const char* meshes;  // the textures' folder, whose player 2 look (the engine's <texture>_duel,
                          // see DarkLookGenerator) is made when the disc has none, or null
+    // its own pictures, loaded from their files (paths without .stx; null: none, or the disc's above): the head, the
+    // bust, player 1's and player 2's full body (see Pictures below)
+    const char* files[4];
 };
 
 // Yoda: a planned fighter (the disc has his select head, bust and HUD portrait, and his name in
@@ -185,7 +189,8 @@ std::vector<Picture> WithExtraBodies(const std::vector<Picture>& bodies, bool st
         // g_SlotCount + 1, a round 12 with one extra.
         newBodies.push_back(random);
         for (const ExtraFighter& extra : g_Extras)
-            newBodies.push_back(standIns ? Sized(Like(random, extra.bust), 256.0f, 128.0f) : random);
+            newBodies.push_back(standIns && !extra.files[2 + block] ? Sized(Like(random, extra.bust), 256.0f, 128.0f)
+                : random);
         newBodies.push_back(random);
     }
     newBodies.push_back(random);
@@ -379,7 +384,8 @@ void __fastcall BodiesHook(uint8_t* screen, void* edx)
 {
     g_OriginalSetBodies(screen, edx);
     for (int player = 0; player < 2; ++player) {
-        if (Extra(*reinterpret_cast<int*>(screen + 0x2C + player * 4)))
+        const ExtraFighter* extra = Extra(*reinterpret_cast<int*>(screen + 0x2C + player * 4));
+        if (extra && !extra->files[2 + player])
             *reinterpret_cast<void**>(*reinterpret_cast<uint8_t**>(screen + 0x70 + player * 4) + 0x1C) = nullptr;
     }
 }
@@ -627,36 +633,17 @@ std::wstring Wide(const std::string& text)
     return std::wstring(text.begin(), text.end());
 }
 
-// A custom character's select pictures are served in the place of pictures the disc has and never shows (a cut
-// character's), read with the shared PAK as the menu asks for them: a picture under mods\ that no PAK has is refused
-// by the menus (0x210B6B: the pre-cache path finds no image). One pair so far: the Grievous bodyguard's.
-struct DonorPictures {
-    const char* head;
-    const char* bust;
-};
-constexpr DonorPictures kDonors[] = { { "s_selduel_gbghead", "s_selduel_gbgbust" } };
-std::vector<uint8_t> g_DonorData[std::size(kDonors)][2];
-
-// The custom picture with the donor's own name inside (0x40, what the menus look textures up by, as the disc spells
-// it).
-void ServeDonor(std::vector<uint8_t>& data, const std::vector<uint8_t>& custom)
-{
-    if (custom.size() < 0x40 + 0x28 || data.size() < 0x40 + 0x28)
-        return;
-    std::vector<uint8_t> out = custom;
-    std::memcpy(out.data() + 0x40, data.data() + 0x40, 0x28);
-    data.swap(out);
-}
-
-void ServeDonor0Head(std::vector<uint8_t>& data) { ServeDonor(data, g_DonorData[0][0]); }
-void ServeDonor0Bust(std::vector<uint8_t>& data) { ServeDonor(data, g_DonorData[0][1]); }
-constexpr ResourcePatch kDonorPatches[std::size(kDonors)][2] = { { &ServeDonor0Head, &ServeDonor0Bust } };
+// A custom character's select pictures: the menus' sets name pictures the shared PAK has (a picture under mods\ that
+// no PAK has is refused by the menus' pre-cache, 0x210B6B), so its entries name stand-ins the disc has (the cut
+// Grievous bodyguard's, kStandInHead/Bust; Random's full body), and its own pictures, loaded from their files, are
+// drawn in their place (see Pictures below).
+constexpr const char* kStandInHead = "s_selduel_gbghead";
+constexpr const char* kStandInBust = "s_selduel_gbgbust";
 
 void BuildExtras()
 {
     g_Extras.clear();
     g_Extras.push_back(kYoda);
-    size_t donors = 0;
     for (const CustomCharacter& custom : CustomCharacters()) {
         if (int(g_Extras.size()) >= kMaxExtras) {
             LOG_WARN("Roster: no select-screen slot left for %s", custom.className.c_str());
@@ -678,22 +665,17 @@ void BuildExtras()
         std::string upper = custom.className;
         for (char& c : upper)
             c = char(toupper(static_cast<unsigned char>(c)));
-        if (donors >= std::size(kDonors) ||
-            !ReadModFile("interfc\\front_end\\" + head + ".stx", g_DonorData[donors][0]) ||
-            !ReadModFile("interfc\\front_end\\" + bust + ".stx", g_DonorData[donors][1])) {
-            LOG_WARN("Roster: no select-screen pictures can be shown for %s (one custom character so far)",
-                custom.className.c_str());
-            continue;
-        }
-        const std::string donorHead = std::string("interfc\\front_end\\") + kDonors[donors].head + ".stx";
-        const std::string donorBust = std::string("interfc\\front_end\\") + kDonors[donors].bust + ".stx";
-        RegisterResourcePatch(donorHead, kDonorPatches[donors][0]);
-        RegisterResourcePatch(donorBust, kDonorPatches[donors][1]);
         ExtraFighter extra = {};
         extra.className = Keep(custom.className);
-        extra.head = kDonors[donors].head;
-        extra.bust = kDonors[donors].bust;
-        ++donors;
+        extra.head = kStandInHead;
+        extra.bust = kStandInBust;
+        extra.files[0] = Keep("interfc\\front_end\\" + head);
+        extra.files[1] = Keep("interfc\\front_end\\" + bust);
+        for (int player = 0; player < 2; ++player) {
+            const std::string body = "s_selduel_fb_" + costume + (player ? "_v2" : "_v1");
+            if (present(body))
+                extra.files[2 + player] = Keep("interfc\\front_end\\" + body);
+        }
         extra.nameId = Keep("IDS_PORT_" + upper + "_NAME");
         extra.titleId = Keep("IDS_PORT_" + upper + "_TITLE");
         SetMenuText(extra.nameId, Wide(custom.name));
@@ -712,6 +694,89 @@ void BuildExtras()
     std::memset(g_TextIds, 0, sizeof(g_TextIds));
 }
 
+// --- Pictures -------------------------------------------------------------------------------------------------------
+// An extra's own pictures are loaded from their files (the texture loader's direct path, as the concept art screen
+// loads its pictures; characters.h LoadPictureFile) the first time they are drawn, and drawn in the place of their
+// stand-ins: the strip of heads by the port (DrawSelectStrip); the busts and full bodies are menu Texture items (draw
+// 0x2C7790, vtable 0x5D3F78 slot 3: +0x1C its picture record, whose +0xC is the texture drawn and +0x64/+0x68 its
+// size; +0x20/+0x24 the item's y/x offsets), whose record, found in its set ([[item+8]+0x2C]: +8 count, +0xC records),
+// names the slot. During that draw only, the record holds the extra's own texture. An extra without its own full body
+// shows its bust in the arena screen (the stand-in entry), scaled into the full body's frame.
+constexpr uint32_t kTextureItemVtable = 0x005D3F78;
+constexpr uint32_t kTextureItemDraw = 0x002C7790;
+void* g_Pictures[kMaxExtras][4];
+bool g_PicturesTried[kMaxExtras][4];
+
+void* ExtraPicture(int extra, int kind)
+{
+    if (extra < 0 || extra >= g_ExtraCount || !g_Extras[size_t(extra)].files[kind])
+        return nullptr;
+    if (!g_PicturesTried[extra][kind]) {
+        g_PicturesTried[extra][kind] = true;
+        g_Pictures[extra][kind] = LoadPictureFile(g_Extras[size_t(extra)].files[kind]);
+        if (!g_Pictures[extra][kind])
+            LOG_WARN("Roster: %s did not load", g_Extras[size_t(extra)].files[kind]);
+    }
+    return g_Pictures[extra][kind];
+}
+
+using TextureDrawFn = void(__fastcall*)(uint8_t*, void*, void*);
+
+void __fastcall TextureItemDrawHook(uint8_t* item, void*, void* context)
+{
+    const auto draw = reinterpret_cast<TextureDrawFn>(uintptr_t(kTextureItemDraw));
+    uint8_t* record = *reinterpret_cast<uint8_t**>(item + 0x1C);
+    uint8_t* data = record ? *reinterpret_cast<uint8_t**>(item + 8) : nullptr;
+    uint8_t* set = data ? *reinterpret_cast<uint8_t**>(data + 0x2C) : nullptr;
+    const int count = set ? *reinterpret_cast<int*>(set + 8) : 0;
+    uint8_t** records = set ? *reinterpret_cast<uint8_t***>(set + 0xC) : nullptr;
+    int index = -1;
+    for (int i = 0; records && i < count && i < 128; ++i)
+        if (records[i] == record)
+            index = i;
+    // the set by its size: the busts (fighters, unused, extras, then three), the full bodies (two blocks and one)
+    int extra = -1, kind = -1, player = 0;
+    if (index >= 0 && count == g_SlotCount + 3) {
+        extra = index - kFirstExtraSlot;
+        kind = 1;
+    } else if (index >= 0 && count == 2 * (g_SlotCount + 1) + 1) {
+        player = index / (g_SlotCount + 1);
+        extra = index % (g_SlotCount + 1) - kFirstExtraSlot;
+        kind = player < 2 ? 2 + player : -1;
+    }
+    if (kind < 0 || extra < 0 || extra >= g_ExtraCount) {
+        draw(item, nullptr, context);
+        return;
+    }
+    void* own = ExtraPicture(extra, kind);
+    const bool bustInFrame = kind >= 2 && !g_Extras[size_t(extra)].files[kind]; // (Yoda's: the disc's bust)
+    if (bustInFrame)
+        own = ExtraPicture(extra, 1);
+    if (!own && !bustInFrame) {
+        draw(item, nullptr, context);
+        return;
+    }
+    void*& texture = *reinterpret_cast<void**>(record + 0xC);
+    float* size = reinterpret_cast<float*>(record + 0x64);
+    float* offset = reinterpret_cast<float*>(item + 0x20);
+    void* const keptTexture = texture;
+    const float keptSize[2] = { size[0], size[1] }, keptOffset[2] = { offset[0], offset[1] };
+    if (own)
+        texture = own;
+    if (bustInFrame) { // the 256x128 bust over the 128x256 full body's frame, centred on it, at its middle
+        size[0] = 192.0f;
+        size[1] = 96.0f;
+        offset[0] += 96.0f;
+        offset[1] = -32.0f;
+    }
+    draw(item, nullptr, context);
+    texture = keptTexture;
+    size[0] = keptSize[0];
+    size[1] = keptSize[1];
+    offset[0] = keptOffset[0];
+    offset[1] = keptOffset[1];
+}
+
 // --- The select screen's strip of heads ----------------------------------------------------------------------------
 // The fighters are one row of heads (0x2D56F0, the screen's slot 3: from the strip item's place ([screen+4] +0x58/+0x5A,
 // its corner +0x5C/+0x5E, in 1/32 pixels), each head 51 pixels on, a locked fighter's the set's last picture; the
@@ -720,8 +785,8 @@ void BuildExtras()
 // kStripCells at a time, scrolled with the cursor that moved last; the cursor of a fighter out of view is hidden.
 constexpr int kStripCells = 11;
 constexpr float kCellStep = 51.0f;  // the game's (0x5D6960)
-constexpr uint32_t kTextureList = 0x0001F820; // thiscall (list {?, count, data}, set +4)
-constexpr uint32_t kDrawPicture = 0x0025A9C0; // cdecl (context, texture, const float* corner, const float* other)
+constexpr uint32_t kTextureList = 0x0001F820; // thiscall (list {?, count, data}, set +4): the set's picture records
+constexpr uint32_t kDrawPicture = 0x0025A9C0; // cdecl (context, picture record, const float* corner, const float* other)
 constexpr uint32_t kEngineFree = 0x54;
 int g_StripFirst = 0;
 int g_StripCursors[2] = { -1, -1 };
@@ -755,7 +820,10 @@ bool DrawSelectStrip(uint8_t* screen, uint32_t context)
     } list = {};
     reinterpret_cast<void(__fastcall*)(void*, void*, uint8_t*)>(uintptr_t(kTextureList))(&list, nullptr, set + 4);
     const int cells = list.count - 1; // the last picture: the locked one
-    if (cells <= kStripCells) {
+    bool ownHeads = false;
+    for (int i = 0; i < g_ExtraCount; ++i)
+        ownHeads = ownHeads || g_Extras[size_t(i)].files[0];
+    if (cells <= kStripCells && !ownHeads) {
         FreeList(list.data);
         return false; // the game's own draw: everything fits
     }
@@ -774,15 +842,21 @@ bool DrawSelectStrip(uint8_t* screen, uint32_t context)
         else if (follow >= g_StripFirst + kStripCells)
             g_StripFirst = follow - kStripCells + 1;
     }
-    g_StripFirst = std::clamp(g_StripFirst, 0, cells - kStripCells);
+    g_StripFirst = std::clamp(g_StripFirst, 0, std::max(0, cells - kStripCells));
     const float k = 1.0f / 32;
     const auto words = reinterpret_cast<const int16_t*>(strip + 0x58);
     float corner[2] = { words[0] * k, words[1] * k }, other[2] = { words[2] * k, words[3] * k };
     const auto isLocked = reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, int)>(uintptr_t(kIsLocked));
-    for (int i = g_StripFirst; i < g_StripFirst + kStripCells; ++i) {
-        void* texture = list.data[isLocked(screen, nullptr, i) ? list.count - 1 : i];
+    for (int i = g_StripFirst; i < std::min(cells, g_StripFirst + kStripCells); ++i) {
+        auto* record = static_cast<uint8_t*>(list.data[isLocked(screen, nullptr, i) ? list.count - 1 : i]);
+        void* own = record == list.data[i] ? ExtraPicture(i - kFirstExtraSlot, 0) : nullptr;
+        void*& texture = *reinterpret_cast<void**>(record + 0xC); // a picture record: its own head while drawn
+        void* const kept = texture;
+        if (own)
+            texture = own;
         reinterpret_cast<void(__cdecl*)(uint32_t, void*, const float*, const float*)>(uintptr_t(kDrawPicture))(
-            context, texture, corner, other);
+            context, record, corner, other);
+        texture = kept;
         corner[0] += kCellStep;
         other[0] += kCellStep;
     }
@@ -831,6 +905,13 @@ const char* ExtraFighterCameras(int duelSlot)
 void InstallRoster()
 {
     BuildExtras();
+    std::memset(g_Pictures, 0, sizeof g_Pictures); // the textures of the last start are gone with it
+    std::memset(g_PicturesTried, 0, sizeof g_PicturesTried);
+    const uint32_t drawSlot = kTextureItemVtable + 3 * 4;
+    if (*reinterpret_cast<const uint32_t*>(uintptr_t(drawSlot)) == kTextureItemDraw) {
+        const uint32_t hook = uint32_t(reinterpret_cast<uintptr_t>(&TextureItemDrawHook));
+        PatchBytes(drawSlot, &hook, 4);
+    }
     static_assert((kFirstExtraSlot + kMaxExtras + 1) * 4 <= 0x7F, "player 2's full-body offset is a signed 8-bit displacement");
     const uint8_t lockCheck[] = { 0x83, 0xFF, 0x09, 0x74 };
     const uint8_t gridLockCheck[] = { 0x83, 0xFE, 0x09, 0x74 };

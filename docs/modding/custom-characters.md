@@ -111,15 +111,22 @@ and title under it, and fights in the duel as itself (also in the main menu's He
 fighters on the same screen):
 
 ```
-mods\interfc\front_end\s_selduel_<costume>head.stx    the grid's cell, 64x64 DXT5 (a ring in its alpha, as the game's)
-mods\interfc\front_end\s_selduel_<costume>bust.stx    the bust above the grid, 256x128 DXT5
+mods\interfc\front_end\s_selduel_<costume>head.stx       the strip's cell, 64x64 DXT5 (a ring in its alpha, as the game's)
+mods\interfc\front_end\s_selduel_<costume>bust.stx       the bust above the strip, 256x128 DXT5
+mods\interfc\front_end\s_selduel_fb_<costume>_v1.stx     its full body, player 1's (optional), 128x256 DXT5
+mods\interfc\front_end\s_selduel_fb_<costume>_v2.stx     player 2's (optional)
 ```
 
-(`<costume>` in lower case, e.g. `s_selduel_lukehead.stx`.) The menus use only pictures read with the shared PAK
-(`res_null.pak`; a picture under `mods\` that no PAK has is refused: its pre-cache finds no image, 0x210B6B), so the
-port serves the custom pictures in the place of a pair the disc has and never shows (the cut Grievous bodyguard's,
-`s_selduel_gbghead` / `gbgbust`): **one custom character on the select screen so far**; others are left off it (the
-log says so) and can still be played, spawned and placed.
+(`<costume>` in lower case, e.g. `s_selduel_lukehead.stx`.) Any number of custom characters get their slots (up to
+seven after Yoda). The full bodies show under the strip and on the arena screen, as the game's fighters'; without
+them the arena screen shows the bust in the full body's frame.
+
+The menus use only pictures read with the shared PAK (`res_null.pak`; a picture under `mods\` that no PAK has is
+refused: its pre-cache finds no image, 0x210B6B), so a custom character's entries in the screens' picture sets name
+pictures the disc has (the cut Grievous bodyguard's, Random's full body), and the port loads the custom pictures from
+their files (the texture loader's direct path, as the concept art screen loads its pictures) and draws them in their
+place: a menu picture item (draw 0x2C7790) holds the custom texture only while it is drawn, and the port draws the
+strip of heads.
 
 The strip of heads shows 11 fighters at a time; with more it scrolls with the cursor (the port draws the strip as the
 game does, 0x2D56F0, from the first fighter in view; a cursor whose fighter is out of view is hidden).
@@ -136,9 +143,8 @@ mods\interfc\hud_b\hud_face_<costume>01.stx    64x64 DXT5, black where transpare
 
 The HUD picks a face by the character's class (0x25E9xx, the face's name from the game's portrait table, the
 lookup 0x27B740 called at 0x25EADD with the character in `esi`); for a custom character the port hands it the
-custom face instead. As with the menus, a texture no PAK has decodes to nothing for the HUD, so the face is served
-in the place of one the disc has and never shows (cut Commander Cody's, `hud_face_unlock_cody01`): one custom
-character's portrait so far. The served pictures keep the replaced texture's own name inside (offset 0x40).
+custom face instead, loaded from its file (the texture loader's direct path: the resources' path decodes a texture no
+PAK has to nothing).
 
 ## Its voice
 
@@ -158,7 +164,3 @@ they change) and, when the dialogue engine starts one of the character's entries
 0x90330), gives the entry the character's line for that call: the voice, the subtitle and the line's length follow
 it. Its other sounds (grunts) stay the base's. The lines take turns per event (a turn passes only when the
 engine starts or queues one). Subtitles show with the game's subtitles on (the Settings menu, or `set subtitles true`).
-
-## Not yet
-- More than one custom character on the Versus select screen and with a HUD portrait (a way to load pictures
-  that no PAK has).

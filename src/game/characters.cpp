@@ -573,7 +573,10 @@ using PortraitLookupFn = void*(__fastcall*)(uint8_t* manager, void* edx, const c
 PortraitLookupFn g_OriginalPortraitLookup = nullptr;
 
 // Loads an interface texture by path through the engine's texture manager, as 0x27C1D1 does.
-void* LoadInterfaceTexture(const char* path)
+// A picture by its path without .stx: through the resources (a PAK of the level has it), or `direct` from its file
+// (the disc's, or one under mods\: the texture loader's fifth argument, as the concept art screen loads its loose
+// pictures at 0x2C26C0).
+void* LoadInterfaceTexture(const char* path, bool direct = false)
 {
     auto* services = *reinterpret_cast<uint8_t**>(uintptr_t(kEngineServices));
     auto* textures = *reinterpret_cast<uint8_t**>(*reinterpret_cast<uint8_t**>(services + 0x38) + 0x4C);
@@ -583,7 +586,7 @@ void* LoadInterfaceTexture(const char* path)
     int first = 0, second = 0;
     using LoadFn = void*(__fastcall*)(void*, void*, void*, int*, int*, int, int, int);
     auto load = (*reinterpret_cast<LoadFn* const*>(textures))[1];
-    return load(textures, nullptr, filePath, &second, &first, 1, 0, 1);
+    return load(textures, nullptr, filePath, &second, &first, 1, direct ? 1 : 0, 1);
 }
 
 void* __fastcall PortraitLookupHook(uint8_t* manager, void* edx, const char* name, int head)
@@ -632,7 +635,7 @@ void* __cdecl PortraitForCharacter(uint8_t* manager, const char* name, int head,
         return PortraitLookupHook(manager, nullptr, name, head);
     if (void* found = g_OriginalPortraitLookup(manager, nullptr, custom->hudFace.c_str(), 0))
         return found;
-    PortraitRecord record = { LoadInterfaceTexture(custom->hudFace.c_str()), nullptr, custom->hudFace.c_str() };
+    PortraitRecord record = { LoadInterfaceTexture(custom->hudFace.c_str(), true), nullptr, custom->hudFace.c_str() };
     if (!record.face) {
         LOG_WARN("Characters: %s's HUD portrait %s did not load", custom->className.c_str(), custom->face.c_str());
         return PortraitLookupHook(manager, nullptr, name, head);
@@ -2050,6 +2053,15 @@ bool SetPlayerClass(const char* className, bool checked)
 const char* PlayerClass()
 {
     return g_PlayerClass;
+}
+
+void* LoadPictureFile(const char* path)
+{
+    __try {
+        return LoadInterfaceTexture(path, true);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
 }
 
 void SetLevelPlayerDefault(const char* className)
