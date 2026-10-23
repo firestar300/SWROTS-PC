@@ -332,7 +332,7 @@ switches, in one place.
 
 A prototype of a 4 against 4 team mode on the developer map ([Heroes vs
 Villains](research/heroes-vs-villains.md)): pick the four heroes and four villains (the Versus fighters and the
-other saber duelists), mark the one you play, set each side's **lives** (35) and every fighter's **health** (500;
+other saber duelists), mark the one you play, set each side's **lives** (35) and every fighter's **health** (250;
 less makes for quicker falls), and whether the **intro** plays, then **Start**: the game restarts into the match
 (the `hvv` command, which the tab writes for you). **Defaults** puts the default line-up back. Below, the running
 match: each side's lives and fighters standing, the winner, and **Play it again**.

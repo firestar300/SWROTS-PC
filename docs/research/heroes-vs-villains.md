@@ -7,27 +7,49 @@ tab](../debug-menu.md#heroes-vs-villains-tab) or the console's `hvv`. Addresses 
 ## Playing it
 
 ```
-hvv                                     the default line-up: Obi-Wan, Yoda, Mace Windu, Cin Drallig
-                                        against Vader, Dooku, Grievous, Serra; you play Obi-Wan
-hvv IAnakin IObiwan IYoda IMace IVader IDooku IGrievous ISerra player 4 lives 10 health 800 intro off
+hvv                                     the default line-up: Obi-Wan, Yoda, Mace Windu, Serra Keto
+                                        against Vader, Dooku, Grievous, Anakin; you play Obi-Wan
+hvv IAnakin IObiwan IYoda IMace IVader IDooku IGrievous ISerra player 4 lives 10 health 400 intro off
                                         eight classes (heroes, then villains), your place in the line-up
                                         (0-7; 4 is Vader here), each side's lives (35), every fighter's
-                                        health (500) and no intro
+                                        health (250) and no intro
+hvv board on|off                        the leaderboard pinned (as holding Tab shows it)
 ```
 
 The game restarts into the match, as a level change does: the fighters stand in two lines facing each other in
-the middle of the floor. **The intro** (about 19 s): a crane shot down both lines ("HEROES VS VILLAINS"), then a
-close-up of each fighter playing its Versus intro, its name below in its side's colour, then the camera glides back
-behind you and "FIGHT!". Everyone holds still meanwhile (the game's `aiDisabled`, your controls held).
+the middle of the floor. **The intro** (about 13 s): for each side a 3 s shot of its line from the front, its
+fighters playing their Versus intros, then a 3 s close shot along the line ("HEROES" / "VILLAINS" with the four
+names); then the camera glides back behind you and "FIGHT!". Everyone holds still meanwhile (the game's
+`aiDisabled`, your controls held).
 
-Each side has its lives: a fighter that falls comes back after its death has played out (about 4 s), somewhere near
-the fight but away from everyone, facing it, and cannot be hurt for 2 s. When you fall, your fall plays out (3 s,
-nothing can hurt you), then a fresh fighter of your class takes over at such a place. A side out of lives keeps
-fighting with whoever is still standing; when none is left, the other side wins. Your side out of lives and you
-falling ends the match the game's way (its death screen, with Restart).
+At "FIGHT!" every fighter is set on the nearest enemy (and again whenever it has none: one that came back, or
+whose enemy fell), so no one stands waiting. Each side has its lives: a fighter that falls comes back after its
+death has played out (about 4 s), just outside the fight and facing it, and cannot be hurt for 2 s. When you fall,
+your fall plays out (3 s, nothing can hurt you), then a fresh fighter of your class takes over there. A side out of
+lives keeps fighting with whoever is still standing (you stay down, out, when yours has none); when none is left,
+the other side wins. The game never sees you die (that would end the mission with its Game Over screen).
 
-A scoreboard over the picture shows each side's lives and a mark for each fighter, lit while it stands (yours
-ringed), and the winner at the end. `restart` (or Restart in the pause menu) plays the same match again.
+**Health**: every fighter has the game's 1000, and the damage it takes is scaled to the mode's health (250: four
+times): the HUD's health bar is as long as the maximum (`max x constant`, 0x25D1A0), so a lower maximum would show
+a stub.
+
+**On screen** (drawn over the picture, in the game's own HUD font, `interfc\fonts\font_large_white`):
+
+- the scoreboard: each side's lives and a mark for each fighter, lit while it stands (yours ringed);
+- a marker over each of your teammates;
+- the kill feed (top right): who defeated whom, or who fell by themselves;
+- your notices: "DEFEATED <NAME>" with your killstreak and the points, "ASSIST <NAME>", "DEFEATED BY <NAME>";
+- the leaderboard while **Tab** is held: defeats, assists, falls and score of everyone;
+- the end: "HEROES WIN" / "VILLAINS WIN", then the top five come to a podium facing the camera, playing their
+  intros, with a card each (FIRST to FIFTH, name, score); the game's own HUD is hidden meanwhile.
+
+**Points**: the damage dealt to enemies (in the mode's health), 100 a defeat, 50 an assist, and 25 more for each
+defeat in a streak (up to 8). A defeat is the last enemy that hit the fighter within 10 s; the others that hit it
+within 15 s assisted. The attacker of a hit is the health change's last argument (0x151500): the character, its
+script instance (+0x434), one of its weapons (+0x1080..+0x10A0, its sabers) or a projectile (`IScriptProjectile`)
+that points back at it.
+
+`restart` (or Restart in the pause menu) plays the same match again.
 
 The launch arguments of a match (`kernel::LaunchGame`, see [starting a level](levels.md#starting-a-level)):
 `map:u107_uta_grievoussurvival devmap:1 hvv:<8 classes> hvvplayer:<0-7> hvvlives:<n> hvvhealth:<n>` (and
@@ -57,7 +79,7 @@ The launch arguments of a match (`kernel::LaunchGame`, see [starting a level](le
   victim's ending on the ground, and a character kept alive stays lying there. So its fall plays out (3 s,
   invincible), then the port's live player change (`ReplacePlayer`) gives the controls to a fresh fighter of its
   class, which is moved to a safe place.
-- **The intro**: everyone is woken at once and holds still (`aiDisabled`, the options byte +0xC4; the player's input
+- **The intro and the end**: everyone is woken at once and holds still (`aiDisabled`, the options byte +0xC4; the player's input
   held back); the camera is the port's (a camera adjuster, as co-op's shared camera, in its place for the match):
   look-at shots computed from the fighters' transforms; each fighter's intro starts as its close-up does. The titles
   and the scoreboard are drawn by the debug menu's layer over the picture (also when the menu is closed).
@@ -85,11 +107,8 @@ played.
 
 - The intro's camera is the port's own: each fighter's Versus intro has a camera file
   (`cinematics\introcamera\<name>_Intro_Cam.cin`) the game plays in Versus.
-- The player's HUD health bar reads against another maximum than the mode's health (with 300 it shows less than a
-  third full). The live player change already clears some of the HUD's state; its bar's maximum is not found yet.
 - Co-op's player 2 is not part of a match yet (with co-op on, they would join as a companion of their own).
-- The titles use the debug menu's pixel font.
 - A camera behind the player (Battlefront style), and a shared camera when two or more play on one screen.
-- A match panel in the debug menu (line-up, lives, health); later the game's own menus.
+- The game's own menus (a Heroes vs Villains entry beside Versus); the debug menu's tab is the panel for now.
 - More than two players: the port's input takes four controllers; the game's player slots and HUD are made for
   two.

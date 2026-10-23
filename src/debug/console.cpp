@@ -1041,6 +1041,11 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
         Coop(words);
     } else if (command == "hvv") {
         // hvv [<8 classes: heroes, then villains>] [player <0-7>] [lives <n>] [health <n>] [intro on|off]
+        // hvv board on|off: the leaderboard pinned (as Tab held shows it)
+        if (words.size() > 1 && words[1] == "board") {
+            game::SetHvvBoardPinned(words.size() < 3 || words[2] != "off");
+            return true;
+        }
         std::vector<std::string> lineup;
         int player = 0, lives = 0, health = 0;
         bool intro = true;

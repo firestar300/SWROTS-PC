@@ -49,5 +49,12 @@ void CoopCharacterRemoving(uint8_t* character);
 // Null removes it.
 using FatalHitGuard = bool (*)(uint8_t* character);
 void SetFatalHitGuard(FatalHitGuard guard);
+// Every health change of a character (`change` < 0: damage), after it is made, with the game's two other arguments
+// (`attacker`: the character that dealt it, or null). Null removes it.
+using DamageObserver = void (*)(uint8_t* character, float change, uint32_t source, uint8_t* attacker);
+void SetDamageObserver(DamageObserver observer);
+// A health change before it is made, which it may change (a mode's damage scale): the change to make. Null removes it.
+using DamageFilter = float (*)(uint8_t* character, float change);
+void SetDamageFilter(DamageFilter filter);
 
 } // namespace swrots::game

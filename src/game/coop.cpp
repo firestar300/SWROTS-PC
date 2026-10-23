@@ -587,10 +587,16 @@ void InstallCoopMenus()
 // Player 2 does not die under the respawn rule: a hit that would kill them leaves them with a little
 // health (so the game starts no death), and they come back beside player 1 on the next frame.
 FatalHitGuard g_FatalHitGuard = nullptr;
+DamageObserver g_DamageObserver = nullptr;
+DamageFilter g_DamageFilter = nullptr;
 
 void __fastcall ChangeHealthHook(uint8_t* character, void*, float change, uint32_t a, uint32_t b)
 {
+    if (g_DamageFilter)
+        change = g_DamageFilter(character, change);
     g_OriginalChangeHealth(character, nullptr, change, a, b);
+    if (g_DamageObserver)
+        g_DamageObserver(character, change, a, reinterpret_cast<uint8_t*>(uintptr_t(b)));
     if (g_FatalHitGuard && character != g_State.p2) {
         float& health = Field<float>(character, kCharacterHealth);
         if (health <= 0.0f && !Field<uint8_t>(character, kCharacterDead) && g_FatalHitGuard(character))
@@ -1503,6 +1509,16 @@ void CoopFrame()
 void SetFatalHitGuard(FatalHitGuard guard)
 {
     g_FatalHitGuard = guard;
+}
+
+void SetDamageObserver(DamageObserver observer)
+{
+    g_DamageObserver = observer;
+}
+
+void SetDamageFilter(DamageFilter filter)
+{
+    g_DamageFilter = filter;
 }
 
 void CoopCharacterRemoving(uint8_t* character)

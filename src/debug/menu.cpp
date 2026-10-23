@@ -19,6 +19,8 @@
 #include "game/devmap.h"
 #include "game/freecam.h"
 #include "game/hvv.h"
+#include "debug/gamefont.h"
+#include "debug/hvvhud.h"
 #include "game/game.h"
 #include "imgui.h"
 #include "kernel/kernel.h"
@@ -914,6 +916,7 @@ void MenuDeviceCreated(IDirect3DDevice9* device, HWND window)
         ImGui_ImplWin32_Init(window);
     }
     ImGui_ImplDX9_Init(device);
+    GameFontDeviceCreated(device);
     g_MenuDevice = device;
     g_MenuWindow = window;
     g_Ready = true;
@@ -923,6 +926,7 @@ void MenuDeviceReleasing()
 {
     if (g_Ready)
         ImGui_ImplDX9_Shutdown();
+    GameFontDeviceReleasing();
     g_Ready = false;
 }
 
@@ -932,7 +936,7 @@ void HvvTab()
     struct Picks {
         bool loaded = false;
         std::vector<std::string> lineup;
-        int player = 0, lives = 35, health = 500;
+        int player = 0, lives = 35, health = 250;
         bool intro = true;
     };
     static Picks picks;
@@ -1008,61 +1012,6 @@ void HvvTab()
         Submit("restart");
 }
 
-// Heroes vs Villains' scoreboard, over the game's picture: each side's lives left and its fighters standing, and the
-// winner at the end.
-void DrawHvvScoreboard()
-{
-    const game::HvvState s = game::GetHvvState();
-    if (!s.active || !g_BigFont)
-        return;
-    ImDrawList* draw = ImGui::GetForegroundDrawList();
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const float unit = float(g_Scale);
-    const float size = g_BigFont->FontSize;
-    const float middle = viewport->Pos.x + viewport->Size.x / 2, top = viewport->Pos.y + 16 * unit;
-    const ImU32 heroes = IM_COL32(110, 170, 255, 255), villains = IM_COL32(255, 90, 80, 255);
-    const ImU32 shadow = IM_COL32(0, 0, 0, 170), dim = IM_COL32(90, 90, 90, 200);
-    auto text = [&](float x, float y, float fontSize, ImU32 colour, const char* t, float align) {
-        const ImVec2 extent = g_BigFont->CalcTextSizeA(fontSize, FLT_MAX, 0, t);
-        const ImVec2 at(x - extent.x * align, y);
-        draw->AddText(g_BigFont, fontSize, ImVec2(at.x + unit * 2, at.y + unit * 2), shadow, t);
-        draw->AddText(g_BigFont, fontSize, at, colour, t);
-        return extent;
-    };
-    char line[64];
-    for (int side = 0; side < 2; ++side) {
-        const float sign = side == 0 ? -1.0f : 1.0f;
-        const ImU32 colour = side == 0 ? heroes : villains;
-        snprintf(line, sizeof line, side == 0 ? "HEROES  %d" : "%d  VILLAINS", s.lives[side]);
-        text(middle + sign * 24 * unit, top, size, colour, line, side == 0 ? 1.0f : 0.0f);
-        // a pip a fighter: lit while standing
-        for (int k = 0; k < 4; ++k) {
-            const auto& f = s.fighters[side * 4 + k];
-            const float x = middle + sign * (32 + k * 18) * unit, y = top + size + 10 * unit;
-            draw->AddCircleFilled(ImVec2(x, y), 6 * unit, f.standing || !s.started ? colour : dim);
-            if (side * 4 + k == s.player)
-                draw->AddCircle(ImVec2(x, y), 9 * unit, IM_COL32(255, 255, 255, 230), 0, 2 * unit);
-        }
-    }
-    text(middle, top, size, IM_COL32(230, 230, 230, 255), "|", 0.5f);
-    // the intro's titles and names, then "FIGHT!": faded in and out
-    if (!s.caption.empty()) {
-        const float fade = std::min({ 1.0f, s.captionFade / 0.15f, (1.0f - s.captionFade) / 0.15f });
-        const int alpha = int(255 * std::clamp(fade, 0.0f, 1.0f));
-        const ImU32 colour = s.captionSide == 0 ? heroes : s.captionSide == 1 ? villains : IM_COL32(240, 220, 160, 255);
-        const ImU32 faded = (colour & 0x00FFFFFF) | (ImU32(alpha) << 24);
-        const bool fight = s.caption == "FIGHT!";
-        const float y = viewport->Pos.y + viewport->Size.y * (fight ? 0.32f : 0.8f);
-        if (s.captionSide >= 0)
-            text(middle, y - size * 0.9f, size * 0.6f, (IM_COL32(230, 230, 230, 0)) | (ImU32(alpha) << 24),
-                s.captionSide == 0 ? "HERO" : "VILLAIN", 0.5f);
-        text(middle, y, size * (fight ? 2.5f : 1.5f), faded, s.caption.c_str(), 0.5f);
-    }
-    if (s.winner >= 0)
-        text(middle, viewport->Pos.y + viewport->Size.y * 0.3f, size * 2, s.winner == 0 ? heroes : villains,
-            s.winner == 0 ? "HEROES WIN" : "VILLAINS WIN", 0.5f);
-}
-
 bool OverlayShown()
 {
     return g_Ready && game::HvvActive();
@@ -1099,7 +1048,7 @@ void RenderMenu()
         target->Release();
     }
     ImGui::NewFrame();
-    DrawHvvScoreboard();
+    DrawHvvHud();
     if (g_Open)
         BuildMenu();
     ImGui::Render();
