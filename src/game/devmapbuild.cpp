@@ -28,6 +28,9 @@ constexpr Range kSpace[3] = { { 1500.0, 24000.0 }, { -3115.924, 1100.0 }, { 2700
 constexpr double kFloorY = -2557.5;
 constexpr double kCaveCentreX = 6296.0, kCaveCentreZ = 6282.0;
 constexpr double kLift = 100000.0; // the wall brushes are moved this far up, out of the way
+// The layout's characters and start stand just above the floor: one placed higher falls when it wakes, and a fall
+// stops what it plays (Heroes vs Villains' intros).
+constexpr double kStandLift = 2.0;
 // The objects a level needs (the managers, the lights, the sky, the sector's settings, the level's properties and
 // the player's start), plus the sky's statics; the cave's props, its characters and its mission go.
 constexpr const char* kKeep[] = { "IStaticManager", "ILightManager", "IBrushManager",
@@ -647,7 +650,7 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
     SetFloats(startAt, startPosition, 36);
     if (layout && layout->start) {
         const float c = std::cos(layout->startYaw), s = std::sin(layout->startYaw);
-        const float transform[12] = { c, 0, -s, 0, 1, 0, s, 0, c, layout->startX, float(kFloorY + 60.0), layout->startZ };
+        const float transform[12] = { c, 0, -s, 0, 1, 0, s, 0, c, layout->startX, float(kFloorY + kStandLift), layout->startZ };
         SetFloats(startAt, transform);
     }
     const float sectorX[1] = { float(midX) }, sectorZ[1] = { float(midZ) };
@@ -997,7 +1000,7 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
             id.U32(placed.id);
             name.String(placed.className + "_dev" + std::to_string(placed.id - kDevMapFirstId));
             const float c = std::cos(placed.yaw), s = std::sin(placed.yaw);
-            const float m[12] = { c, 0, -s, 0, 1, 0, s, 0, c, placed.x, float(kFloorY + 60.0), placed.z };
+            const float m[12] = { c, 0, -s, 0, 1, 0, s, 0, c, placed.x, float(kFloorY + kStandLift), placed.z };
             transform.Raw(m, sizeof m);
             o.props = { { "ID", id.out }, { "Name", name.out }, { "Transform", transform.out } };
             o.tail.assign(8, 0);
