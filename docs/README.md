@@ -43,7 +43,7 @@ Notes on the game's engine, from its own executable and from related games.
 - [The camera system](research/camera-system.md): from the master camera to the screen, camera effects,
   the free camera
 - [Two players in the story missions](research/coop.md): how the game does co-op, and a second player
-  for the campaign (work in progress)
+  for the campaign
 - [Heroes vs Villains](research/heroes-vs-villains.md): research for a 4 against 4 team mode on the Versus arenas
 - [Levels](research/levels.md): how a level is built (the level file, collision brushes, sectors, lights, objects),
   and a developer test map made from one

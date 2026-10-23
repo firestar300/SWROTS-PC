@@ -61,7 +61,7 @@ Shader-group names follow (`palpatine_greyGeo_palpatineBodySG`). The engine requ
 The layout of a weapon mesh, from `meshes\weapons\lsaberanakin\lsaberanakin.msh`;
 `tools/weapons/msh.py` rebuilds that file byte for byte from it, and the game loads meshes written
 this way with other vertex and triangle counts (1084 and 838 against the original's 262 and 202).
-Character meshes (skinned, with bones) have not been looked at.
+Character meshes (skinned, with bones) are below.
 
 | Offset | Size | Field |
 |---|---|---|
@@ -88,6 +88,52 @@ understood.
 A weapon's other files: `.gat` names its attachment points (`ATT_saber_base`, `ATT_saber_middle`,
 `ATT_sabertip` for a lightsaber; the blade starts at `ATT_saber_base`), `.gin` its bound
 (`bound_B01`). See [replacing weapons](replacing-weapons.md).
+
+### Character meshes
+
+A character model (`meshes\chars\<folder>\<file>.msh`) is a serialised object tree, read field by field by
+the game's own reader (`TMMSHFile`); `tools/meshes/charmsh.py` follows it and rebuilds every character model
+tested byte for byte (`python tools/meshes/charmsh.py info <file>` prints the structure). Versions seen:
+0x9001D to 0xA0042.
+
+The archive's types: a bool is 4 bytes; a string is a u32 length and its characters; an array is an i32
+capacity (stored as it is), an i32 count, then the elements.
+
+| Part | Contents |
+|---|---|
+| file | u32 magic `F8C203A1`, u32 version, a header (array of {name, array of names}: `Base` lists the model's meshes, e.g. `Base`, `head`, `Shadow_Xbox`), an array of models, then one bool per mesh |
+| model | name, bool, array of meshes, array of bones, two 48-byte matrices, an array of bools |
+| bone | name (32 bytes), a 48-byte matrix (4 x 3 floats), parent (s16, -1 for the root) |
+| mesh | name (32 bytes), centre (3 floats), radius, 4 bools, colour, the mesh's triangle total (i32), bool, the **body**, bounding box (min, max), then a few bools (and an optional extra block) |
+| body | bool, an empty legacy array, an array of **groups**, the texture names and the material names (two string tables), an empty array of embedded textures, an array of 60-byte attachments |
+| group | u32 flags, colour, 2 floats, u8, the material (u32 shader, 4 layers of {u8, 4 x s16, u32 texture index}), then the render data |
+| render data | bool, the vertex format (35 bytes), i32 vertex count, the vertices, an array of triangle lists |
+| triangle list | bone palette (array of u16 bone numbers), indices (array of u16, one triangle strip), 2 bools, u16 vertices used, s16 triangle count, u32 |
+
+A string table: u32 total size, u32, u32 bytes used, an array of u32 offsets, then the text (the names,
+zero-terminated). Group *n* takes material name *n*; textures are referred to by 1-based index into the
+texture table.
+
+**Vertices.** The vertex format's bytes 0x16 to 0x20 hold the offsets of 11 elements (0xFF when absent), and
+byte 0x22 the vertex size: 36 bytes for most groups (position 3 floats, normal 4 bytes, uv 2 floats, bone
+weights 4 bytes adding up to 255, bone indices 4 bytes, 4 more bytes), 44 with a tangent (normal-mapped
+groups), 16 for the shadow mesh (position and normal only). A bone index is the bone's place in the triangle
+list's palette **times 3** (a bone takes three shader constants).
+
+**Triangle lists.** Each list takes the next run of the group's vertices and has its own palette: up to
+21 bones were seen in one list. The strip joins separate strips with repeated indices, as in the weapon
+meshes.
+
+**Pieces.** A group is drawn with its material, and the game can turn a material off for one character:
+that is how dismemberment hides a limb. The clone trooper's arms are groups of their own (`Shoulder_LSG`,
+`Elbow_RSG`), laid over a body that stays closed underneath; the temple Jedi Knight's model has a left arm
+(`Shoulder_LSG`) and a neck (`neckSG`) piece too, made for a dismemberment the game never shipped. The
+heroes' models are split by look instead (Anakin's: pants, leather, cloth, cloak, head), and Anakin's bare
+left hand is a group named `AnakinHeadSG`.
+
+**Limits.** A list's triangle count is a signed 16-bit number, so a list can hold at most 32,767 triangles;
+indices are 16-bit, so a group addresses at most 65,535 vertices. Weapons have a lower limit in practice (see
+[replacing weapons](replacing-weapons.md#limits)).
 
 ## Character skin table
 
