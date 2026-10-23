@@ -22,6 +22,10 @@ bool SetPlayerClass(const char* className, bool checked = true);
 // The class set with SetPlayerClass, or null.
 const char* PlayerClass();
 
+// This start's level's player when no class is set (the level's own replaced, e.g. the dev map's IAnakin for
+// Grievous Survival's Grievous), or null: the level's own. A static string, set before the level starts.
+void SetLevelPlayerDefault(const char* className);
+
 // The player's costume from the next level start: a variant's name, a part of its name found in no
 // other ("duel" for Anakin_Duel) or its number; empty for the usual one.
 void SetPlayerVariant(const std::string& variant);

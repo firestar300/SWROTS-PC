@@ -308,7 +308,7 @@ Your character's live data and quick helpers, the game's own variables (the ones
 switches, in one place.
 
 - **Levels**: a button for each [custom map](modding/custom-maps.md) beside it (`devmap <map>`). **Developer map** (`devmap`): the game restarts into an empty, lit, flat floor under the sky
-  (22,500 × 10,800 units), with nothing on it but you (General Grievous; `player` picks another character). Spawn
+  (22,500 × 10,800 units), with nothing on it but you (Anakin; `player` picks another character); its loading screen is a plain dark one (or a custom map's own picture). Spawn
   characters there (`spawn`) to test anything without a mission's scripts, enemies or walls in the way. The port
   builds it as the level loads, from the bonus mission *Grievous Survival*'s own files; `restart` keeps it. How it
   is made: [levels](research/levels.md#the-developer-map).

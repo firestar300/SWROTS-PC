@@ -13,6 +13,7 @@ A custom map comes as a folder to drop into the game's `mods\` folder:
 mods\maps\cantina\map.ini               the map
 mods\maps\cantina\cantina_light.bin     its baked light (optional)
 mods\maps\cantina\mus_<slot>.hwx        its music (optional)
+mods\maps\cantina\load_a.stx (b, c)     its loading picture (optional)
 mods\meshes\maps\cantina\cantina.msh    its model
 mods\meshes\maps\cantina\*.stx          its textures (named as the model names them)
 ```
@@ -77,6 +78,17 @@ after the slot, plays in its place while the map plays (only then: other levels 
 slot's sample rate and exactly its length (`tools/audio/hwx.py encode`, see [replacing music](replacing-music.md)).
 The level's own music start is kept: its player start triggers a sequencer, which now holds one music object alone,
 naming the map's slot.
+
+## Loading picture
+
+`load_a.stx`, `load_b.stx` and `load_c.stx` beside map.ini (optional, all three) are the loading screen's picture
+while the map loads: one 640x256 picture cut in three side by side, 256x256, 256x256 and 128x256, in the format of
+the game's own (`interfc\front_end\loading\load_back_*_a/b/c.stx`, DXT). As in the game's, the map's name and anything
+else shown is part of the picture: the screen itself only writes "Loading". Without them the screen is plain dark.
+
+The game draws the textures the level's `loadScreenPrefix:` names (the mission list's; Grievous Survival's are
+`load_back_uta_griev_a/b/c`, Grievous on Utapau, in its PAK only); the port serves the map's in their place, or
+blacks them out, for that start only.
 
 ## The model
 

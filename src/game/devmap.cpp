@@ -124,6 +124,56 @@ void BuildFloor(std::vector<uint8_t>& data)
         data = DevMapFloorModel();
 }
 
+// The loading screen (0x42C40) draws one 640x256 picture, the textures <prefix>a, b and c (256, 256 and 128 wide),
+// the prefix being the mission list's `loadScreenPrefix:`; the level's PAK has them. Grievous Survival's (Grievous on
+// Utapau; only its PAK has them) is no picture of the dev map: they are served black (the game has no plain one: an
+// empty prefix asks for load_back_v2_a/b/c, which no PAK has), or as a custom map's own (mods\maps\<id>\load_a/b/c.stx).
+const char* const kMapLoadPictures[3] = { "interfc\\front_end\\loading\\load_back_uta_griev_a.stx",
+    "interfc\\front_end\\loading\\load_back_uta_griev_b.stx", "interfc\\front_end\\loading\\load_back_uta_griev_c.stx" };
+std::vector<uint8_t> g_LoadPictures[3]; // this start's custom map's, when it has all three
+
+constexpr size_t kStxHeader = 0x184, kStxName = 0x40, kStxNameLength = 0x28, kStxKind = 8;
+
+void ServeLoadPicture(std::vector<uint8_t>& data, const std::vector<uint8_t>& own)
+{
+    if (!g_Active || data.size() <= kStxHeader)
+        return;
+    if (own.size() > kStxHeader) {
+        std::vector<uint8_t> out = own;
+        std::memcpy(out.data() + kStxName, data.data() + kStxName, kStxNameLength); // the name inside: the one asked for
+        data.swap(out);
+        return;
+    }
+    // black: DXT1 blocks all zero; 8-byte-alpha blocks (DXT3/5) opaque alpha (all ones), then black colour
+    const uint32_t kind = *reinterpret_cast<const uint32_t*>(data.data() + kStxKind);
+    const size_t block = kind == 4 ? 16 : 8;
+    for (size_t at = kStxHeader; at + block <= data.size(); at += block) {
+        std::memset(data.data() + at, 0, block);
+        if (block == 16)
+            std::memset(data.data() + at, 0xFF, 8);
+    }
+}
+void ServeLoadA(std::vector<uint8_t>& data) { ServeLoadPicture(data, g_LoadPictures[0]); }
+void ServeLoadB(std::vector<uint8_t>& data) { ServeLoadPicture(data, g_LoadPictures[1]); }
+void ServeLoadC(std::vector<uint8_t>& data) { ServeLoadPicture(data, g_LoadPictures[2]); }
+
+bool ReadFileBytes(const std::wstring& path, std::vector<uint8_t>& data)
+{
+    data.clear();
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+    LARGE_INTEGER size{};
+    if (GetFileSizeEx(file, &size) && size.QuadPart < (8 << 20)) {
+        data.resize(size_t(size.QuadPart));
+        DWORD read = 0;
+        ReadFile(file, data.data(), DWORD(data.size()), &read, nullptr);
+        data.resize(read);
+    }
+    CloseHandle(file);
+    return !data.empty();
+}
+
 std::string ReadText(const std::wstring& path)
 {
     std::string text;
@@ -171,6 +221,23 @@ void InstallDevMap(const std::wstring& gameData, const std::wstring& mods)
         if (!g_Map)
             LOG_WARN("Dev map: there is no map %s under mods\\maps (the dev map's floor instead)", value.c_str());
     }
+    for (auto& picture : g_LoadPictures)
+        picture.clear();
+    if (g_Map) {
+        static const wchar_t* const kOwn[3] = { L"\\load_a.stx", L"\\load_b.stx", L"\\load_c.stx" };
+        bool all = true;
+        for (int i = 0; i < 3; ++i)
+            all = ReadFileBytes(mods + L"\\maps\\" + std::wstring(g_Map->id.begin(), g_Map->id.end()) + kOwn[i],
+                g_LoadPictures[i]) && all;
+        if (!all)
+            for (auto& picture : g_LoadPictures)
+                picture.clear();
+    }
+    static const ResourcePatch kServe[3] = { &ServeLoadA, &ServeLoadB, &ServeLoadC };
+    for (int i = 0; i < 3; ++i)
+        RegisterResourcePatch(kMapLoadPictures[i], kServe[i]);
+    // the dev map by itself (no mode on it): the player is Anakin, not Grievous Survival's Grievous
+    SetLevelPlayerDefault(g_Active && !g_Duel && !BootArgument("hvv", value) ? "IAnakin" : nullptr);
     RegisterResourcePatch(kDevMapSource, &BuildLevel);
     RegisterResourcePatch(kDuelArena, &BuildDuel);
     if (g_Duel && g_Map)

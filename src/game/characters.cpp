@@ -205,16 +205,19 @@ int g_LevelCostume = -1;
 const uint8_t* g_LevelPlayerObject = nullptr;
 bool g_LevelPlayerIsOwn = false;
 
+const char* g_LevelPlayerDefault = nullptr;
+
 void __cdecl SpawnPlayerHook(void* playerClass, int variant)
 {
     g_PlayerSpawned = true;
     const char* levelClass = playerClass ? *reinterpret_cast<const char* const*>(playerClass) : nullptr;
     g_LevelClassName = levelClass ? levelClass : "";
     LOG_INFO("Characters: the level's player is %s", g_LevelClassName.c_str());
-    if (g_PlayerClass && playerClass) {
+    const char* chosen = g_PlayerClass ? g_PlayerClass : g_LevelPlayerDefault;
+    if (chosen && playerClass) {
         auto assign = reinterpret_cast<void(__fastcall*)(void*, void*, const char*)>(uintptr_t(kTStringAssign));
-        assign(playerClass, nullptr, g_PlayerClass);
-        LOG_INFO("Characters: the player is %s", g_PlayerClass);
+        assign(playerClass, nullptr, chosen);
+        LOG_INFO("Characters: the player is %s", chosen);
     }
     g_OriginalSpawnPlayer(playerClass, variant);
 }
@@ -2047,6 +2050,11 @@ bool SetPlayerClass(const char* className, bool checked)
 const char* PlayerClass()
 {
     return g_PlayerClass;
+}
+
+void SetLevelPlayerDefault(const char* className)
+{
+    g_LevelPlayerDefault = className;
 }
 
 void SettleActivated(uint8_t* character)
