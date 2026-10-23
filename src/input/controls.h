@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <string>
+#include <vector>
 
 namespace swrots::input {
 
@@ -20,6 +21,16 @@ struct KeyboardPad {
 
 // Loads `path` (creating it with the default layout if missing).
 void LoadControls(const std::wstring& path);
+// The keys bound to an action (named as in controls.ini, e.g. L"Jump"): virtual keys in their order; none when
+// unbound.
+std::vector<int> ActionKeys(const wchar_t* action);
+// Whether the mouse moves the right stick ([Mouse] RightStick).
+bool MouseIsRightStick();
+
+// The on-screen button prompts: true while the player's last input was the keyboard or the mouse (keyboard prompts),
+// false while it was a controller (the game's own). [Controls] ButtonPrompts in settings.ini can hold either;
+// SWROTS_PROMPTS=keyboard|controller forces one for tests.
+bool KeyboardPrompts();
 // Current keyboard/mouse state as controller input; empty when the game
 // window is not focused.
 KeyboardPad ReadKeyboardPad();

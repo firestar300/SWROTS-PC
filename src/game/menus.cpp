@@ -35,8 +35,19 @@ TableFindFn g_OriginalTableFind = nullptr;
 std::mutex g_TextLock;
 std::unordered_map<uint32_t, std::unique_ptr<wchar_t[]>> g_Texts;
 
+uint32_t (*g_TextRedirect)(uint32_t) = nullptr;
+
 void* __fastcall TableFindHook(uint8_t* table, void*, uint32_t* out, const uint32_t* key)
 {
+    uint32_t redirected = 0;
+    if (key && g_TextRedirect) {
+        redirected = g_TextRedirect(*key);
+        if (redirected != *key) {
+            void* result = g_OriginalTableFind(table, nullptr, out, &redirected);
+            if (out && *out)
+                return result;
+        }
+    }
     void* result = g_OriginalTableFind(table, nullptr, out, key);
     if (out && !*out && key) {
         std::lock_guard<std::mutex> lock(g_TextLock);
@@ -185,6 +196,11 @@ void SetMenuText(const char* id, const std::wstring& text)
     buffer[0] = wchar_t(length);
     std::memcpy(buffer.get() + 1, text.data(), length * sizeof(wchar_t));
     buffer[length + 1] = 0;
+}
+
+void SetMenuTextRedirect(uint32_t (*redirect)(uint32_t key))
+{
+    g_TextRedirect = redirect;
 }
 
 const wchar_t* MenuTextBuffer(const char* id)

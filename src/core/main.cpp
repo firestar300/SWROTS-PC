@@ -33,6 +33,7 @@
 #include "game/hvv.h"
 #include "game/hvvmenu.h"
 #include "game/menus.h"
+#include "game/prompts.h"
 #include "game/game.h"
 #include "game/resources.h"
 #include "game/roster.h"
@@ -179,6 +180,7 @@ static void StartGame(const void* launchData)
     game::InstallAnimationAliases();
     game::InstallCharacters();
     game::InstallMenus();
+    game::InstallPrompts(g_Boot.paths.cache);
     game::InstallCoop();
     game::InstallCustomMaps(g_Boot.paths.mods);
     game::InstallDevMap(g_Boot.paths.gameData, g_Boot.paths.mods);

@@ -295,9 +295,62 @@ static void ReadHostPad(DWORD port, XGamepad& g)
 }
 
 // Keyboard and mouse (controls.ini) as player 1's controller.
+// The last device player 1 used, for the button prompts: a controller's button, trigger or a stick past half way
+// (its drift does not count), the keyboard's bound keys or the mouse's buttons and movement.
+static std::atomic<int> g_PromptDevice = -1; // -1 not known yet, 0 controller, 1 keyboard and mouse
+static int g_ForcedPrompts = -1;              // SWROTS_PROMPTS / [Controls] ButtonPrompts: 0 controller, 1 keyboard
+
+static void NotePadActivity(const XGamepad& g)
+{
+    bool active = (g.wButtons & 0xFF) != 0;
+    for (int i = 0; i < 8 && !active; ++i)
+        active = g.bAnalogButtons[i] > 0x40;
+    const auto strong = [](SHORT v) { return v > 16384 || v < -16384; };
+    if (active || strong(g.sThumbLX) || strong(g.sThumbLY) || strong(g.sThumbRX) || strong(g.sThumbRY))
+        g_PromptDevice = 0;
+}
+
+static void NoteKeyboardActivity(const KeyboardPad& k)
+{
+    bool active = k.buttons != 0 || k.lx || k.ly;
+    for (int i = 0; i < 8 && !active; ++i)
+        active = k.analog[i] != 0;
+    const auto strong = [](SHORT v) { return v > 8192 || v < -8192; }; // the mouse moving the right stick
+    if (active || strong(k.rx) || strong(k.ry))
+        g_PromptDevice = 1;
+}
+
+bool KeyboardPrompts()
+{
+    static bool read = false;
+    if (!read) {
+        read = true;
+        char value[32] = {};
+        if (GetEnvironmentVariableA("SWROTS_PROMPTS", value, sizeof value))
+            g_ForcedPrompts = _stricmp(value, "keyboard") == 0 ? 1 : _stricmp(value, "controller") == 0 ? 0 : -1;
+        else
+            g_ForcedPrompts = GetSettings().buttonPrompts;
+    }
+    if (g_ForcedPrompts >= 0)
+        return g_ForcedPrompts == 1;
+    const int device = g_PromptDevice;
+    if (device >= 0)
+        return device == 1;
+    // nothing pressed yet: the keyboard's unless a controller is there (looked at once a second: this is asked often)
+    static ULONGLONG checked = 0;
+    static bool noController = true;
+    const ULONGLONG now = GetTickCount64();
+    if (now - checked >= 1000) {
+        checked = now;
+        noController = Sources().empty();
+    }
+    return noController;
+}
+
 static void ReadKeyboard(XGamepad& g)
 {
     KeyboardPad k = ReadKeyboardPad();
+    NoteKeyboardActivity(k);
     g.wButtons |= k.buttons;
     for (int i = 0; i < 8; ++i)
         g.bAnalogButtons[i] |= k.analog[i];
@@ -583,8 +636,11 @@ static DWORD __stdcall XbInputGetState(HANDLE device, XInputState* state)
     DWORD index = DWORD(port - g_Ports);
     XGamepad g = {};
     if (index != 0 || !g_HoldPlayer) { // the free camera has player 1's input
-        if (!RunningInBackground()) // an unattended test: a pad in someone's hands on this PC is not its input
+        if (!RunningInBackground()) { // an unattended test: a pad in someone's hands on this PC is not its input
             ReadHostPad(index, g);
+            if (index == 0)
+                NotePadActivity(g);
+        }
         if (index == 0) {
             ReadKeyboard(g);
             ReadTestInput(g);

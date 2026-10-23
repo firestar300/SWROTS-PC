@@ -191,6 +191,16 @@ void LoadControls(const std::wstring& path)
     LOG_INFO("Controls loaded from %ls", path.c_str());
 }
 
+std::vector<int> ActionKeys(const wchar_t* action)
+{
+    for (const Action& a : g_Actions)
+        if (_wcsicmp(a.name, action) == 0)
+            return a.keys;
+    return {};
+}
+
+bool MouseIsRightStick() { return g_MouseRightStick; }
+
 void AddMouseMotion(LONG dx, LONG dy)
 {
     g_MouseDx += dx;

@@ -21,6 +21,10 @@ Bloom=1             ; the game's full-screen bloom; 0 turns it off
 [Game]
 FpsLimit=30         ; 30 like the original; 60 is experimental
 
+[Controls]
+ButtonPrompts=Auto  ; the buttons shown on screen: Auto (the keyboard's keys or the controller's buttons, whichever
+                    ; was used last), Keyboard, Controller
+
 [Coop]
 Enabled=0           ; 1: a second player in the story and single-player missions (see below)
 Input=0             ; 0 auto, 1 the keyboard is player 1 and the first controller player 2, 2 two controllers

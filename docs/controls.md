@@ -57,5 +57,19 @@ Key names: `A`-`Z`, `0`-`9`, `F1`-`F24`, `Numpad0`-`Numpad9`, `Space`, `Enter`, 
 Keyboard input only counts while the game window has focus. Mouse buttons count once you have
 clicked into the game (which hides and captures the cursor); that click itself, and clicks on the
 title bar or window buttons, are not game input. Alt alone does not release the mouse (Alt+F4 still
-quits). On-screen button prompts still show
-Xbox buttons; keyboard prompts are planned.
+quits).
+
+## Button prompts
+
+The buttons the game shows (menu footers, tips, the HUD's prompts, the pause screen's combat chart) follow the
+device you used last: after a key or the mouse they show the keys bound above, as key caps in the game's own
+style and font (mouse buttons as a mouse with that button lit, the arrow keys as arrows); after a controller
+button or stick, the Xbox buttons again. Tips that tell you to "pull" a trigger say "press" with the keyboard (the
+game's own PlayStation 2 wording). `[Controls] ButtonPrompts` in settings.ini (`Auto`, `Keyboard`, `Controller`)
+fixes one look. The caps are made from your bindings when first shown (kept in `cache\prompts`).
+
+How it works (`src/game/prompts.cpp`): every button icon is a 32x32 picture of the game's (the menus'
+`s_buttons_xbox_*` and d-pad pictures, the tips' `xboxtipbutton-NN`) loaded and drawn through its texture
+interface (vtable 0x561A30: load 0x1F650, release 0x1F5E0, draw 0x1F040) or taken from its handle by the menus'
+picture draw (0x2049F0); the port knows which handle is which icon from its file name and draws the key's cap in
+its place, and puts the caps into the tips' icon table (0x7F0608, whose sizes the tips' layout reads).

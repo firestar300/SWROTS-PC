@@ -113,7 +113,7 @@ and controller layouts: [controls](docs/controls.md).
 
 ## Known issues
 
-- On-screen button prompts and some messages still refer to the Xbox and its controller.
+- Some messages still refer to the Xbox and its controller (the button prompts follow the keyboard and mouse).
 - 60 fps (`FpsLimit=60`) is experimental: some of the game's logic is timed for 30 fps.
 - Outside co-op the keyboard and the first controller are both player 1, so Versus and the bonus
   missions made for two need two controllers. In co-op one controller is enough: the keyboard is then
@@ -154,7 +154,7 @@ files ([modding](docs/modding/README.md)).
 
 - Co-op: a playthrough of every mission with two players, player 2's character and controllers in the
   Cooperative Mod screen, health pickups for player 2.
-- PC button prompts and wording (keyboard, mouse and PlayStation icons).
+- PlayStation button icons for PlayStation controllers.
 - Proper 60 fps and higher (the engine has fixed-step simulation to build on).
 - An in-game settings menu, keyboard as its own player for versus modes, more controllers.
 - More versus fighters from the disc (the framework for Yoda's slot takes more), Yoda's own duel

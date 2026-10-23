@@ -23,6 +23,9 @@ void SetMenuText(const char* id, const std::wstring& text);
 // Such a text as the string table holds one (its length first, then the characters; it stays for the session), or
 // null when it was never set.
 const wchar_t* MenuTextBuffer(const char* id);
+// Texts asked for by one id answered with another's (e.g. the keyboard's wording): `redirect` gets the id's key and
+// gives the key to look up (the same for none).
+void SetMenuTextRedirect(uint32_t (*redirect)(uint32_t key));
 
 // A menu action of the port's own, for an item's action string: `make` makes a handler (the menu makes one
 // for every item that names the action). Registered with the in-game menus' handlers (the HUD's list).

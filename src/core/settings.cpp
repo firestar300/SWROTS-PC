@@ -62,6 +62,11 @@ void LoadSettings(const std::wstring& path)
     s.anisotropy = ReadInt(L"Graphics", L"Anisotropy", d.anisotropy, 1, 16);
     s.bloom = ReadInt(L"Graphics", L"Bloom", d.bloom, 0, 1) != 0;
     s.fpsLimit = ReadInt(L"Game", L"FpsLimit", d.fpsLimit, 30, 60) >= 45 ? 60 : 30;
+    {
+        wchar_t prompts[32] = {};
+        GetPrivateProfileStringW(L"Controls", L"ButtonPrompts", L"Auto", prompts, 32, g_Path.c_str());
+        s.buttonPrompts = _wcsicmp(prompts, L"Keyboard") == 0 ? 1 : _wcsicmp(prompts, L"Controller") == 0 ? 0 : -1;
+    }
     s.coop = ReadInt(L"Coop", L"Enabled", d.coop, 0, 1) != 0;
     s.coopInput = ReadInt(L"Coop", L"Input", d.coopInput, 0, 2);
     s.coopDeath = ReadInt(L"Coop", L"Player2Death", d.coopDeath, 0, 1);
@@ -99,6 +104,8 @@ void SaveSettings()
     WriteInt(L"Graphics", L"Anisotropy", s.anisotropy);
     WriteInt(L"Graphics", L"Bloom", s.bloom);
     WriteInt(L"Game", L"FpsLimit", s.fpsLimit);
+    WritePrivateProfileStringW(L"Controls", L"ButtonPrompts",
+        s.buttonPrompts == 1 ? L"Keyboard" : s.buttonPrompts == 0 ? L"Controller" : L"Auto", g_Path.c_str());
     WriteInt(L"Coop", L"Enabled", s.coop);
     WriteInt(L"Coop", L"Input", s.coopInput);
     WriteInt(L"Coop", L"Player2Death", s.coopDeath);
