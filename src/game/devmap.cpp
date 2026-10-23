@@ -5,13 +5,12 @@
 
 #include <windows.h>
 
-#include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <sstream>
 #include <vector>
 
 #include "core/log.h"
-#include "game/devmapbuild.h"
 #include "game/resources.h"
 #include "kernel/kernel.h"
 
@@ -23,13 +22,16 @@ constexpr const char* kLevelArgument = "map:u107_uta_grievoussurvival";
 constexpr const char* kDevMapArgument = "devmap:1";
 
 bool g_Active = false;
+DevMapLayout g_Layout;
+bool g_HasLayout = false;
+std::string g_Arguments; // this start's launch arguments, or else its Default_Xbox.cfg
 
 void BuildLevel(std::vector<uint8_t>& data)
 {
     if (!g_Active)
         return;
     std::string report;
-    if (BuildDevMapLevel(data, report))
+    if (BuildDevMapLevel(data, report, g_HasLayout ? &g_Layout : nullptr))
         LOG_INFO("Dev map: level built (%zu bytes): %s", data.size(), report.c_str());
     else
         LOG_WARN("Dev map: the level file is not the one expected (%s); Grievous Survival loads as it is",
@@ -40,17 +42,6 @@ void BuildFloor(std::vector<uint8_t>& data)
 {
     if (g_Active)
         data = DevMapFloorModel();
-}
-
-// True when `text` (launch arguments, or a Default_Xbox.cfg) holds the dev map's argument.
-bool HasDevMapArgument(const std::string& text)
-{
-    std::istringstream words(text);
-    std::string word;
-    while (words >> word)
-        if (_stricmp(word.c_str(), kDevMapArgument) == 0)
-            return true;
-    return false;
 }
 
 std::string ReadText(const std::wstring& path)
@@ -76,15 +67,16 @@ void InstallDevMap(const std::wstring& gameData, const std::wstring& mods)
 {
     // the launch data decides when there is any (a level change, StartDevMap); else the configuration the game
     // starts with (mods\ overrides the disc's)
-    const std::string& arguments = kernel::LaunchArguments();
-    if (!arguments.empty()) {
-        g_Active = HasDevMapArgument(arguments);
-    } else {
-        std::string config = ReadText(mods + L"\\Default_Xbox.cfg");
-        if (config.empty())
-            config = ReadText(gameData + L"\\Default_Xbox.cfg");
-        g_Active = HasDevMapArgument(config);
+    g_Arguments = kernel::LaunchArguments();
+    if (g_Arguments.empty()) {
+        g_Arguments = ReadText(mods + L"\\Default_Xbox.cfg");
+        if (g_Arguments.empty())
+            g_Arguments = ReadText(gameData + L"\\Default_Xbox.cfg");
     }
+    std::string value;
+    g_Active = BootArgument("devmap", value) && value == "1";
+    g_Layout = {};
+    g_HasLayout = false;
     RegisterResourcePatch(kDevMapSource, &BuildLevel);
     RegisterResourcePatch(kDevMapFloorModel, &BuildFloor);
     if (g_Active)
@@ -93,9 +85,29 @@ void InstallDevMap(const std::wstring& gameData, const std::wstring& mods)
 
 bool DevMapActive() { return g_Active; }
 
-void StartDevMap()
+bool BootArgument(const char* name, std::string& value)
 {
-    kernel::LaunchGame(std::string(kLevelArgument) + " " + kDevMapArgument);
+    std::istringstream words(g_Arguments);
+    std::string word;
+    const size_t length = strlen(name);
+    while (words >> word) {
+        if (word.size() > length && word[length] == ':' && _strnicmp(word.c_str(), name, length) == 0) {
+            value = word.substr(length + 1);
+            return true;
+        }
+    }
+    return false;
+}
+
+void SetDevMapLayout(const DevMapLayout& layout)
+{
+    g_Layout = layout;
+    g_HasLayout = true;
+}
+
+void StartDevMap(const std::string& more)
+{
+    kernel::LaunchGame(std::string(kLevelArgument) + " " + kDevMapArgument + (more.empty() ? "" : " " + more));
 }
 
 } // namespace swrots::game

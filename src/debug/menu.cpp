@@ -18,6 +18,7 @@
 #include "game/coop.h"
 #include "game/devmap.h"
 #include "game/freecam.h"
+#include "game/hvv.h"
 #include "game/game.h"
 #include "imgui.h"
 #include "kernel/kernel.h"
@@ -745,6 +746,8 @@ void ApplyTheme()
 // The menu's pixel font is only sharp at whole multiples of its 13 px, rendered at that size
 // (stretching it with FontGlobalScale blurs it): 1x up to about 1440 lines, then 2x, 3x.
 int g_Scale = 0;
+ImFont* g_BigFont = nullptr;
+IDirect3DDevice9* g_MenuDevice = nullptr;
 ImGuiStyle g_BaseStyle;
 HWND g_MenuWindow = nullptr;
 
@@ -762,6 +765,9 @@ void UpdateScale()
     ImFontConfig font;
     font.SizePixels = 13.0f * float(scale);
     io.Fonts->AddFontDefault(&font);
+    ImFontConfig big; // the scoreboard's
+    big.SizePixels = 26.0f * float(scale);
+    g_BigFont = io.Fonts->AddFontDefault(&big);
     ImGui_ImplDX9_InvalidateDeviceObjects(); // the font texture is rebuilt by the next NewFrame
     ImGui::GetStyle() = g_BaseStyle;
     ImGui::GetStyle().ScaleAllSizes(float(scale));
@@ -902,6 +908,7 @@ void MenuDeviceCreated(IDirect3DDevice9* device, HWND window)
         ImGui_ImplWin32_Init(window);
     }
     ImGui_ImplDX9_Init(device);
+    g_MenuDevice = device;
     g_MenuWindow = window;
     g_Ready = true;
 }
@@ -913,9 +920,56 @@ void MenuDeviceReleasing()
     g_Ready = false;
 }
 
+// Heroes vs Villains' scoreboard, over the game's picture: each side's lives left and its fighters standing, and the
+// winner at the end.
+void DrawHvvScoreboard()
+{
+    const game::HvvState s = game::GetHvvState();
+    if (!s.active || !g_BigFont)
+        return;
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float unit = float(g_Scale);
+    const float size = g_BigFont->FontSize;
+    const float middle = viewport->Pos.x + viewport->Size.x / 2, top = viewport->Pos.y + 16 * unit;
+    const ImU32 heroes = IM_COL32(110, 170, 255, 255), villains = IM_COL32(255, 90, 80, 255);
+    const ImU32 shadow = IM_COL32(0, 0, 0, 170), dim = IM_COL32(90, 90, 90, 200);
+    auto text = [&](float x, float y, float fontSize, ImU32 colour, const char* t, float align) {
+        const ImVec2 extent = g_BigFont->CalcTextSizeA(fontSize, FLT_MAX, 0, t);
+        const ImVec2 at(x - extent.x * align, y);
+        draw->AddText(g_BigFont, fontSize, ImVec2(at.x + unit * 2, at.y + unit * 2), shadow, t);
+        draw->AddText(g_BigFont, fontSize, at, colour, t);
+        return extent;
+    };
+    char line[64];
+    for (int side = 0; side < 2; ++side) {
+        const float sign = side == 0 ? -1.0f : 1.0f;
+        const ImU32 colour = side == 0 ? heroes : villains;
+        snprintf(line, sizeof line, side == 0 ? "HEROES  %d" : "%d  VILLAINS", s.lives[side]);
+        text(middle + sign * 24 * unit, top, size, colour, line, side == 0 ? 1.0f : 0.0f);
+        // a pip a fighter: lit while standing
+        for (int k = 0; k < 4; ++k) {
+            const auto& f = s.fighters[side * 4 + k];
+            const float x = middle + sign * (32 + k * 18) * unit, y = top + size + 10 * unit;
+            draw->AddCircleFilled(ImVec2(x, y), 6 * unit, f.standing || !s.started ? colour : dim);
+            if (side * 4 + k == s.player)
+                draw->AddCircle(ImVec2(x, y), 9 * unit, IM_COL32(255, 255, 255, 230), 0, 2 * unit);
+        }
+    }
+    text(middle, top, size, IM_COL32(230, 230, 230, 255), "|", 0.5f);
+    if (s.winner >= 0)
+        text(middle, viewport->Pos.y + viewport->Size.y * 0.3f, size * 2, s.winner == 0 ? heroes : villains,
+            s.winner == 0 ? "HEROES WIN" : "VILLAINS WIN", 0.5f);
+}
+
+bool OverlayShown()
+{
+    return g_Ready && game::HvvActive();
+}
+
 void RenderMenu()
 {
-    if (!g_Ready || !g_Open)
+    if (!g_Ready || (!g_Open && !OverlayShown()))
         return;
     if (g_OpenedSinceLastFrame.exchange(false)) {
         g_JustOpened = true;
@@ -933,8 +987,20 @@ void RenderMenu()
     UpdateScale();
     ImGui_ImplDX9_NewFrame();
     ImGui_ImplWin32_NewFrame();
+    // a minimised window (unattended test runs) has no size: the overlay is sized to the picture instead
+    ImGuiIO& io = ImGui::GetIO();
+    IDirect3DSurface9* target = nullptr;
+    if ((io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) && g_MenuDevice &&
+        SUCCEEDED(g_MenuDevice->GetRenderTarget(0, &target))) {
+        D3DSURFACE_DESC desc;
+        if (SUCCEEDED(target->GetDesc(&desc)))
+            io.DisplaySize = ImVec2(float(desc.Width), float(desc.Height));
+        target->Release();
+    }
     ImGui::NewFrame();
-    BuildMenu();
+    DrawHvvScoreboard();
+    if (g_Open)
+        BuildMenu();
     ImGui::Render();
     ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
 }
@@ -944,6 +1010,7 @@ void MenuAfterFrame()
     RunQueuedConsoleCommands();
     game::PlayerFrame();
     game::CoopFrame();
+    game::HvvFrame();
 }
 
 } // namespace swrots::debug

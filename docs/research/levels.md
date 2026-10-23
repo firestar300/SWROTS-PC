@@ -121,11 +121,17 @@ there starts that level. The game's own level changes write `map:`, `nextmap:`, 
 
 A level holds no code of its own: its behaviour comes from the game's classes placed in it, with their
 properties. With the objects readable and writable, a map can be given the game's own systems. Proven so far: the
-player's start (`IPointSpawnPlayer`), the lights, the sky, the managers, and characters fighting on a floor of the
-port's own (spawned with the debug console). Seen in Grievous Survival, not tried yet:
+player's start (`IPointSpawnPlayer`), the lights, the sky, the managers, characters fighting on a floor of the
+port's own (spawned with the debug console), and:
 
-- **Characters placed in the level**, which load with it. Characters spawned later have no sound set (their clashes
-  and hits are silent, [characters](characters.md)); placed ones should have theirs.
+- **Characters placed in the level**, which load with it, of any class (those the level never had are loaded from
+  the other levels' files), each with its class's sound set, which characters spawned later do not get
+  ([characters](characters.md)). An object needs only its class, `ID`, `Name` and `Transform` (and the 8 bytes
+  after the properties); it waits inactive until woken (vfunc +0xB4). [Heroes vs
+  Villains](heroes-vs-villains.md#how-it-works) is built on this.
+
+Seen in Grievous Survival, not tried yet:
+
 - **Waves:** `ICharacterManager` (templates, spawn engines, spawn locations), how the survival mission sends its
   clones.
 - **Scripting:** trigger volumes (`ITriggerMulti`), scripted sequences (`ITriggerSequence`, sequencers,

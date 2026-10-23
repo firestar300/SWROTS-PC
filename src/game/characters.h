@@ -15,8 +15,9 @@ const char* RegisteredClassName(const char* name);
 
 // Makes the player a character class (e.g. "ICloneTrooper") from the next level start until the game
 // is closed; null goes back to each level's own player (and its costume and mesh). False when the game
-// knows no such class.
-bool SetPlayerClass(const char* className);
+// knows no such class; unchecked (before the game has registered its classes, at boot), the name is taken as
+// given, in the game's spelling.
+bool SetPlayerClass(const char* className, bool checked = true);
 
 // The class set with SetPlayerClass, or null.
 const char* PlayerClass();
@@ -66,6 +67,13 @@ bool ClassHasBody(const char* className);
 enum class SpawnSide { Default, Ally, Enemy, Neutral, Riot };
 bool SpawnCharacter(const char* className, const std::string& costume, const std::string& skin,
     const std::string& mesh, SpawnSide side, std::string& error);
+// The same at a place (a character's transform: rows right, up, forward and position, 4 floats each; null: in
+// front of the player); the character, or null with `error` set.
+uint8_t* SpawnCharacterAt(const char* className, const std::string& costume, const std::string& skin,
+    const std::string& mesh, SpawnSide side, const float* place, std::string& error);
+// Puts a character in the running level on a side, as a spawn's (Ally: the player's). False outside a level.
+bool SetCharacterSide(uint8_t* character, SpawnSide side);
+const char* SideName(SpawnSide side);
 
 // The running level's player, for display: its class (type name), costume, position and heading
 // (degrees about the up axis). `valid` is false outside a level.

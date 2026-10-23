@@ -398,6 +398,21 @@ constexpr float kSpawnDistance = 120.0f; // in front of the player (a character 
 
 std::list<OwnedList> g_SpawnLists; // the spawned characters' own costume lists (this boot)
 int g_Spawned = 0;          // numbers the spawns in the log (this session)
+
+// A character's side is its AI data's "Target Player" (+0x50, set with "+0x1C"): the level's enemies have it, the
+// player and its allies not, and two characters whose differ are enemies (0x18F3F0, either way round). A spawn has
+// its class's default (a hero's: the player's enemy), so an ally gets it cleared. Teams decide too when both have
+// some (a shared bit is a friend; with the player, 0x18F300): the player and its allies get the port's own bit,
+// outside the level designers' teams A-H, and the port's enemies another.
+struct SideData {
+    uint32_t team;
+    uint8_t targetsPlayer;
+    uint8_t ignored;
+    const char* name;
+};
+constexpr SideData kSides[] = { { 0, 0, 0, "the class's own side" }, { kPortPlayerTeam, 0, 0, "an ally" },
+    { kPortEnemyTeam, 1, 0, "an enemy" }, { kPortNeutralTeam, 0, 1, "neutral" }, { kPortRiotTeam, 1, 0, "rioting" } };
+
 int g_SpawnedInLevel = 0;   // spawned in the running level
 // The maximum health chosen on the Game tab (0: the class's), kept through live changes.
 float g_ChosenMaxHealth = 0;
@@ -1611,75 +1626,88 @@ bool ReplacePlayer(std::string& error)
     return true;
 }
 
+const char* SideName(SpawnSide side)
+{
+    return kSides[int(side)].name;
+}
+
+bool SetCharacterSide(uint8_t* character, SpawnSide side)
+{
+    if (!character || side == SpawnSide::Default || !PlayerAlive())
+        return false;
+    uint32_t playerTeams = 0;
+    CharacterTeams(g_Player, playerTeams);
+    SetCharacterTeams(g_Player, playerTeams | kPortPlayerTeam);
+    const SideData& sideData = kSides[int(side)];
+    SetCharacterTeams(character, sideData.team);
+    if (uint8_t* ai = *reinterpret_cast<uint8_t**>(character + kCharacterAIData)) {
+        ai[kAIHasSide] = 1;
+        ai[kAITargetPlayer] = sideData.targetsPlayer;
+        ai[kAIIgnoredByAI] = sideData.ignored; // "Ignored By AI": no one sets out for it
+    }
+    if (side == SpawnSide::Neutral)
+        g_Neutrals.push_back({ character, *reinterpret_cast<uint32_t*>(character + 4),
+            *reinterpret_cast<const float*>(character + kCharacterHealth) });
+    return true;
+}
+
 bool SpawnCharacter(const char* className, const std::string& costume, const std::string& skin,
     const std::string& mesh, SpawnSide side, std::string& error)
 {
+    return SpawnCharacterAt(className, costume, skin, mesh, side, nullptr, error) != nullptr;
+}
+
+uint8_t* SpawnCharacterAt(const char* className, const std::string& costume, const std::string& skin,
+    const std::string& mesh, SpawnSide side, const float* place, std::string& error)
+{
     if (!PlayerAlive()) {
         error = g_PlayerSpawned ? "only in story levels, not in Versus" : "no mission is running";
-        return false;
+        return nullptr;
     }
     const char* name = RegisteredClassName(className);
     if (!name) {
         error = std::string(className) + ": not a class the game knows";
-        return false;
+        return nullptr;
     }
     if (!ClassHasBody(name)) {
         error = std::string(name) + " was cut from the game (none of its costumes is on the disc)";
-        return false;
+        return nullptr;
     }
     char who[96];
     sprintf_s(who, "spawned %s #%d", name, ++g_Spawned);
     uint8_t* object = CreateCharacter(name, costume, skin, mesh, who, error);
     if (!object)
-        return false;
+        return nullptr;
     RecordBody(g_Player);
     if (BodyBoundToAnotherClass(object)) {
         error = std::string(name) + " wears " + CharacterBody(object) + ", a body another class wore in this level "
             "(pick another costume, or restart the mission)";
-        return false;
+        return nullptr;
     }
-    // In front of the player, facing it: right and forward turned round.
     float m[16];
-    std::memcpy(m, g_Player + kCharacterTransform, sizeof(m));
-    for (int i = 0; i < 3; ++i)
-        m[12 + i] += m[8 + i] * kSpawnDistance;
-    for (int i = 0; i < 3; ++i) {
-        m[i] = -m[i];
-        m[8 + i] = -m[8 + i];
+    if (place) {
+        std::memcpy(m, place, sizeof(m));
+    } else { // in front of the player, facing it: right and forward turned round
+        std::memcpy(m, g_Player + kCharacterTransform, sizeof(m));
+        for (int i = 0; i < 3; ++i)
+            m[12 + i] += m[8 + i] * kSpawnDistance;
+        for (int i = 0; i < 3; ++i) {
+            m[i] = -m[i];
+            m[8 + i] = -m[8 + i];
+        }
     }
     if (!PlaceCharacter(object, m, name, error))
-        return false;
+        return nullptr;
     RecordBody(object);
     LOG_INFO("Characters: %s at %.0f %.0f %.0f", who, m[12], m[13], m[14]);
     if (side != SpawnSide::Default) {
-        // A character's side is its AI data's "Target Player" (+0x50, set with "+0x1C"): the level's
-        // enemies have it, the player and its allies not, and two characters whose differ are enemies
-        // (0x18F3F0, either way round). A spawn has its class's default (a hero's: the player's enemy),
-        // so an ally gets it cleared. Teams decide too when both have some (a shared bit is a friend;
-        // with the player, 0x18F300): the player and its allies get the port's own bit, outside the
-        // level designers' teams A-H, and the port's enemies another.
-        uint32_t playerTeams = 0;
-        CharacterTeams(g_Player, playerTeams);
-        SetCharacterTeams(g_Player, playerTeams | kPortPlayerTeam);
-        static const struct { uint32_t team; uint8_t targetsPlayer; uint8_t ignored; const char* name; } kSides[] = {
-            {}, { kPortPlayerTeam, 0, 0, "an ally" }, { kPortEnemyTeam, 1, 0, "an enemy" },
-            { kPortNeutralTeam, 0, 1, "neutral" }, { kPortRiotTeam, 1, 0, "rioting" } };
-        const auto& sideData = kSides[int(side)];
-        SetCharacterTeams(object, sideData.team);
-        if (uint8_t* ai = *reinterpret_cast<uint8_t**>(object + kCharacterAIData)) {
-            ai[kAIHasSide] = 1;
-            ai[kAITargetPlayer] = sideData.targetsPlayer;
-            ai[kAIIgnoredByAI] = sideData.ignored; // "Ignored By AI": no one sets out for it
-        }
-        if (side == SpawnSide::Neutral)
-            g_Neutrals.push_back({ object, *reinterpret_cast<uint32_t*>(object + 4),
-                *reinterpret_cast<const float*>(object + kCharacterHealth) });
-        LOG_INFO("Characters: %s is %s", who, sideData.name);
+        SetCharacterSide(object, side);
+        LOG_INFO("Characters: %s is %s", who, SideName(side));
     }
     ++g_SpawnedInLevel;
     g_LastSpawned = object;
     g_SpawnedCharacters.push_back({ object, *reinterpret_cast<uint32_t*>(object + 4) });
-    return true;
+    return object;
 }
 
 constexpr uint32_t kCharacterPower = 0xA40;    // Force power, as `power` sets it (0x150480)
@@ -1923,7 +1951,7 @@ bool PlayerSaberColor(float* rgb)
     return g_SaberColorSet;
 }
 
-bool SetPlayerClass(const char* className)
+bool SetPlayerClass(const char* className, bool checked)
 {
     if (!className) {
         g_PlayerClass = nullptr;
@@ -1932,7 +1960,7 @@ bool SetPlayerClass(const char* className)
         g_PlayerSkin.clear();
         return true;
     }
-    const char* name = RegisteredClassName(className);
+    const char* name = checked ? RegisteredClassName(className) : className;
     if (!name)
         return false;
     g_PlayerClassName = name;

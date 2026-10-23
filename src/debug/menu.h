@@ -17,6 +17,9 @@ namespace swrots::debug {
 // `key`: the toggle key's name from settings.ini ("~", "F1", "Insert", a letter...).
 void ConfigureMenu(bool enabled, const wchar_t* key);
 bool MenuOpen();
+// True when something is drawn over the game's picture with the menu closed (Heroes vs Villains' scoreboard):
+// RenderMenu draws it, as part of the picture.
+bool OverlayShown();
 
 // Window thread, first thing in the game window's procedure. Returns true (with
 // `result`) when the menu consumed the message.

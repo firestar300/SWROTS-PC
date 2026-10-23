@@ -591,8 +591,12 @@ static void PresentFrame()
     if (w != LONG(out.Width) || h != LONG(out.Height))
         g_Device->ColorFill(g_SwapChainBuffer, nullptr, D3DCOLOR_XRGB(0, 0, 0));
     g_Device->StretchRect(g_HostBackBuffer, nullptr, g_SwapChainBuffer, &dest, D3DTEXF_LINEAR);
+    // an overlay (with the menu closed) is part of the picture, screenshots too; the menu is not
+    const bool menu = debug::MenuOpen();
+    if (!menu && debug::OverlayShown())
+        DrawMenu();
     SavePendingScreenshot(g_SwapChainBuffer);
-    if (debug::MenuOpen())
+    if (menu)
         DrawMenu();
     HRESULT presented = g_WindowChain->Present(nullptr, nullptr, nullptr, nullptr, 0);
     if (SUCCEEDED(presented))

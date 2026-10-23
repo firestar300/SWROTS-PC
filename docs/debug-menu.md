@@ -42,6 +42,7 @@ Up/Down recall earlier commands.
 | `despawn` | removes the characters you spawned in this level (the Characters tab's Remove spawned) |
 | `restart` | restarts the running mission (as the pause menu's Restart Mission does) |
 | `devmap` | the game restarts into the developer map: an empty, lit, flat floor under the sky with nothing on it but you, to test anything (see the [Game tab](#game-tab)) |
+| `hvv [<8 classes>] [player <0-7>] [lives <n>] [health <n>]` | prototype: Heroes vs Villains, four heroes against four villains on the developer map, with lives and a scoreboard ([how to play it](research/heroes-vs-villains.md#playing-it)) |
 | `autorestart [on\|off]` | whether a `player` change applies at once during a mission: live, or by restarting it (on by default) |
 | `variants <class>` | lists a character class's costumes and texture sets |
 | `meshes [text]` | lists the character bodies on the disc and under `mods\` (those containing the text) |
@@ -210,7 +211,8 @@ way.
 **Silent spawns.** A spawned character has no sounds of its own: the game sets up a character class's sounds only
 while the level loads, so a class spawned later plays none. Its saber still hums and swings when it swings, but
 the clashes when it blocks and the hits when it is struck are silent, and so are its voice and footsteps. The
-level's own characters (and you) keep theirs.
+level's own characters (and you) keep theirs, and so does a spawn of a class the level has (a clone trooper where
+the level has clone troopers).
 
 **Every move, in every level.** A level normally loads only the moves its own characters use: in a
 level without lightsaber duels, a hero you spawn (and your own Jedi against him) would lack the duel

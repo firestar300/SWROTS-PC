@@ -399,7 +399,7 @@ uint8_t HedronVertices(const std::vector<uint8_t>& d, size_t hedron) { return d[
 
 } // namespace
 
-bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report)
+bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const DevMapLayout* layout)
 {
     const std::vector<uint8_t>& in = level;
     Reader r{ in };
@@ -571,6 +571,11 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report)
         return fail("the player's start");
     const float startPosition[3] = { float(midX), float(kFloorY + 60.0), float(midZ) };
     SetFloats(startAt, startPosition, 36);
+    if (layout && layout->start) {
+        const float c = std::cos(layout->startYaw), s = std::sin(layout->startYaw);
+        const float transform[12] = { c, 0, -s, 0, 1, 0, s, 0, c, layout->startX, float(kFloorY + 60.0), layout->startZ };
+        SetFloats(startAt, transform);
+    }
     const float sectorX[1] = { float(midX) }, sectorZ[1] = { float(midZ) };
     SetFloats(sectorAt, sectorX, 36);
     SetFloats(sectorAt, sectorZ, 44);
@@ -721,6 +726,24 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report)
             keptObjects.push_back(std::move(o));
     }
     say("%zu of %zu objects kept", keptObjects.size(), objects.size());
+    // the layout's characters: an id, a name, a place (rows right, up, forward, position) and the 8 bytes after
+    // the properties, as the level's own characters
+    if (layout) {
+        for (const DevMapCharacter& placed : layout->characters) {
+            Object o;
+            o.cls = placed.className;
+            Writer id, name, transform;
+            id.U32(placed.id);
+            name.String(placed.className + "_dev" + std::to_string(placed.id - kDevMapFirstId));
+            const float c = std::cos(placed.yaw), s = std::sin(placed.yaw);
+            const float m[12] = { c, 0, -s, 0, 1, 0, s, 0, c, placed.x, float(kFloorY + 60.0), placed.z };
+            transform.Raw(m, sizeof m);
+            o.props = { { "ID", id.out }, { "Name", name.out }, { "Transform", transform.out } };
+            o.tail.assign(8, 0);
+            keptObjects.push_back(std::move(o));
+        }
+        say(", %zu characters placed", layout->characters.size());
+    }
     Writer section;
     section.U32(kLevelVersion);
     section.U32(nextId);

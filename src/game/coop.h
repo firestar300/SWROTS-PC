@@ -43,5 +43,11 @@ uint8_t* CoopPlayer2();
 // A character is about to be removed from the level (the port's despawn): when it is player 2's, player 2
 // lets go of it first (the camera must not keep it).
 void CoopCharacterRemoving(uint8_t* character);
+// A fatal hit on a character other than player 2 (a health change leaving it none, or an instant kill: a fall,
+// a kill zone) is first offered to this guard (a mode's, e.g. Heroes vs Villains): when it returns true the
+// character lives on with a little health (an instant kill does nothing) and the guard's owner deals with it.
+// Null removes it.
+using FatalHitGuard = bool (*)(uint8_t* character);
+void SetFatalHitGuard(FatalHitGuard guard);
 
 } // namespace swrots::game

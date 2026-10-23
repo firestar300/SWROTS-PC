@@ -198,6 +198,10 @@ will not have valid sounds" and no set, character `+0x444` = 0). The class's scr
 at load (Vader's breathing), which a character created later never runs. A spawned character's own sounds are
 therefore skipped: its clashes and hits when it blocks or is struck, its voice, its footsteps. Registering a set
 late is not enough (an attempt gave a half-built set and faults at 0x16F262); it needs the script's sound setup.
+A class that has a set already (a character of that class loaded with the level) is another matter: a character of
+it created later takes that set (seen: a Vader spawned where a Vader was placed in the level got the placed one's
+set). Characters placed in a level file load with it, whatever their class, each class with its set
+([levels](levels.md#modes-and-missions-from-the-games-own-objects)): a way to give spawned classes their sounds.
 
 **Shared bindings.** A body's animation binding (`<mesh>.ban`) is one resource per mesh, shared by every
 character wearing it; it is rebuilt for a class whose animations it lacks. Two classes in one body in

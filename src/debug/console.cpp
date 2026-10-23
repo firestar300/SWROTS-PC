@@ -21,6 +21,7 @@
 #include "game/characters.h"
 #include "game/coop.h"
 #include "game/devmap.h"
+#include "game/hvv.h"
 #include "game/versus.h"
 #include "kernel/kernel.h"
 
@@ -1001,7 +1002,7 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
         command != "infiniteforce" && command != "memory" && command != "team" &&
         command != "findrefs" && command != "despawn" && command != "characters" && command != "scale" &&
         command != "screenshot" && command != "coop" &&
-        command != "devmap")
+        command != "devmap" && command != "hvv")
         return false;
     Print(LineKind::Output, "> %s", line.c_str());
     if (command == "duelist") {
@@ -1038,6 +1039,27 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
         Scale(words);
     } else if (command == "coop") {
         Coop(words);
+    } else if (command == "hvv") {
+        // hvv [<8 classes: heroes, then villains>] [player <0-7>] [lives <n>] [health <n>]
+        std::vector<std::string> lineup;
+        int player = 0, lives = 0, health = 0;
+        for (size_t i = 1; i < words.size(); ++i) {
+            if (words[i] == "player" && i + 1 < words.size())
+                player = std::atoi(words[++i].c_str());
+            else if (words[i] == "lives" && i + 1 < words.size())
+                lives = std::atoi(words[++i].c_str());
+            else if (words[i] == "health" && i + 1 < words.size())
+                health = std::atoi(words[++i].c_str());
+            else
+                lineup.push_back(words[i]);
+        }
+        if (lineup.empty())
+            lineup = game::HvvDefaultLineup();
+        std::string error;
+        if (game::StartHvv(lineup, player, lives, health, error))
+            Print(LineKind::Output, "  starting Heroes vs Villains...");
+        else
+            Print(LineKind::Error, "%s", error.c_str());
     } else if (command == "devmap") {
         Print(LineKind::Output, "  starting the developer map...");
         game::StartDevMap();
@@ -1135,7 +1157,7 @@ void RunQueuedConsoleCommands()
             // and gone while a level loads).
             const std::vector<std::string> words = Words(line);
             static const char* const kStandalone[] = { "player", "variants", "meshes", "restart", "autorestart",
-                "duelist", "freecam", "saber", "spawn", "peek", "infiniteforce", "memory", "team", "findrefs", "despawn", "characters", "scale", "screenshot", "coop", "devmap", "clear", "cls" };
+                "duelist", "freecam", "saber", "spawn", "peek", "infiniteforce", "memory", "team", "findrefs", "despawn", "characters", "scale", "screenshot", "coop", "devmap", "hvv", "clear", "cls" };
             const bool standalone = !words.empty() && std::any_of(std::begin(kStandalone), std::end(kStandalone),
                 [&](const char* c) { return _stricmp(words[0].c_str(), c) == 0; });
             if (standalone) {
