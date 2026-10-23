@@ -123,10 +123,40 @@ void __declspec(naked) EmptySequenceGuard()
     }
 }
 
+// A character answers whether it goes by a name (vfunc +0x460, 0x14FE90, shared by 42 classes) by comparing it with
+// the two names of its class's script (`[[character+0x434]+4]` +0x5C and +0x60) through 0x2233F0, which does not
+// take a null string. Palpatine's class has no second name, so asking a Palpatine (as the game's logic does about
+// characters in a fight) crashed (0x4EBEB4); the game never has one fight, but a spawned one does. The function is
+// replaced by the same comparison, a missing name matching nothing.
+constexpr uint32_t kCharacterNamed = 0x0014FE90;
+constexpr uint8_t kCharacterNamedBytes[] = { 0x56, 0x8B, 0xF1, 0x8B, 0x86, 0x34, 0x04, 0x00, 0x00 };
+constexpr uint32_t kCompareNames = 0x002233F0; // cdecl (a, b) -> 0 when equal
+
+bool __fastcall CharacterNamed(uint8_t* character, void*, const char* name)
+{
+    uint8_t* script = *reinterpret_cast<uint8_t**>(character + 0x434);
+    uint8_t* info = script ? *reinterpret_cast<uint8_t**>(script + 4) : nullptr;
+    if (!info || !name)
+        return false;
+    const auto compare = reinterpret_cast<int(__cdecl*)(const char*, const char*)>(uintptr_t(kCompareNames));
+    static const uint32_t kNames[] = { 0x5C, 0x60 };
+    for (uint32_t at : kNames) {
+        const char* own = *reinterpret_cast<const char* const*>(info + at);
+        if (own && compare(name, own) == 0)
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 void InstallGameFixes()
 {
+    if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kCharacterNamed)), kCharacterNamedBytes,
+            sizeof(kCharacterNamedBytes)) == 0)
+        PatchJump(kCharacterNamed, reinterpret_cast<const void*>(&CharacterNamed));
+    else
+        LOG_WARN("Game fix: character name check does not match; not patched");
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kHashPoolTakeSite)), kHashPoolTakeBytes,
             sizeof(kHashPoolTakeBytes)) == 0) {
         PatchJump(kHashPoolTakeSite, reinterpret_cast<const void*>(&HashPoolTakeGuard));
