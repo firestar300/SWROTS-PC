@@ -13,5 +13,8 @@ void SyncRosterClasses();
 // The duelist whose duel cameras the extra fighter in `slot` uses (e.g. "Anakin", for
 // cinematics\introcamera\Anakin_Intro_Cam.cin), or null for a slot that is not an extra fighter's.
 const char* ExtraFighterCameras(int slot);
+// The character class of a select-screen slot (0-8 the game's fighters, from 10 the extra ones), or null (Random,
+// or no such slot).
+const char* SelectSlotClass(int slot);
 
 } // namespace swrots::game

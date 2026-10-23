@@ -14,6 +14,7 @@
 #include "debug/gamefont.h"
 #include "game/freecam.h"
 #include "game/hvv.h"
+#include "game/hvvmenu.h"
 #include "imgui.h"
 
 namespace swrots::debug {
@@ -265,8 +266,50 @@ bool TabHeld()
 
 } // namespace
 
+// The character select in Heroes vs Villains mode: the line-up so far, the rules, the buttons.
+void PickPanel(const game::HvvPickState& p, const ImGuiViewport* vp, float u)
+{
+    const float left = vp->Pos.x + vp->Size.x * 0.50f, top = vp->Pos.y + vp->Size.y * 0.355f;
+    const float width = vp->Size.x * 0.48f, height = vp->Size.y * 0.37f;
+    g_Draw->AddRectFilled(ImVec2(left, top), ImVec2(left + width, top + height), IM_COL32(8, 12, 24, 238), 4 * u);
+    g_Draw->AddRect(ImVec2(left, top), ImVec2(left + width, top + height), kEdge, 4 * u, 0, 1.5f * u);
+    Text(left + width / 2, top + 8 * u, 24 * u, kGold, "HEROES VS VILLAINS", 0.5f);
+    const size_t next = p.picks.size();
+    for (int side = 0; side < 2; ++side) {
+        const float x = left + 14 * u + side * width / 2;
+        float y = top + 42 * u;
+        Text(x, y, 18 * u, SideColour(side), side == 0 ? "HEROES" : "VILLAINS");
+        y += 26 * u;
+        for (int k = 0; k < 4; ++k) {
+            const size_t i = size_t(side * 4 + k);
+            const bool current = i == next;
+            std::string name = i < p.picks.size() ? game::HvvDisplayName(p.picks[i])
+                : current && !p.highlighted.empty() ? game::HvvDisplayName(p.highlighted) : "-";
+            if (current)
+                g_Draw->AddRectFilled(ImVec2(x - 6 * u, y - 3 * u), ImVec2(x + width / 2 - 22 * u, y + 20 * u),
+                    IM_COL32(255, 196, 90, 50), 3 * u);
+            Text(x, y, 16 * u, i < p.picks.size() ? kWhite : current ? Faded(kWhite, 0.6f) : kDim,
+                (i == 0 ? "YOU  " : "") + name);
+            y += 24 * u;
+        }
+    }
+    char rules[96];
+    snprintf(rules, sizeof rules, "LIVES %d   HEALTH %d   INTRO %s", p.lives, p.health, p.intro ? "ON" : "OFF");
+    Text(left + width / 2, top + height - 62 * u, 15 * u, kWhite, rules, 0.5f);
+    Text(left + width / 2, top + height - 41 * u, 15 * u, kWhite, "MAP  " + p.map, 0.5f);
+    Text(left + width / 2, top + height - 19 * u, 12 * u, kDim,
+        next < 8 ? "A ADD   B REMOVE   UP DOWN LIVES   X HEALTH   Y INTRO" : "", 0.5f);
+}
+
 void DrawHvvHud()
 {
+    const game::HvvPickState picks = game::GetHvvPickState();
+    if (picks.active) {
+        g_Draw = ImGui::GetForegroundDrawList();
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        PickPanel(picks, vp, std::max(0.5f, vp->Size.y / 720.0f));
+        return;
+    }
     const game::HvvState s = game::GetHvvState();
     // the game's own HUD hidden for the end (its `hud` variable, the opacity), given back after
     static bool hudHidden = false;

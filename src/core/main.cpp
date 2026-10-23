@@ -29,6 +29,7 @@
 #include "game/fixes.h"
 #include "game/freecam.h"
 #include "game/hvv.h"
+#include "game/hvvmenu.h"
 #include "game/menus.h"
 #include "game/game.h"
 #include "game/resources.h"
@@ -178,6 +179,7 @@ static void StartGame(const void* launchData)
     game::InstallCoop();
     game::InstallDevMap(g_Boot.paths.gameData, g_Boot.paths.mods);
     game::InstallHvv();
+    game::InstallHvvMenu();
     game::InstallResourceHooks(g_Boot.paths.gameData, g_Boot.paths.mods, g_Boot.paths.cache, g_Boot.dumpDir,
         g_Boot.logResources);
     game::InstallFreeCamera();
@@ -254,6 +256,13 @@ static void Run(void* reserveBase, unsigned reserveSize, void* contiguousBase, u
     kernel::Paths paths;
     paths.gameData = exeDir + L"\\GameData";
     paths.saves = exeDir + L"\\saves";
+    // Test switch SWROTS_TEST_SAVES=<folder>: the save drive is that folder (unattended menu tests never touch the
+    // player's saves). Created when missing.
+    wchar_t testSaves[MAX_PATH] = {};
+    if (GetEnvironmentVariableW(L"SWROTS_TEST_SAVES", testSaves, MAX_PATH)) {
+        paths.saves = testSaves;
+        CreateDirectoryW(testSaves, nullptr);
+    }
     paths.cache = exeDir + L"\\cache";
     paths.mods = exeDir + L"\\mods";
     paths.logs = logDir;

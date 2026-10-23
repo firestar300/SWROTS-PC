@@ -347,6 +347,55 @@ static void ReadTestInput(XGamepad& g)
         g.bAnalogButtons[kOrder[step % int(std::size(kOrder))]] = 0xFF;
 }
 
+// For unattended menu tests: SWROTS_TEST_BUTTONS="<seconds>:<button>;..." presses player 1's buttons at those
+// times (seconds after the first input read; each held 0.15 s): A, B, X, Y, Start, Back, Up, Down, Left, Right.
+// The variable clears itself, as SWROTS_TEST_INPUT does.
+struct TestPress {
+    double at;
+    int analog;   // an analog button's index, or -1
+    WORD digital; // or a digital button's bit
+};
+static std::vector<TestPress> g_TestPresses;
+
+static void ReadTestButtons(XGamepad& g)
+{
+    static ULONGLONG start = 0;
+    static bool read = false;
+    if (!read) {
+        read = true;
+        char value[2048] = {};
+        if (GetEnvironmentVariableA("SWROTS_TEST_BUTTONS", value, sizeof(value))) {
+            SetEnvironmentVariableA("SWROTS_TEST_BUTTONS", nullptr);
+            static const struct { const char* name; int analog; WORD digital; } kButtons[] = {
+                { "A", 0, 0 }, { "B", 1, 0 }, { "X", 2, 0 }, { "Y", 3, 0 }, { "Start", -1, 0x10 },
+                { "Back", -1, 0x20 }, { "Up", -1, 0x1 }, { "Down", -1, 0x2 }, { "Left", -1, 0x4 },
+                { "Right", -1, 0x8 } };
+            char* context = nullptr;
+            for (char* item = strtok_s(value, ";", &context); item; item = strtok_s(nullptr, ";", &context)) {
+                const char* colon = std::strchr(item, ':');
+                if (!colon)
+                    continue;
+                for (const auto& b : kButtons)
+                    if (_stricmp(colon + 1, b.name) == 0)
+                        g_TestPresses.push_back({ atof(item), b.analog, b.digital });
+            }
+            LOG_INFO("Input: %zu scripted button presses", g_TestPresses.size());
+        }
+        start = GetTickCount64();
+    }
+    if (g_TestPresses.empty())
+        return;
+    const double t = double(GetTickCount64() - start) / 1000.0;
+    for (const TestPress& p : g_TestPresses) {
+        if (t < p.at || t >= p.at + 0.15)
+            continue;
+        if (p.analog >= 0)
+            g.bAnalogButtons[p.analog] = 0xFF;
+        else
+            g.wButtons |= p.digital;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Free camera
 // ---------------------------------------------------------------------------
@@ -491,6 +540,7 @@ static DWORD __stdcall XbInputGetState(HANDLE device, XInputState* state)
         if (index == 0) {
             ReadKeyboard(g);
             ReadTestInput(g);
+            ReadTestButtons(g);
             const double now = TestPad2Seconds(); // SWROTS_TEST_PAD2's ":start": player 1 pauses
             if (TestPad2Spec().on && TestPad2Spec().pause >= 0 && now >= TestPad2Spec().pause && now < TestPad2Spec().pause + 0.2)
                 g.wButtons |= XB_START;

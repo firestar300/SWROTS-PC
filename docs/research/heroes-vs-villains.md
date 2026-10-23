@@ -6,6 +6,15 @@ tab](../debug-menu.md#heroes-vs-villains-tab) or the console's `hvv`. Addresses 
 
 ## Playing it
 
+**From the main menu**: Multi Player > **Heroes vs Villains** opens the Versus character select in Heroes vs Villains
+mode, with a panel over the right half: the line-up so far, the rules and the map. **A** adds the fighter under the
+cursor to the line-up (the first is you; then your three fellow heroes, then the four villains; Random picks any;
+fighters the profile has not unlocked for Versus can be picked too), **B** takes the last back (with none, back to
+the main menu), **Up/Down** set each side's lives (5 to 99), **X** the health (150 to 1000), **Y** the intro. The
+eighth pick starts the match. The map is the developer map for now.
+
+**From the debug menu or the console:**
+
 ```
 hvv                                     the default line-up: Obi-Wan, Yoda, Mace Windu, Serra Keto
                                         against Vader, Dooku, Grievous, Anakin; you play Obi-Wan
@@ -56,6 +65,20 @@ The launch arguments of a match (`kernel::LaunchGame`, see [starting a level](le
 `hvvintro:0`). They also work in `mods\Default_Xbox.cfg`.
 
 ## How it works
+
+- **The menu entry** (`src/game/hvvmenu.cpp`): the main menu (`interfc\front_end\xml\main_menu.xbl_xml`, asked
+  for as `main_menu.xml`) has under Multi Player a submenu (`MainMenuSubMenu`, its row count the u32 before its
+  first row, then 8 bytes of its own after its last) of `MainMenuSwitchScreenButton` rows: name, position, text id,
+  down and up neighbours, the screen to switch to and a button id (Versus 2, Cooperative 3: 3 asks the profile
+  whether the co-op missions are open). A copy of Cooperative's row becomes Heroes vs Villains: Versus's screen
+  (`select_jedi`) and id, linked between Cooperative and Versus, the count raised. The rows' event handler (vtable
+  0x5D5580 slot 4, 0x2CBEC0: event 0x23 "chosen" switches the screen through 0xD4070) tells which row was chosen by
+  its item data's +4, the row's name key (the game's string hash, 0x222BA0).
+- **The character select** (`JediList`, vtable 0x5D68B8) passes player 1's events to 0x2D51B0 (thiscall (event),
+  called from 0x2D54B6): 0x1F/0x20 left/right (the cursor, a slot, +0x2C), 0x21/0x22 up/down, 0x23 A (+0x28 set:
+  picked; then player 1 picks the opponent, +0x29), 0x26 B, 0x2B X, 0x2C Y. In Heroes vs Villains mode the port
+  takes them first (the call patched). The panel is drawn while the screen is (its vtable slot 3, 0x2D56F0, thiscall
+  (one argument), runs every frame).
 
 - **The fighters are placed in the level** (`src/game/hvv.cpp`, `devmapbuild.cpp`): the dev map's level file gets a
   character object for each AI fighter (class, id, name, transform: the same few properties as the level's own
@@ -109,6 +132,6 @@ played.
   (`cinematics\introcamera\<name>_Intro_Cam.cin`) the game plays in Versus.
 - Co-op's player 2 is not part of a match yet (with co-op on, they would join as a companion of their own).
 - A camera behind the player (Battlefront style), and a shared camera when two or more play on one screen.
-- The game's own menus (a Heroes vs Villains entry beside Versus); the debug menu's tab is the panel for now.
+- Maps: the developer map only so far (custom maps to come); the select screen does not show a map picker yet.
 - More than two players: the port's input takes four controllers; the game's player slots and HUD are made for
   two.

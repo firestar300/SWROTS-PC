@@ -80,7 +80,12 @@ then, to walk the menus), `SWROTS_COMMANDS="<seconds>:<command>;..."` (runs debu
 commands that many seconds after the start, e.g. `"9:player IVader;12:spawn ICloneTrooper enemy;15:despawn"`;
 `screenshot <name>` among them saves what the game shows then to `screenshots\<name>.png`),
 `SWROTS_BACKGROUND=1` (starts the game minimised and silent without taking the focus, so a test run
-leaves the desktop alone; it keeps drawing, and the screenshots work).
+leaves the desktop alone; it keeps drawing, and the screenshots work),
+`SWROTS_TEST_BUTTONS="<seconds>:<button>;..."` (presses player 1's buttons at those times, each for 0.15 s:
+`A`, `B`, `X`, `Y`, `Start`, `Back`, `Up`, `Down`, `Left`, `Right`; to walk the front-end menus unattended, e.g.
+`"6:Start;11:Down;13:A"`; the menus take input only once their intro has played, about 5 s after they show),
+`SWROTS_TEST_SAVES=<folder>` (the save drive is that folder instead of `saves\`, created when missing, so menu
+tests never touch your own saved games).
 
 ## Finding your way around
 

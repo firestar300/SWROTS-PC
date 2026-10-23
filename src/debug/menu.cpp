@@ -19,6 +19,7 @@
 #include "game/devmap.h"
 #include "game/freecam.h"
 #include "game/hvv.h"
+#include "game/hvvmenu.h"
 #include "debug/gamefont.h"
 #include "debug/hvvhud.h"
 #include "game/game.h"
@@ -1014,7 +1015,7 @@ void HvvTab()
 
 bool OverlayShown()
 {
-    return g_Ready && game::HvvActive();
+    return g_Ready && (game::HvvActive() || game::GetHvvPickState().active);
 }
 
 void RenderMenu()

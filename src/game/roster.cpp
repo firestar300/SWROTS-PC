@@ -580,6 +580,15 @@ void PatchDisplacement(const TableSite& site, const void* table)
 
 } // namespace
 
+const char* SelectSlotClass(int slot)
+{
+    if (slot >= 0 && slot < kFighterCount)
+        return reinterpret_cast<const char* const*>(uintptr_t(kDuelistClasses))[slot];
+    if (const ExtraFighter* extra = Extra(slot))
+        return extra->className;
+    return nullptr;
+}
+
 void SyncRosterClasses()
 {
     std::memcpy(g_Classes, reinterpret_cast<const void*>(uintptr_t(kDuelistClasses)), kFighterCount * sizeof(g_Classes[0]));
