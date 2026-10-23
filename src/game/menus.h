@@ -30,6 +30,18 @@ void AddMenuHandler(const char* name, MenuHandlerMaker make);
 // "interfc\<name>.xml", must come from a resource patch or generator.
 void AddMenuScreen(const std::string& lowerXmlName);
 
+// The front end's twins (the shell: title, main menu, Versus...): a menu action of the port's own (registered with
+// the shell's handlers), a screen (gameinfo\shelllist.txt; its compiled file, asked for as
+// "interfc\front_end\xml\<name>.xml", from a resource generator), and a change of screen (as the game goes from the
+// fighters' select to the arena's): false without the shell.
+void AddShellHandler(const char* name, MenuHandlerMaker make);
+void AddShellScreen(const std::string& lowerXmlName);
+bool GoToShellScreen(const char* name);
+
+// The text ids the game's On/Off control (SettingsScreenOnOffControl, draw 0x2D8D70) shows for its two values
+// (IDS_SHELL_ON / IDS_SHELL_OFF); a control of the port's own sets its own around its draw (null: the game's).
+void SetOnOffTexts(const char* on, const char* off);
+
 // Compiled menus (.xbl_xml): strings are a u32 length and the text; an item is the string "screenItem", its
 // name, a u32, its position (x, y floats), ... and its children.
 std::vector<uint8_t> MenuString(const std::string& text);

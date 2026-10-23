@@ -21,8 +21,8 @@ mods\meshes\maps\cantina\*.stx          its textures (named as the model names t
 The port reads `mods\maps\*\map.ini` at every start (the log says `Custom maps: cantina (MOS EISLEY CANTINA), ...`).
 Then:
 
-- **Heroes vs Villains**: on its select screen (Multi Player > Heroes vs Villains) LB / RB (the Xbox pad's White /
-  Black) choose the map; in the console `hvv map cantina`; the debug menu's Heroes vs Villains tab.
+- **Heroes vs Villains**: its Map row (Multi Player > Heroes vs Villains); in the console `hvv map cantina`; the
+  debug menu's Heroes vs Villains tab.
 - **Versus** (the game's own duels: rounds, its HUD, its duel cameras): on the Versus select screen LB / RB choose
   the arena (top right: the game's choice or a custom map); the duel then plays on the map, whichever arena the
   arena screen picks. In the console `versus ILuke IVader map cantina` (you against the computer).

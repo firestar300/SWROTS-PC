@@ -77,6 +77,31 @@ void __fastcall HudSetupHook(uint8_t* hud, void*)
     }
 }
 
+// The shell (the front end) registers its handlers the same way (VaderShell 0x2FA610, the same prologue; its list at
+// +0x268 too).
+constexpr uint32_t kShellSetup = 0x002FA610;
+HudSetupFn g_OriginalShellSetup = nullptr;
+std::vector<Handler> g_ShellHandlers;
+
+void __fastcall ShellSetupHook(uint8_t* shell, void*)
+{
+    g_OriginalShellSetup(shell, nullptr);
+    for (const Handler& handler : g_ShellHandlers) {
+        struct {
+            const char* name;
+            uint8_t* prototype;
+        } entry = { handler.name.c_str(), handler.make() };
+        if (entry.prototype)
+            reinterpret_cast<void(__fastcall*)(uint8_t*, void*, const void*)>(uintptr_t(kAddHandler))(shell + kHudHandlers,
+                nullptr, &entry);
+    }
+}
+
+// The On/Off control's two texts: the ids it pushes (at 0x2D8EAB, 0x2D8EFF) are read from the port's buffers.
+constexpr uint32_t kOnTextPush = 0x002D8EAB, kOffTextPush = 0x002D8EFF;
+constexpr uint32_t kOnText = 0x005D6F08, kOffText = 0x005D6EF8;
+char g_OnText[64] = "IDS_SHELL_ON", g_OffText[64] = "IDS_SHELL_OFF";
+
 // --- Screens ---
 // gameinfo\guilist.txt (in each level's PAK) lists the in-game menus' screens, one compiled file a line; the
 // GUI manager (IGuiManParse, 0xD5270) makes a screen of each.
@@ -100,6 +125,34 @@ void PatchGuiList(std::vector<uint8_t>& data)
     }
     data.assign(text.begin(), text.end());
 }
+
+// gameinfo\shelllist.txt (in the shared PAK) lists the front end's screens the same way (VaderShell 0x2F9530).
+constexpr char kShellList[] = "gameinfo\\shelllist.txt";
+std::vector<std::string> g_ShellScreens;
+
+void PatchShellList(std::vector<uint8_t>& data)
+{
+    std::string text(data.begin(), data.end());
+    for (const std::string& screen : g_ShellScreens) {
+        constexpr int kMenuType = 31;
+        if (!DeclareGeneratedResource(screen, kMenuType))
+            LOG_WARN("Menus: %s could not be declared", screen.c_str());
+        if (text.find(screen) != std::string::npos)
+            continue;
+        if (!text.empty() && text.back() != '\n')
+            text += "\r\n";
+        text += screen + "\r\n";
+    }
+    data.assign(text.begin(), text.end());
+}
+
+// A change of the shell's screen: its transition object ([shell] +0xDD0; the shell [0x7F637C], up while its +0xC has
+// 0x40000) latches the screen's name (0x2D1B80, thiscall (const TString*); the name from text by 0x222FA0, cdecl
+// (TString* out, const char*)), as the fighters' select goes to the arena's (0x2D4D85).
+constexpr uint32_t kShell = 0x007F637C;
+constexpr uint32_t kShellTransition = 0xDD0;
+constexpr uint32_t kTransitionTo = 0x002D1B80;
+constexpr uint32_t kTextToString = 0x00222FA0;
 
 uint8_t* Trampoline(uint32_t address, const uint8_t* bytes, uint32_t length)
 {
@@ -148,6 +201,43 @@ void AddMenuScreen(const std::string& lowerXmlName)
         g_Screens.push_back(lowerXmlName);
 }
 
+void AddShellHandler(const char* name, MenuHandlerMaker make)
+{
+    for (const Handler& handler : g_ShellHandlers)
+        if (handler.name == name)
+            return;
+    g_ShellHandlers.push_back({ name, make });
+}
+
+void AddShellScreen(const std::string& lowerXmlName)
+{
+    if (std::find(g_ShellScreens.begin(), g_ShellScreens.end(), lowerXmlName) == g_ShellScreens.end())
+        g_ShellScreens.push_back(lowerXmlName);
+}
+
+bool GoToShellScreen(const char* name)
+{
+    __try {
+        uint8_t* shell = *reinterpret_cast<uint8_t**>(uintptr_t(kShell));
+        uint8_t* transition = shell ? *reinterpret_cast<uint8_t**>(shell + kShellTransition) : nullptr;
+        if (!transition)
+            return false;
+        uint32_t text = 0; // a TString
+        reinterpret_cast<void*(__cdecl*)(uint32_t*, const char*)>(uintptr_t(kTextToString))(&text, name);
+        reinterpret_cast<void(__fastcall*)(uint8_t*, void*, const uint32_t*)>(uintptr_t(kTransitionTo))(transition,
+            nullptr, &text);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void SetOnOffTexts(const char* on, const char* off)
+{
+    strcpy_s(g_OnText, on ? on : "IDS_SHELL_ON");
+    strcpy_s(g_OffText, off ? off : "IDS_SHELL_OFF");
+}
+
 void InstallMenus()
 {
     const auto matches = [](uint32_t address, const uint8_t* bytes, size_t length) {
@@ -161,11 +251,28 @@ void InstallMenus()
     // The stubs live in the port's memory and survive reboots; the jumps are patched into every new image.
     static uint8_t* tableStub = Trampoline(kTableFind, kTableFindBytes, sizeof(kTableFindBytes));
     static uint8_t* hudStub = Trampoline(kHudSetup, kHudSetupBytes, sizeof(kHudSetupBytes));
+    static uint8_t* shellStub = Trampoline(kShellSetup, kHudSetupBytes, sizeof(kHudSetupBytes));
     g_OriginalTableFind = reinterpret_cast<TableFindFn>(tableStub);
     g_OriginalHudSetup = reinterpret_cast<HudSetupFn>(hudStub);
     PatchJump(kTableFind, reinterpret_cast<const void*>(&TableFindHook));
     PatchJump(kHudSetup, reinterpret_cast<const void*>(&HudSetupHook));
     RegisterResourcePatch(kGuiList, &PatchGuiList);
+    if (matches(kShellSetup, kHudSetupBytes, sizeof(kHudSetupBytes))) {
+        g_OriginalShellSetup = reinterpret_cast<HudSetupFn>(shellStub);
+        PatchJump(kShellSetup, reinterpret_cast<const void*>(&ShellSetupHook));
+        RegisterResourcePatch(kShellList, &PatchShellList);
+    }
+    const auto pushes = [&](uint32_t at, uint32_t text) {
+        return *reinterpret_cast<const uint8_t*>(uintptr_t(at)) == 0x68 &&
+            *reinterpret_cast<const uint32_t*>(uintptr_t(at + 1)) == text;
+    };
+    if (pushes(kOnTextPush, kOnText) && pushes(kOffTextPush, kOffText)) {
+        SetOnOffTexts(nullptr, nullptr);
+        const uint32_t on = uint32_t(reinterpret_cast<uintptr_t>(g_OnText));
+        const uint32_t off = uint32_t(reinterpret_cast<uintptr_t>(g_OffText));
+        PatchBytes(kOnTextPush + 1, &on, 4);
+        PatchBytes(kOffTextPush + 1, &off, 4);
+    }
 }
 
 std::vector<uint8_t> MenuString(const std::string& text)

@@ -3,8 +3,10 @@
 // The main menu (interfc\front_end\xml\main_menu.xbl_xml, asked for as main_menu.xml) has under Multi Player a
 // submenu (MainMenuSubMenu) of two rows, Versus and Cooperative: MainMenuSwitchScreenButton items, each a text id,
 // its down and up neighbours and a screen to switch to (select_jedi, select_challenge). A third row is added, a copy
-// of Cooperative, switching to the Versus character select; the port knows it was this row that was chosen from the
-// button's event (vtable 0x5D5580 slot 4, 0x2CBEC0; event 0x23 "chosen" switches the screen through 0xD4070).
+// of Cooperative, switching to the port's screen hvv_setup (the match's rules), whose Line-up row goes to hvv_lineup
+// (a row a fighter: choosing one opens the Versus character select to pick it); the port knows it was this row that
+// was chosen from the button's event (vtable 0x5D5580 slot 4, 0x2CBEC0; event 0x23 "chosen" switches the screen
+// through 0xD4070).
 
 #include "game/hvvmenu.h"
 
@@ -33,6 +35,11 @@ namespace {
 constexpr const char* kMainMenu = "interfc\\front_end\\xml\\main_menu.xml";
 constexpr const char* kRowName = "hvv";
 constexpr const char* kRowText = "IDS_PORT_HVV";
+constexpr const char* kSetupScreen = "hvv_setup";
+constexpr const char* kLineupScreen = "hvv_lineup";
+constexpr const char* kSetupFile = "interfc\\front_end\\xml\\hvv_setup.xml";
+constexpr const char* kLineupFile = "interfc\\front_end\\xml\\hvv_lineup.xml";
+constexpr const char* kSettingsFile = "interfc\\front_end\\xml\\settings.xml";
 constexpr float kRowStep = 24.0f; // the submenu's rows
 
 constexpr uint32_t kSwitchButtonVtable = 0x005D5580;
@@ -40,8 +47,8 @@ constexpr uint32_t kEventSlot = 4;
 constexpr uint32_t kSwitchButtonEvent = 0x002CBEC0;
 constexpr int kChosen = 0x23;
 
-bool g_HvvMode = false;
-std::vector<std::string> g_Picks;
+bool g_HvvMode = false;  // in the Heroes vs Villains screens (from its main menu row on)
+int g_PickSlot = -1;     // the line-up's place the character select picks for, or -1
 
 // The submenu's child count: the u32 right before its first child (the Versus row).
 bool PatchMainMenu(std::vector<uint8_t>& data)
@@ -84,10 +91,10 @@ bool PatchMainMenu(std::vector<uint8_t>& data)
     const size_t rowDown = ok ? MenuFind(row, versusString, nameAt + 8, rowEnd) : std::string::npos;
     ok = rowDown != std::string::npos &&
          MenuReplaceString(row, rowDown + versusString.size(), rowEnd, "versus", "cooperative") &&
-         MenuReplaceString(row, nameAt + 8, rowEnd, "select_challenge", "select_jedi");
+         MenuReplaceString(row, nameAt + 8, rowEnd, "select_challenge", kSetupScreen);
     // after the screen: the button's id (+0x84 at run time; Versus 2, Cooperative 3, which asks the profile
-    // whether the co-op missions are open): Versus's
-    const std::vector<uint8_t> screen = MenuString("select_jedi");
+    // whether the co-op missions are open): Versus's (the character select it leads to is the Versus one)
+    const std::vector<uint8_t> screen = MenuString(kSetupScreen);
     const size_t screenAt = ok ? MenuFind(row, screen, nameAt + 8, rowEnd) : std::string::npos;
     if (!ok || screenAt == std::string::npos || screenAt + screen.size() + 4 > rowEnd) {
         LOG_WARN("HvV menu: the Cooperative row is not as expected; no Heroes vs Villains entry");
@@ -135,7 +142,7 @@ bool __fastcall SwitchButtonEvent(uint8_t* self, void*, int event, int value)
         const uint32_t key = item ? *reinterpret_cast<const uint32_t*>(item + 4) : 0;
         if (key == MenuKey(kRowName)) {
             g_HvvMode = true;
-            g_Picks.clear();
+            g_PickSlot = -1;
             LOG_INFO("HvV menu: Heroes vs Villains chosen");
         } else if (key) {
             g_HvvMode = false;
@@ -144,14 +151,11 @@ bool __fastcall SwitchButtonEvent(uint8_t* self, void*, int event, int value)
     return reinterpret_cast<EventFn>(uintptr_t(kSwitchButtonEvent))(self, nullptr, event, value);
 }
 
-// --- The character select in Heroes vs Villains mode ---------------------------------------------------------------
+// --- The character select for a line-up's place ---------------------------------------------------------------------
 // The select screen (JediList, vtable 0x5D68B8) passes player 1's events to 0x2D51B0 (thiscall (event), from
 // 0x2D54B6): left/right (0x1F/0x20) move the cursor (+0x2C, a slot), A (0x23) picks (+0x28 set; then player 1 picks
-// the opponent), B (0x26) takes the pick back. In Heroes vs Villains mode the cursor stays player 1's: A adds the
-// fighter under it to the line-up (the first is the player's, heroes first, then villains), B takes the last back
-// (with none, the screen's own B: back to the main menu), up/down set the lives, X the health, Y the intro,
-// White/Black (LB/RB: 0x2A/0x29) the map, the triggers (LT/RT: 0x28/0x27) the team size before the first pick. The
-// last pick (both sides full) starts the match.
+// the opponent), B (0x26) takes the pick back. Picking for the line-up (g_PickSlot), A takes the fighter under the
+// cursor for that place and B leaves it as it was; both go back to the line-up.
 constexpr uint32_t kPlayer1EventCall = 0x002D54B6;
 constexpr uint32_t kPlayer1Event = 0x002D51B0;
 constexpr uint32_t kSelectVtable = 0x005D68B8;
@@ -162,7 +166,7 @@ constexpr int kLeft = 0x1F, kRight = 0x20, kUp = 0x21, kDown = 0x22, kB = 0x26;
 constexpr int kX = 0x2B, kY = 0x2C;
 constexpr int kWhite = 0x2A, kBlack = 0x29; // LB and RB on a PC pad
 constexpr int kLeftTrigger = 0x28, kRightTrigger = 0x27;
-constexpr int kMaxPerSide = 6; // the select screen's team sizes, 1v1 to 6v6 (the console takes up to 8 a side)
+constexpr int kMaxPerSide = 5; // the setup screen's team sizes, 1v1 to 5v5 (the console takes up to 8 a side)
 constexpr int kLivesChoices[] = { 5, 10, 20, 35, 50, 75, 99 };
 constexpr int kHealthChoices[] = { 150, 250, 400, 600, 1000 };
 
@@ -171,6 +175,8 @@ uint8_t* g_SelectScreen = nullptr;
 int g_LivesChoice = 3, g_HealthChoice = 1;
 bool g_Intro = true;
 int g_PerSide = 4;
+// the line-up: kMaxPerSide heroes, then kMaxPerSide villains (the first g_PerSide of each play)
+std::string g_Lineup[2 * kMaxPerSide];
 int g_MapChoice = 0; // 0 the dev map's floor, then the custom maps
 // The game's own Versus on a custom map: LB/RB on its select screen choose the arena (0: the game's own choice, then
 // the custom maps); its duel's launch is then made the dev map's duel on that map (see VersusLaunch).
@@ -216,6 +222,441 @@ std::string MapChoice()
     return g_MapChoice > 0 && g_MapChoice <= int(maps.size()) ? maps[size_t(g_MapChoice - 1)].id : std::string();
 }
 
+// --- The setup and line-up screens ---------------------------------------------------------------------------------
+// Both are the front end's Settings screen (settings.xbl_xml: nine rows from y 138, 24 apart, each with a veil item
+// behind it, then the footer) with rows of the port's own:
+//   hvv_setup: Team Size, Lives, Health, Intro, Map: copies of the Subtitles row (an On/Off control,
+//     SettingsScreenOnOffControl) with the action "HvvValue", showing the value as its On text; Line-up, Start: copies
+//     of the Codes row (SettingsScreenButton) with the action "HvvButton". Codes and Restore Defaults go.
+//   hvv_lineup: ten rows, "HvvButton" too: the team's heroes, then its villains (SlotOfRow); the rows past them are not
+//     drawn and the others' links (the item's up and down neighbours, the keys of their names at +0x18 and +0x1C) are
+//     set for the team size as they draw.
+// A row's name tells the handlers which it is (handler +8 the item, its +4 the name's key).
+struct ScreenRow {
+    std::string name, textId;
+    bool button;
+};
+
+std::vector<ScreenRow> SetupRows()
+{
+    return { { "hvvteam", "IDS_PORT_HVV_TEAM", false }, { "hvvlives", "IDS_PORT_HVV_LIVES", false },
+        { "hvvhealth", "IDS_PORT_HVV_HEALTH", false }, { "hvvintro", "IDS_PORT_HVV_INTRO", false },
+        { "hvvmap", "IDS_PORT_HVV_MAP", false }, { "hvvlineup", "IDS_PORT_HVV_LINEUP", true },
+        { "hvvstart", "IDS_PORT_HVV_START", true } };
+}
+
+std::vector<ScreenRow> LineupRows()
+{
+    std::vector<ScreenRow> rows;
+    for (int i = 0; i < 2 * kMaxPerSide; ++i)
+        rows.push_back({ "hvvslot" + std::to_string(i), "IDS_PORT_HVV_SLOT" + std::to_string(i), true });
+    return rows;
+}
+
+constexpr const char* kSettingsRows[] = { "controller", "vibration", "subtitles", "musicvolume", "effectsvolume",
+    "dialoguevolume", "difficulty", "codes", "restoredefaults" };
+constexpr const char* kSettingsVeils[] = { "controllerveil", "vibrationveil", "subtitlesveil", "mvolumeveil",
+    "evolumeveil", "dvolumeveil", "difficultyveil", "codesveil", "restoreveil" };
+constexpr float kSettingsStep = 24.0f;
+
+// A top-level item without children (a veil): where it starts and where the next item starts.
+bool ItemBlock(const std::vector<uint8_t>& data, const std::string& name, size_t& begin, size_t& end)
+{
+    const std::vector<uint8_t> item = MenuString("screenItem");
+    std::vector<uint8_t> what = item;
+    const std::vector<uint8_t> n = MenuString(name);
+    what.insert(what.end(), n.begin(), n.end());
+    begin = MenuFind(data, what, 0, data.size());
+    if (begin == std::string::npos)
+        return false;
+    end = MenuFind(data, item, begin + 1, data.size());
+    return end != std::string::npos;
+}
+
+// A row from a template row: its name, text, neighbours and action (the template's in the order they come: its name,
+// text id, down, up, [the Codes row's screen,] action).
+bool MakeRow(std::vector<uint8_t>& row, const std::string& templateName, const std::string& textId,
+    const std::string& down, const std::string& up, const std::string& action, const ScreenRow& r, const std::string& rowDown,
+    const std::string& rowUp, bool button)
+{
+    const size_t nameAt = MenuString("screenItem").size();
+    size_t end = row.size();
+    bool ok = MenuReplaceString(row, 0, end, templateName, r.name) &&
+              MenuReplaceString(row, nameAt + 4, end, textId, r.textId) &&
+              MenuReplaceString(row, nameAt + 4, end, down, rowDown) &&
+              MenuReplaceString(row, nameAt + 4, end, up, rowUp);
+    if (ok && button) // the Codes row's screen: none of the port's rows goes to it
+        ok = MenuReplaceString(row, nameAt + 4, end, templateName, r.name);
+    return ok && MenuReplaceString(row, nameAt + 4, end, action, button ? "HvvButton" : "HvvValue");
+}
+
+bool BuildScreen(std::vector<uint8_t>& data, const char* screenName, const std::vector<ScreenRow>& rows,
+    const char* titleId)
+{
+    if (!ReadDiscResource(kSettingsFile, data))
+        return false;
+    size_t valueBegin, valueEnd, buttonBegin, buttonEnd, veilBegin, veilEnd;
+    if (!MenuRowBlock(data, "subtitles", valueBegin, valueEnd) || !MenuRowBlock(data, "codes", buttonBegin, buttonEnd) ||
+        !ItemBlock(data, "restoreveil", veilBegin, veilEnd)) {
+        LOG_WARN("HvV menu: the Settings screen is not as expected; no %s screen", screenName);
+        return false;
+    }
+    const std::vector<uint8_t> valueRow(data.begin() + valueBegin, data.begin() + valueEnd);
+    const std::vector<uint8_t> buttonRow(data.begin() + buttonBegin, data.begin() + buttonEnd);
+    const std::vector<uint8_t> veil(data.begin() + veilBegin, data.begin() + veilEnd);
+    const int count = int(rows.size()), settingsRows = int(std::size(kSettingsRows));
+    int itemDelta = 0;
+    // more rows than Settings has: copies after its last row, and a veil each after its last veil (their places set
+    // below with the others)
+    for (int i = settingsRows; i < count; ++i) {
+        size_t begin, end;
+        if (!MenuRowBlock(data, kSettingsRows[settingsRows - 1], begin, end))
+            return false;
+        data.insert(data.begin() + end, buttonRow.begin(), buttonRow.end());
+        if (!ItemBlock(data, kSettingsVeils[settingsRows - 1], begin, end))
+            return false;
+        std::vector<uint8_t> v = veil;
+        float x, y;
+        MenuItemPosition(v, &x, &y, false);
+        y += kSettingsStep * float(i - settingsRows + 1);
+        MenuItemPosition(v, &x, &y, true);
+        size_t vEnd = v.size();
+        MenuReplaceString(v, 0, vEnd, kSettingsVeils[settingsRows - 1], "hvvveil" + std::to_string(i));
+        data.insert(data.begin() + end, v.begin(), v.end());
+        itemDelta += 2;
+    }
+    // the rows, from the last back (a change moves only what follows it): the first nine replace Settings' rows in
+    // place, the extra copies are replaced from the end
+    std::vector<std::pair<size_t, size_t>> blocks;
+    {
+        size_t at = 0;
+        for (int i = 0; i < std::max(count, settingsRows); ++i) {
+            size_t begin, end;
+            const std::string name = i < settingsRows ? kSettingsRows[i] : "codes";
+            if (i < settingsRows) {
+                if (!MenuRowBlock(data, name, begin, end))
+                    return false;
+            } else { // the copies: the next "codes" row after the last
+                const std::vector<uint8_t> item = MenuString("screenItem");
+                std::vector<uint8_t> what = item;
+                const std::vector<uint8_t> n = MenuString("codes");
+                what.insert(what.end(), n.begin(), n.end());
+                begin = MenuFind(data, what, at, data.size());
+                if (begin == std::string::npos)
+                    return false;
+                const size_t child = MenuFind(data, item, begin + 1, data.size());
+                end = child == std::string::npos ? std::string::npos : MenuFind(data, item, child + 1, data.size());
+                if (end == std::string::npos)
+                    return false;
+            }
+            at = end;
+            blocks.push_back({ begin, end });
+        }
+    }
+    float x = 106.0f, firstY = 138.0f;
+    for (int i = int(blocks.size()) - 1; i >= 0; --i) {
+        const size_t begin = blocks[size_t(i)].first, end = blocks[size_t(i)].second;
+        if (i >= count) { // a Settings row the screen does not need (its veil goes after: the veils come first)
+            data.erase(data.begin() + begin, data.begin() + end);
+            itemDelta -= 1;
+            continue;
+        }
+        const ScreenRow& r = rows[size_t(i)];
+        std::vector<uint8_t> row = r.button ? buttonRow : valueRow;
+        const std::string down = rows[size_t((i + 1) % count)].name, up = rows[size_t((i + count - 1) % count)].name;
+        const bool ok = r.button ? MakeRow(row, "codes", "IDS_SHELL_CODES", "restoredefaults", "difficulty",
+                                       "SettingsScreenButton", r, down, up, true)
+                                 : MakeRow(row, "subtitles", "IDS_SHELL_SUBTITLES", "musicvolume", "vibration",
+                                       "SettingsScreenOnOffControl", r, down, up, false);
+        if (!ok) {
+            LOG_WARN("HvV menu: the Settings screen's rows are not as expected; no %s screen", screenName);
+            return false;
+        }
+        float y = firstY + kSettingsStep * float(i);
+        MenuItemPosition(row, &x, &y, true);
+        data.erase(data.begin() + begin, data.begin() + end);
+        data.insert(data.begin() + begin, row.begin(), row.end());
+    }
+    for (int i = count; i < settingsRows; ++i) {
+        size_t vb, ve;
+        if (ItemBlock(data, kSettingsVeils[i], vb, ve)) {
+            data.erase(data.begin() + vb, data.begin() + ve);
+            itemDelta -= 1;
+        }
+    }
+    // the screen's name and its first item, then its number of items (after them), then the title
+    size_t end = 64;
+    if (!MenuReplaceString(data, 0, end, "settings", screenName) ||
+        !MenuReplaceString(data, 0, end, "controller", rows[0].name)) {
+        LOG_WARN("HvV menu: the Settings screen's header is not as expected; no %s screen", screenName);
+        return false;
+    }
+    const size_t countAt = 4 + MenuString(screenName).size() + MenuString(rows[0].name).size();
+    uint32_t items;
+    std::memcpy(&items, data.data() + countAt, 4);
+    items = uint32_t(int(items) + itemDelta);
+    std::memcpy(data.data() + countAt, &items, 4);
+    end = data.size();
+    if (!MenuReplaceString(data, 0, end, "IDS_SETTINGS", titleId))
+        LOG_WARN("HvV menu: the Settings screen's title is not as expected");
+    return true;
+}
+
+bool GenerateScreens(const std::string& lowerName, std::vector<uint8_t>& data)
+{
+    bool ok = false;
+    if (lowerName == kSetupFile)
+        ok = BuildScreen(data, kSetupScreen, SetupRows(), "IDS_PORT_HVV_TITLE");
+    else if (lowerName == kLineupFile)
+        ok = BuildScreen(data, kLineupScreen, LineupRows(), "IDS_PORT_HVV_LINEUP_TITLE");
+    return ok;
+}
+
+std::string MapChoice();
+
+// A line-up row's place in g_Lineup: the team's heroes, then its villains; -1 past them.
+int SlotOfRow(int row)
+{
+    if (row < g_PerSide)
+        return row;
+    return row < 2 * g_PerSide ? kMaxPerSide + row - g_PerSide : -1;
+}
+
+std::wstring Wide(const std::string& text)
+{
+    return std::wstring(text.begin(), text.end());
+}
+
+// The rows' texts: a value row's name is its text, its value the On text the control shows; a line-up row is the
+// place and the fighter.
+void UpdateTexts()
+{
+    SetMenuText("IDS_PORT_HVV_V_TEAM", Wide(std::to_string(g_PerSide) + " VS " + std::to_string(g_PerSide)));
+    SetMenuText("IDS_PORT_HVV_V_LIVES", Wide(std::to_string(kLivesChoices[g_LivesChoice])));
+    SetMenuText("IDS_PORT_HVV_V_HEALTH", Wide(std::to_string(kHealthChoices[g_HealthChoice])));
+    const std::string map = MapChoice();
+    const CustomMap* custom = map.empty() ? nullptr : FindCustomMap(map);
+    SetMenuText("IDS_PORT_HVV_V_MAP", Wide(custom ? custom->name : "DEVELOPER MAP"));
+    for (int row = 0; row < 2 * kMaxPerSide; ++row) {
+        const int slot = SlotOfRow(row);
+        const std::string id = "IDS_PORT_HVV_SLOT" + std::to_string(row);
+        if (slot < 0) {
+            SetMenuText(id.c_str(), L"");
+            continue;
+        }
+        const int side = slot / kMaxPerSide, place = slot % kMaxPerSide;
+        SetMenuText(id.c_str(), Wide((side ? "VILLAIN " : "HERO ") + std::to_string(place + 1) + "   " +
+            HvvDisplayName(g_Lineup[slot]) + (slot == 0 ? "  (YOU)" : "")));
+    }
+}
+
+int RowOf(uint8_t* handler, const std::vector<ScreenRow>& rows)
+{
+    const uint8_t* item = *reinterpret_cast<uint8_t**>(handler + 8);
+    if (!item)
+        return -1;
+    const uint32_t key = *reinterpret_cast<const uint32_t*>(item + 4);
+    for (size_t i = 0; i < rows.size(); ++i)
+        if (key == MenuKey(rows[i].name.c_str()))
+            return int(i);
+    return -1;
+}
+
+// The value rows: the game's On/Off control (made by 0x2D9690, vtable 0x5D7000; its value a byte at +0x23C; it shows
+// the profile's subtitles setting, profile +0x2A, for a row made from Subtitles) with a vtable of the port's own: its
+// draw (slot 3) shows the row's value as its On text, its events (slot 4) change the value (left/right, A), B goes
+// back as any item does (0x2C62D0); slot 10 makes another, slots 27/28 (defaults, apply) do nothing.
+constexpr uint32_t kMakeOnOff = 0x002D9690;
+constexpr uint32_t kOnOffVtable = 0x005D7000;
+constexpr uint32_t kMakeButton = 0x002D93F0; // SettingsScreenButton
+constexpr uint32_t kButtonVtable = 0x005D6E10;
+constexpr int kVtableSlots = 32;
+constexpr uint32_t kItemEvent = 0x002C62D0;
+constexpr uint32_t kProfiles = 0x007E8F24;
+constexpr uint32_t kCurrentProfile = 0x0024CC50;
+using DrawFn = char(__fastcall*)(uint8_t*, void*, uint32_t);
+using ItemEventFn = char(__fastcall*)(uint8_t*, void*, int, int);
+uint32_t g_ValueVtable[kVtableSlots], g_ButtonVtable[kVtableSlots];
+DrawFn g_OnOffDraw = nullptr;
+ItemEventFn g_OnOffEvent = nullptr, g_ButtonEvent = nullptr;
+
+uint8_t* CurrentProfile()
+{
+    uint8_t* profiles = *reinterpret_cast<uint8_t**>(uintptr_t(kProfiles));
+    return profiles ? reinterpret_cast<uint8_t*(__fastcall*)(uint8_t*, void*)>(uintptr_t(kCurrentProfile))(profiles, nullptr)
+                    : nullptr;
+}
+
+char __fastcall ValueDraw(uint8_t* handler, void*, uint32_t value)
+{
+    static const char* const kValueTexts[] = { "IDS_PORT_HVV_V_TEAM", "IDS_PORT_HVV_V_LIVES", "IDS_PORT_HVV_V_HEALTH",
+        nullptr, "IDS_PORT_HVV_V_MAP" };
+    const int row = RowOf(handler, SetupRows());
+    if (row < 0 || row > 4)
+        return g_OnOffDraw(handler, nullptr, value);
+    const bool on = row == 3 ? g_Intro : true;
+    handler[0x23C] = on ? 1 : 0;
+    uint8_t* profile = CurrentProfile();
+    const uint8_t saved = profile ? profile[0x2A] : 0;
+    if (profile)
+        profile[0x2A] = on ? 1 : 0;
+    if (kValueTexts[row])
+        SetOnOffTexts(kValueTexts[row], kValueTexts[row]);
+    const char result = g_OnOffDraw(handler, nullptr, value);
+    SetOnOffTexts(nullptr, nullptr);
+    if (profile)
+        profile[0x2A] = saved;
+    return result;
+}
+
+void Step(int row, int by)
+{
+    const auto wrap = [](int v, int n) { return ((v % n) + n) % n; };
+    switch (row) {
+    case 0: g_PerSide = wrap(g_PerSide - 1 + by, kMaxPerSide) + 1; break;
+    case 1: g_LivesChoice = wrap(g_LivesChoice + by, int(std::size(kLivesChoices))); break;
+    case 2: g_HealthChoice = wrap(g_HealthChoice + by, int(std::size(kHealthChoices))); break;
+    case 3: g_Intro = !g_Intro; break;
+    case 4: g_MapChoice = wrap(g_MapChoice + by, int(CustomMaps().size()) + 1); break;
+    default: return;
+    }
+    UpdateTexts();
+}
+
+char __fastcall ValueEvent(uint8_t* handler, void*, int event, int value)
+{
+    const int row = RowOf(handler, SetupRows());
+    if (event == kB)
+        return reinterpret_cast<ItemEventFn>(uintptr_t(kItemEvent))(handler, nullptr, event, value);
+    if (row >= 0 && (event == kLeft || event == kRight || event == kChosen)) {
+        g_OnOffEvent(handler, nullptr, event, value); // its sound (its value is the port's, set as it draws)
+        Step(row, event == kLeft ? -1 : 1);
+        return 1;
+    }
+    return g_OnOffEvent(handler, nullptr, event, value);
+}
+
+void StartMatch()
+{
+    std::vector<std::string> lineup;
+    for (int side = 0; side < 2; ++side)
+        for (int i = 0; i < g_PerSide; ++i)
+            lineup.push_back(g_Lineup[side * kMaxPerSide + i]);
+    std::string error;
+    if (!StartHvv(lineup, g_PerSide, 0, kLivesChoices[g_LivesChoice], kHealthChoices[g_HealthChoice], g_Intro,
+            MapChoice(), error))
+        LOG_WARN("HvV menu: the match cannot start: %s", error.c_str());
+    else
+        LOG_INFO("HvV menu: the match starts");
+}
+
+char __fastcall ButtonEvent(uint8_t* handler, void*, int event, int value)
+{
+    const int setupRow = RowOf(handler, SetupRows());
+    const int row = setupRow < 0 ? RowOf(handler, LineupRows()) : -1;
+    const int slot = row >= 0 ? SlotOfRow(row) : -1;
+    if (event == kB) {
+        if (row >= 0) { // the line-up: back to the setup
+            GoToShellScreen(kSetupScreen);
+            return 1;
+        }
+        return reinterpret_cast<ItemEventFn>(uintptr_t(kItemEvent))(handler, nullptr, event, value);
+    }
+    if (event != kChosen)
+        return g_ButtonEvent(handler, nullptr, event, value);
+    if (setupRow == 5) {
+        GoToShellScreen(kLineupScreen);
+        return 1;
+    }
+    if (setupRow == 6) {
+        StartMatch();
+        return 1;
+    }
+    if (slot >= 0) {
+        g_PickSlot = slot;
+        GoToShellScreen("select_jedi");
+        return 1;
+    }
+    return 1;
+}
+
+// The line-up rows' draw: a row past the team isn't drawn; the others lead to each other for the team size.
+DrawFn g_ButtonDraw = nullptr;
+
+char __fastcall ButtonDraw(uint8_t* handler, void*, uint32_t value)
+{
+    const int row = RowOf(handler, LineupRows());
+    if (row < 0)
+        return g_ButtonDraw(handler, nullptr, value);
+    if (SlotOfRow(row) < 0)
+        return 0;
+    uint32_t* item = *reinterpret_cast<uint32_t**>(handler + 8);
+    const int rows = 2 * g_PerSide;
+    const std::string up = "hvvslot" + std::to_string((row + rows - 1) % rows);
+    const std::string down = "hvvslot" + std::to_string((row + 1) % rows);
+    item[0x18 / 4] = MenuKey(up.c_str());
+    item[0x1C / 4] = MenuKey(down.c_str());
+    return g_ButtonDraw(handler, nullptr, value);
+}
+
+uint8_t* MakeValue()
+{
+    uint8_t* handler = reinterpret_cast<uint8_t*(__cdecl*)()>(uintptr_t(kMakeOnOff))();
+    if (handler)
+        *reinterpret_cast<uint32_t**>(handler) = g_ValueVtable;
+    return handler;
+}
+uint8_t* __fastcall MakeValueSlot(uint8_t*, void*) { return MakeValue(); }
+uint8_t* MakeButton()
+{
+    uint8_t* handler = reinterpret_cast<uint8_t*(__cdecl*)()>(uintptr_t(kMakeButton))();
+    if (handler)
+        *reinterpret_cast<uint32_t**>(handler) = g_ButtonVtable;
+    return handler;
+}
+uint8_t* __fastcall MakeButtonSlot(uint8_t*, void*) { return MakeButton(); }
+void __fastcall Nothing(uint8_t*, void*) {}
+
+void InstallScreens()
+{
+    std::memcpy(g_ValueVtable, reinterpret_cast<const void*>(uintptr_t(kOnOffVtable)), sizeof g_ValueVtable);
+    g_OnOffDraw = reinterpret_cast<DrawFn>(uintptr_t(g_ValueVtable[3]));
+    g_OnOffEvent = reinterpret_cast<ItemEventFn>(uintptr_t(g_ValueVtable[4]));
+    g_ValueVtable[3] = uint32_t(reinterpret_cast<uintptr_t>(&ValueDraw));
+    g_ValueVtable[4] = uint32_t(reinterpret_cast<uintptr_t>(&ValueEvent));
+    g_ValueVtable[10] = uint32_t(reinterpret_cast<uintptr_t>(&MakeValueSlot));
+    g_ValueVtable[27] = uint32_t(reinterpret_cast<uintptr_t>(&Nothing));
+    g_ValueVtable[28] = uint32_t(reinterpret_cast<uintptr_t>(&Nothing));
+    std::memcpy(g_ButtonVtable, reinterpret_cast<const void*>(uintptr_t(kButtonVtable)), sizeof g_ButtonVtable);
+    g_ButtonEvent = reinterpret_cast<ItemEventFn>(uintptr_t(g_ButtonVtable[4]));
+    g_ButtonVtable[4] = uint32_t(reinterpret_cast<uintptr_t>(&ButtonEvent));
+    g_ButtonDraw = reinterpret_cast<DrawFn>(uintptr_t(g_ButtonVtable[3]));
+    g_ButtonVtable[3] = uint32_t(reinterpret_cast<uintptr_t>(&ButtonDraw));
+    g_ButtonVtable[10] = uint32_t(reinterpret_cast<uintptr_t>(&MakeButtonSlot));
+    SetMenuText("IDS_PORT_HVV_TITLE", L"Heroes vs Villains");
+    SetMenuText("IDS_PORT_HVV_LINEUP_TITLE", L"Line-up");
+    SetMenuText("IDS_PORT_HVV_TEAM", L"Team Size");
+    SetMenuText("IDS_PORT_HVV_LIVES", L"Lives");
+    SetMenuText("IDS_PORT_HVV_HEALTH", L"Health");
+    SetMenuText("IDS_PORT_HVV_INTRO", L"Intro");
+    SetMenuText("IDS_PORT_HVV_MAP", L"Map");
+    SetMenuText("IDS_PORT_HVV_LINEUP", L"Line-up");
+    SetMenuText("IDS_PORT_HVV_START", L"Start");
+    // the line-up's defaults, once (kept across the game's restarts, as the rules)
+    if (g_Lineup[0].empty()) {
+        static const char* const kDefaults[2 * kMaxPerSide] = { "IObiwan", "IYoda", "IMace", "ISerra", "ICinDrallig",
+            "IVader", "IDooku", "IGrievous", "IPalpatine", "IAnakin" };
+        for (int i = 0; i < 2 * kMaxPerSide; ++i)
+            g_Lineup[i] = kDefaults[i];
+    }
+    UpdateTexts();
+    AddShellHandler("HvvValue", &MakeValue);
+    AddShellHandler("HvvButton", &MakeButton);
+    AddShellScreen(kSetupFile);
+    AddShellScreen(kLineupFile);
+    RegisterResourceGenerator(&GenerateScreens);
+}
+
 using Player1EventFn = bool(__fastcall*)(uint8_t*, void*, int);
 using FrameFn = void(__fastcall*)(uint8_t*, void*, uint32_t);
 
@@ -236,56 +677,31 @@ bool __fastcall Player1EventHook(uint8_t* screen, void*, int event)
         }
         return reinterpret_cast<Player1EventFn>(uintptr_t(kPlayer1Event))(screen, nullptr, event);
     }
+    if (g_PickSlot < 0)
+        return reinterpret_cast<Player1EventFn>(uintptr_t(kPlayer1Event))(screen, nullptr, event);
     if (event == kChosen) {
         const int slot = *reinterpret_cast<const int*>(screen + 0x2C);
         if (const char* className = SelectSlotClass(slot)) {
-            g_Picks.push_back(className);
-        } else { // Random: any fighter the match panel offers
+            g_Lineup[g_PickSlot] = className;
+        } else { // Random: any fighter
             const std::vector<std::string> classes = HvvFighterClasses();
             if (!classes.empty())
-                g_Picks.push_back(classes[size_t(std::rand()) % classes.size()]);
+                g_Lineup[g_PickSlot] = classes[size_t(std::rand()) % classes.size()];
         }
         Sound(screen, 0x13);
-        if (g_Picks.size() >= size_t(2 * g_PerSide)) {
-            std::string error;
-            if (!StartHvv(g_Picks, g_PerSide, 0, kLivesChoices[g_LivesChoice], kHealthChoices[g_HealthChoice], g_Intro,
-                    MapChoice(), error)) {
-                LOG_WARN("HvV menu: the match cannot start: %s", error.c_str());
-                g_Picks.pop_back();
-            } else {
-                LOG_INFO("HvV menu: the match starts");
-            }
-        }
+        UpdateTexts();
+        g_PickSlot = -1;
+        GoToShellScreen(kLineupScreen);
         return true;
     }
-    if (event == kB && !g_Picks.empty()) {
-        g_Picks.pop_back();
-        Sound(screen, 0x13);
+    if (event == kB) {
+        g_PickSlot = -1;
+        GoToShellScreen(kLineupScreen);
         return true;
     }
-    if (event == kUp || event == kDown) {
-        const int n = int(std::size(kLivesChoices));
-        g_LivesChoice = (g_LivesChoice + (event == kUp ? 1 : n - 1)) % n;
-        return true;
-    }
-    if (event == kX) {
-        g_HealthChoice = (g_HealthChoice + 1) % int(std::size(kHealthChoices));
-        return true;
-    }
-    if (event == kY) {
-        g_Intro = !g_Intro;
-        return true;
-    }
-    if ((event == kLeftTrigger || event == kRightTrigger) && g_Picks.empty()) { // the team size, before any pick
-        g_PerSide = (g_PerSide + (event == kRightTrigger ? 0 : kMaxPerSide - 2)) % kMaxPerSide + 1;
-        return true;
-    }
-    if (event == kWhite || event == kBlack) { // the map: the floor, then the custom maps
-        const int n = int(CustomMaps().size()) + 1;
-        g_MapChoice = (g_MapChoice + (event == kBlack ? 1 : n - 1)) % n;
-        return true;
-    }
-    return reinterpret_cast<Player1EventFn>(uintptr_t(kPlayer1Event))(screen, nullptr, event);
+    if (event == kLeft || event == kRight)
+        return reinterpret_cast<Player1EventFn>(uintptr_t(kPlayer1Event))(screen, nullptr, event);
+    return true; // nothing else while picking for the line-up
 }
 
 void __fastcall SelectFrameHook(uint8_t* screen, void*, uint32_t arg)
@@ -347,6 +763,7 @@ uint8_t* Trampoline(uint32_t address, const uint8_t* bytes, uint32_t length)
 
 void InstallHvvMenu()
 {
+    InstallScreens();
     // once (the port's memory outlives the game's reboots); the jumps into every new image
     static uint8_t* transition = Trampoline(kTransition, kTransitionBytes, sizeof kTransitionBytes);
     static uint8_t* childSwitch = Trampoline(kChildSwitch, kChildSwitchBytes, sizeof kChildSwitchBytes);
@@ -358,7 +775,7 @@ void InstallHvvMenu()
         PatchJump(kChildSwitch, reinterpret_cast<const void*>(&ChildSwitchHook));
     }
     g_HvvMode = false;
-    g_Picks.clear();
+    g_PickSlot = -1;
     g_SelectSeen = 0;
     g_SelectScreen = nullptr;
     SetMenuText(kRowText, L"Heroes vs Villains");
@@ -392,18 +809,6 @@ HvvPickState GetHvvPickState()
         s.arena = map ? map->name : "";
         return s;
     }
-    s.active = g_HvvMode && shown;
-    if (!s.active)
-        return s;
-    s.picks = g_Picks;
-    if (const char* c = SelectSlotClass(*reinterpret_cast<const int*>(g_SelectScreen + 0x2C)))
-        s.highlighted = c;
-    const std::string map = MapChoice();
-    s.map = map.empty() ? "DEVELOPER MAP" : FindCustomMap(map)->name;
-    s.perSide = g_PerSide;
-    s.lives = kLivesChoices[g_LivesChoice];
-    s.health = kHealthChoices[g_HealthChoice];
-    s.intro = g_Intro;
     return s;
 }
 

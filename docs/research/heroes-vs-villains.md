@@ -7,14 +7,13 @@ Addresses are for the supported retail XBE.
 
 ## Playing it
 
-**From the main menu**: Multi Player > **Heroes vs Villains** opens the Versus character select in Heroes vs Villains
-mode, with a panel over the right half: the line-up so far, the rules and the map. **A** adds the fighter under the
-cursor to the line-up (the first is you; then your fellow heroes, then the villains; Random picks any; fighters the
-profile has not unlocked for Versus can be picked too), **B** takes the last back (with none, back to the main menu),
-**LT/RT** the team size before the first pick (1v1 to 6v6), **Up/Down** set each side's lives (5 to 99), **X** the
-health (150 to 1000), **Y** the intro, **LB/RB** (the Xbox pad's White/Black) the map: the developer map's floor or a
-[custom map](../modding/custom-maps.md). The last pick (both sides full) starts the match. When it ends (the top five,
-12 s), the game goes back to the main menu, with your profile.
+**From the main menu**: Multi Player > **Heroes vs Villains** opens its screen (as the game's Settings screen): **Team
+Size** (1v1 to 5v5), **Lives** (each side's, 5 to 99), **Health** (150 to 1000), **Intro**, **Map** (the developer
+map's floor or a [custom map](../modding/custom-maps.md); left/right or A change a value), **Line-up** and **Start**.
+Line-up lists the team's places, heroes then villains (Hero 1 is you); choosing one opens the Versus character select,
+where A takes the fighter under the cursor for that place (Random picks any; fighters the profile has not unlocked for
+Versus can be picked too) and B leaves it as it was. The choices are kept until the game is closed. When a match ends
+(the top five, 12 s), the game goes back to the main menu, with your profile.
 
 **From the debug menu or the console:**
 
@@ -178,6 +177,17 @@ clearest of fighters and nearest the fight), else near the fight within its `Bou
   own font until found. The markers are placed through the game camera's placement and field of view, which is
   **horizontal** (taken as vertical, points off the middle land 16:9 times too near it).
 - **Facing**: a character's transform is rows right, up, forward and position; at yaw 0 (identity) it faces +z.
+- **The menus** (`hvvmenu.cpp`, `menus.cpp`): the front end (the shell) lists its screens in `gameinfo\shelllist.txt`
+  and registers its menu actions at its setup (VaderShell 0x2FA610, a list at +0x268 as the in-game HUD's); the port
+  adds two screens there, generated from the front-end Settings screen (`settings.xbl_xml`: nine rows 24 apart from
+  y 138, each with a veil behind it): `hvv_setup` (value rows made from the Subtitles row, an On/Off control whose On
+  text, the ids pushed at 0x2D8EAB / 0x2D8EFF, the port points at its own text while the row draws; button rows made
+  from the Codes row, SettingsScreenButton 0x2D93F0) and `hvv_lineup` (ten button rows). A row's item holds its
+  neighbours as the keys of their names (+0x18 up, +0x1C down), which the line-up's rows set as they draw for the
+  team size; the rows past the team are not drawn. Screens are changed through the shell's transition object
+  (0x2D1B80 on [[0x7F637C] +0xDD0], the name a TString from 0x222FA0). The main menu's Heroes vs Villains row goes to
+  `hvv_setup`; the character select, entered from a line-up row, takes A and B for that place (0x2D54B6) and goes
+  back to the line-up.
 
 ## What was tried before
 
