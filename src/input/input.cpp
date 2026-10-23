@@ -348,7 +348,8 @@ static void ReadTestInput(XGamepad& g)
 }
 
 // For unattended menu tests: SWROTS_TEST_BUTTONS="<seconds>:<button>;..." presses player 1's buttons at those
-// times (seconds after the first input read; each held 0.15 s): A, B, X, Y, Start, Back, Up, Down, Left, Right.
+// times (seconds after the first input read; each held 0.15 s): A, B, X, Y, Start, Back, Up, Down, Left, Right,
+// Black, White, LT, RT.
 // The variable clears itself, as SWROTS_TEST_INPUT does.
 struct TestPress {
     double at;
@@ -369,7 +370,7 @@ static void ReadTestButtons(XGamepad& g)
             static const struct { const char* name; int analog; WORD digital; } kButtons[] = {
                 { "A", 0, 0 }, { "B", 1, 0 }, { "X", 2, 0 }, { "Y", 3, 0 }, { "Start", -1, 0x10 },
                 { "Back", -1, 0x20 }, { "Up", -1, 0x1 }, { "Down", -1, 0x2 }, { "Left", -1, 0x4 },
-                { "Right", -1, 0x8 } };
+                { "Right", -1, 0x8 }, { "Black", 4, 0 }, { "White", 5, 0 }, { "LT", 6, 0 }, { "RT", 7, 0 } };
             char* context = nullptr;
             for (char* item = strtok_s(value, ";", &context); item; item = strtok_s(nullptr, ";", &context)) {
                 const char* colon = std::strchr(item, ':');

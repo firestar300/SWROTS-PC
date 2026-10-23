@@ -24,13 +24,24 @@ struct DevMapCharacter {
     uint32_t id;           // the object's id, unique in the level (see kDevMapFirstId)
     float x, z, yaw;
 };
+// A box of collision (a box brush): its centre (y from the floor), half extents and turn about the up axis.
+struct DevMapBox {
+    float cx, cy, cz, hx, hy, hz, yaw;
+};
 struct DevMapLayout {
     std::vector<DevMapCharacter> characters;
     bool start = false; // the player's start, else the middle of the floor
     float startX = 0, startZ = 0, startYaw = 0;
+    // A map of a mod's own (custommaps.h): its model under meshes\ (folder and name) in the place of the floor's,
+    // where it stands on the floor, its vertex count (its baked light), and its collision boxes.
+    std::string modelFolder, modelName;
+    uint32_t modelVertices = 0;
+    float modelX = 0, modelY = 0, modelZ = 0, modelYaw = 0; // modelY: from the floor
+    std::vector<DevMapBox> boxes;
 };
 // The ids the dev map's own objects take (the level's run far below).
 constexpr uint32_t kDevMapFirstId = 0x00300001;
+constexpr uint32_t kDevMapFirstBoxId = 0x00380001; // the collision boxes' brush handles
 // The floor's middle and its height (the characters stand there).
 constexpr float kDevMapMiddleX = 12750.0f, kDevMapMiddleZ = 8100.0f, kDevMapFloorY = -2557.5f;
 

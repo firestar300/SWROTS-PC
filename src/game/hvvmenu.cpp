@@ -17,6 +17,7 @@
 
 #include "core/log.h"
 #include "core/patch.h"
+#include "game/custommaps.h"
 #include "game/hvv.h"
 #include "game/menus.h"
 #include "game/resources.h"
@@ -147,8 +148,8 @@ bool __fastcall SwitchButtonEvent(uint8_t* self, void*, int event, int value)
 // 0x2D54B6): left/right (0x1F/0x20) move the cursor (+0x2C, a slot), A (0x23) picks (+0x28 set; then player 1 picks
 // the opponent), B (0x26) takes the pick back. In Heroes vs Villains mode the cursor stays player 1's: A adds the
 // fighter under it to the line-up (the first is the player's, heroes first, then villains), B takes the last back
-// (with none, the screen's own B: back to the main menu), up/down set the lives, X the health, Y the intro. The
-// eighth pick starts the match.
+// (with none, the screen's own B: back to the main menu), up/down set the lives, X the health, Y the intro,
+// White/Black (LB/RB: 0x2A/0x29) the map. The eighth pick starts the match.
 constexpr uint32_t kPlayer1EventCall = 0x002D54B6;
 constexpr uint32_t kPlayer1Event = 0x002D51B0;
 constexpr uint32_t kSelectVtable = 0x005D68B8;
@@ -157,6 +158,7 @@ constexpr uint32_t kSelectFrame = 0x002D56F0;
 constexpr uint32_t kSelectSound = 0x2C; // vfunc, thiscall (sound id): 0x13 the pick's
 constexpr int kLeft = 0x1F, kRight = 0x20, kUp = 0x21, kDown = 0x22, kB = 0x26;
 constexpr int kX = 0x2B, kY = 0x2C;
+constexpr int kWhite = 0x2A, kBlack = 0x29; // LB and RB on a PC pad (LT 0x28, RT 0x27)
 constexpr size_t kLineup = 8;
 constexpr int kLivesChoices[] = { 5, 10, 20, 35, 50, 75, 99 };
 constexpr int kHealthChoices[] = { 150, 250, 400, 600, 1000 };
@@ -165,6 +167,14 @@ ULONGLONG g_SelectSeen = 0;
 uint8_t* g_SelectScreen = nullptr;
 int g_LivesChoice = 3, g_HealthChoice = 1;
 bool g_Intro = true;
+int g_MapChoice = 0; // 0 the dev map's floor, then the custom maps
+
+// The chosen map's id (empty: the dev map's floor).
+std::string MapChoice()
+{
+    const auto& maps = CustomMaps();
+    return g_MapChoice > 0 && g_MapChoice <= int(maps.size()) ? maps[size_t(g_MapChoice - 1)].id : std::string();
+}
 
 using Player1EventFn = bool(__fastcall*)(uint8_t*, void*, int);
 using FrameFn = void(__fastcall*)(uint8_t*, void*, uint32_t);
@@ -192,7 +202,7 @@ bool __fastcall Player1EventHook(uint8_t* screen, void*, int event)
         Sound(screen, 0x13);
         if (g_Picks.size() >= kLineup) {
             std::string error;
-            if (!StartHvv(g_Picks, 0, kLivesChoices[g_LivesChoice], kHealthChoices[g_HealthChoice], g_Intro, error)) {
+            if (!StartHvv(g_Picks, 0, kLivesChoices[g_LivesChoice], kHealthChoices[g_HealthChoice], g_Intro, MapChoice(), error)) {
                 LOG_WARN("HvV menu: the match cannot start: %s", error.c_str());
                 g_Picks.pop_back();
             } else {
@@ -217,6 +227,11 @@ bool __fastcall Player1EventHook(uint8_t* screen, void*, int event)
     }
     if (event == kY) {
         g_Intro = !g_Intro;
+        return true;
+    }
+    if (event == kWhite || event == kBlack) { // the map: the floor, then the custom maps
+        const int n = int(CustomMaps().size()) + 1;
+        g_MapChoice = (g_MapChoice + (event == kBlack ? 1 : n - 1)) % n;
         return true;
     }
     return reinterpret_cast<Player1EventFn>(uintptr_t(kPlayer1Event))(screen, nullptr, event);
@@ -266,7 +281,8 @@ HvvPickState GetHvvPickState()
     s.picks = g_Picks;
     if (const char* c = SelectSlotClass(*reinterpret_cast<const int*>(g_SelectScreen + 0x2C)))
         s.highlighted = c;
-    s.map = "DEVELOPER MAP";
+    const std::string map = MapChoice();
+    s.map = map.empty() ? "DEVELOPER MAP" : FindCustomMap(map)->name;
     s.lives = kLivesChoices[g_LivesChoice];
     s.health = kHealthChoices[g_HealthChoice];
     s.intro = g_Intro;

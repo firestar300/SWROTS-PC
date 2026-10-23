@@ -20,6 +20,7 @@
 #include "core/settings.h"
 #include "game/characters.h"
 #include "game/coop.h"
+#include "game/custommaps.h"
 #include "game/devmap.h"
 #include "game/hvv.h"
 #include "game/versus.h"
@@ -30,6 +31,15 @@ namespace swrots::debug {
 namespace {
 
 constexpr size_t kMaxLines = 4000;
+
+// The custom maps' ids, for the console's help ("none" without any).
+std::string CustomMapList()
+{
+    std::string text;
+    for (const game::CustomMap& m : game::CustomMaps())
+        text += (text.empty() ? "" : ", ") + m.id;
+    return text.empty() ? "none" : text;
+}
 
 std::mutex g_Lock;
 std::deque<ConsoleLine> g_Lines;
@@ -255,7 +265,10 @@ void Help(uint8_t* console)
     Print(LineKind::Output, "  memory                   the game's memory use, and the characters spawned");
     Print(LineKind::Output, "  despawn                  remove the characters you spawned");
     Print(LineKind::Output, "  restart                  restart the mission");
-    Print(LineKind::Output, "  devmap                   the developer map: an empty, lit, flat floor to test anything");
+    Print(LineKind::Output, "  devmap [<map>]           the developer map: an empty, lit, flat floor to test anything,");
+    Print(LineKind::Output, "                           or a custom map on it (mods/maps; now: %s)", CustomMapList().c_str());
+    Print(LineKind::Output, "  hvv [<8 classes>] [player <0-7>] [lives <n>] [health <n>] [intro on|off] [map <map>]");
+    Print(LineKind::Output, "                           Heroes vs Villains (heroes, then villains); hvv board on|off");
     Print(LineKind::Output, "  autorestart [on|off]     whether player changes apply at once (live, or by restarting)");
     Print(LineKind::Output, "  variants <class>         a character class's costumes");
     Print(LineKind::Output, "  meshes [text]            the character meshes on the disc (those containing text)");
@@ -1040,13 +1053,14 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
     } else if (command == "coop") {
         Coop(words);
     } else if (command == "hvv") {
-        // hvv [<8 classes: heroes, then villains>] [player <0-7>] [lives <n>] [health <n>] [intro on|off]
+        // hvv [<8 classes: heroes, then villains>] [player <0-7>] [lives <n>] [health <n>] [intro on|off] [map <id>]
         // hvv board on|off: the leaderboard pinned (as Tab held shows it)
         if (words.size() > 1 && words[1] == "board") {
             game::SetHvvBoardPinned(words.size() < 3 || words[2] != "off");
             return true;
         }
         std::vector<std::string> lineup;
+        std::string map;
         int player = 0, lives = 0, health = 0;
         bool intro = true;
         for (size_t i = 1; i < words.size(); ++i) {
@@ -1058,19 +1072,26 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
                 health = std::atoi(words[++i].c_str());
             else if (words[i] == "intro" && i + 1 < words.size())
                 intro = words[++i] != "off";
+            else if (words[i] == "map" && i + 1 < words.size())
+                map = words[++i];
             else
                 lineup.push_back(words[i]);
         }
         if (lineup.empty())
             lineup = game::HvvDefaultLineup();
         std::string error;
-        if (game::StartHvv(lineup, player, lives, health, intro, error))
+        if (game::StartHvv(lineup, player, lives, health, intro, map, error))
             Print(LineKind::Output, "  starting Heroes vs Villains...");
         else
             Print(LineKind::Error, "%s", error.c_str());
     } else if (command == "devmap") {
+        // devmap [<map>]: the floor, or a custom map (mods/maps/<map>/map.ini)
+        if (words.size() > 1 && !game::FindCustomMap(words[1])) {
+            Print(LineKind::Error, "no map %s (maps: %s)", words[1].c_str(), CustomMapList().c_str());
+            return true;
+        }
         Print(LineKind::Output, "  starting the developer map...");
-        game::StartDevMap();
+        game::StartDevMap(words.size() > 1 ? "custommap:" + words[1] : "");
     } else if (command == "screenshot") {
         d3d::RequestScreenshot(words.size() > 1 ? words[1] : "");
         Print(LineKind::Output, "  saved at the next frame, without this menu, to the screenshots folder");

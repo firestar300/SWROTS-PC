@@ -17,6 +17,7 @@
 #include "game/characters.h"
 #include "game/coop.h"
 #include "game/customchars.h"
+#include "game/custommaps.h"
 #include "game/devmap.h"
 #include "game/freecam.h"
 #include "game/game.h"
@@ -28,7 +29,7 @@ namespace {
 
 constexpr int kSide = 4;            // fighters a side
 constexpr int kFighters = 2 * kSide;
-constexpr float kLineGap = 150.0f;  // between fighters in a line
+constexpr float kLineGap = 150.0f;  // between fighters in a line (the dev map's floor; a map has its own)
 constexpr float kLinesApart = 700.0f;
 constexpr float kPi = 3.14159265f;
 constexpr ULONGLONG kWakeAfter = 500;     // ms after the player is in the level: the placed fighters join
@@ -119,6 +120,12 @@ int g_ShotPlayed = -1;      // the last intro shot whose line played its intros
 float g_LastShot[16] = {};  // the intro camera's last placement, for the way back to the game's
 bool g_BoardPinned = false;
 std::vector<int> g_Top;     // the end's top five
+// the arena: the floor's, or a custom map's (its lines' gap and distance, where fighters can come back)
+float g_LineGap = kLineGap, g_LinesApart = kLinesApart;
+float g_Bounds[4] = { kFloorX0, kFloorZ0, kFloorX1, kFloorZ1 };
+float g_Margin = kFloorMargin;
+std::vector<std::pair<float, float>> g_Spawns; // a map's own places to come back (the dev map's coordinates)
+std::string g_MapName;
 
 struct FeedEntry {
     int killer, victim;
@@ -196,8 +203,8 @@ int SideOf(int slot) { return slot / kSide; }
 void LinePlace(int slot, float& x, float& z, float& yaw)
 {
     const int k = slot % kSide;
-    x = kDevMapMiddleX + (k - (kSide - 1) / 2.0f) * kLineGap;
-    z = kDevMapMiddleZ + (SideOf(slot) == 0 ? -kLinesApart / 2 : kLinesApart / 2);
+    x = kDevMapMiddleX + (k - (kSide - 1) / 2.0f) * g_LineGap;
+    z = kDevMapMiddleZ + (SideOf(slot) == 0 ? -g_LinesApart / 2 : g_LinesApart / 2);
     yaw = SideOf(slot) == 0 ? 0.0f : kPi; // a character faces +z at yaw 0
 }
 
@@ -327,11 +334,18 @@ void SafePlace(int except, float (&m)[16])
         cz = kDevMapMiddleZ;
     }
     float bestX = cx, bestZ = cz, bestScore = -1e9f;
-    for (int t = 0; t < kRespawnTries; ++t) {
-        const float angle = float(std::rand()) / RAND_MAX * 2 * kPi;
-        const float reach = kRespawnClear + float(std::rand()) / RAND_MAX * (kRespawnReach - kRespawnClear);
-        const float x = std::clamp(cx + std::sin(angle) * reach, kFloorX0 + kFloorMargin, kFloorX1 - kFloorMargin);
-        const float z = std::clamp(cz + std::cos(angle) * reach, kFloorZ0 + kFloorMargin, kFloorZ1 - kFloorMargin);
+    const int tries = g_Spawns.empty() ? kRespawnTries : int(g_Spawns.size());
+    for (int t = 0; t < tries; ++t) {
+        float x, z;
+        if (!g_Spawns.empty()) { // a map's own places
+            x = g_Spawns[t].first;
+            z = g_Spawns[t].second;
+        } else {
+            const float angle = float(std::rand()) / RAND_MAX * 2 * kPi;
+            const float reach = kRespawnClear + float(std::rand()) / RAND_MAX * (kRespawnReach - kRespawnClear);
+            x = std::clamp(cx + std::sin(angle) * reach, g_Bounds[0] + g_Margin, g_Bounds[2] - g_Margin);
+            z = std::clamp(cz + std::cos(angle) * reach, g_Bounds[1] + g_Margin, g_Bounds[3] - g_Margin);
+        }
         float clear = 1e9f;
         for (const auto& o : others)
             clear = std::min(clear, std::hypot(x - o.first, z - o.second));
@@ -579,7 +593,7 @@ bool IntroShot(ULONGLONG t, float m[16])
     const int shot = int(t / kLineShot), side = shot / 2;
     const float a = Smooth(float(t % kLineShot) / kLineShot);
     const float floorY = kDevMapFloorY;
-    const float lineZ = kDevMapMiddleZ + (side == 0 ? -kLinesApart / 2 : kLinesApart / 2);
+    const float lineZ = kDevMapMiddleZ + (side == 0 ? -g_LinesApart / 2 : g_LinesApart / 2);
     const float facing = side == 0 ? 1.0f : -1.0f; // the line faces +z (heroes) or -z
     const float x = kDevMapMiddleX;
     if (shot % 2 == 0) { // from the front, a little low, drifting across and in
@@ -587,7 +601,7 @@ bool IntroShot(ULONGLONG t, float m[16])
         const float target[3] = { x, floorY + 55, lineZ };
         LookAt(eye, target, m);
     } else { // close, from one end of the line, along it at chest height
-        const float end = (side == 0 ? 1.0f : -1.0f) * (1.5f * kLineGap + 110);
+        const float end = (side == 0 ? 1.0f : -1.0f) * (1.5f * g_LineGap + 110);
         const float eye[3] = { x + end - (side == 0 ? 35 : -35) * a, floorY + 72, lineZ + facing * (85 + 15 * a) };
         const float target[3] = { x - end * 0.5f, floorY + 58, lineZ - facing * 10 };
         LookAt(eye, target, m);
@@ -728,6 +742,25 @@ void InstallHvv()
     g_Lives[0] = g_Lives[1] = g_StartLives;
     g_Health = BootArgument("hvvhealth", value) ? std::max(1, std::atoi(value.c_str())) : kDefaultHealth;
     g_IntroWanted = !BootArgument("hvvintro", value) || value != "0";
+    g_LineGap = kLineGap;
+    g_LinesApart = kLinesApart;
+    const float floorBounds[4] = { kFloorX0, kFloorZ0, kFloorX1, kFloorZ1 };
+    std::copy(std::begin(floorBounds), std::end(floorBounds), g_Bounds);
+    g_Margin = kFloorMargin;
+    g_Spawns.clear();
+    g_MapName.clear();
+    if (const CustomMap* map = DevMapCustomMap()) { // its lines (turned to face along z), its spawns and bounds
+        g_LineGap = map->lineGap;
+        g_LinesApart = std::hypot(map->villains[0] - map->heroes[0], map->villains[1] - map->heroes[1]);
+        CustomMapBounds(*map, g_Bounds);
+        g_Margin = map->hasBounds ? 0.0f : kFloorMargin;
+        for (const auto& s : map->spawns) {
+            float x, z;
+            CustomMapToWorld(*map, s.first, s.second, x, z);
+            g_Spawns.push_back({ x, z });
+        }
+        g_MapName = map->name;
+    }
 
     DevMapLayout layout;
     for (int i = 0; i < kFighters; ++i) {
@@ -754,9 +787,10 @@ void InstallHvv()
     SetCameraAdjuster(&HvvCamera); // in place of co-op's for this start
     g_Active = true;
     std::srand(unsigned(GetTickCount()));
-    LOG_INFO("HvV: %s, %s, %s, %s against %s, %s, %s, %s; the player is %s; %d lives a side, %d health",
+    LOG_INFO("HvV: %s, %s, %s, %s against %s, %s, %s, %s; the player is %s; %d lives a side, %d health; on %s",
         classes[0].c_str(), classes[1].c_str(), classes[2].c_str(), classes[3].c_str(), classes[4].c_str(),
-        classes[5].c_str(), classes[6].c_str(), classes[7].c_str(), classes[g_Player].c_str(), g_StartLives, g_Health);
+        classes[5].c_str(), classes[6].c_str(), classes[7].c_str(), classes[g_Player].c_str(), g_StartLives, g_Health,
+        g_MapName.empty() ? "the dev map" : g_MapName.c_str());
 }
 
 bool HvvActive() { return g_Active; }
@@ -868,8 +902,13 @@ void SetHvvBoardPinned(bool pinned)
     g_BoardPinned = pinned;
 }
 
-bool StartHvv(const std::vector<std::string>& lineup, int player, int lives, int health, bool intro, std::string& error)
+bool StartHvv(const std::vector<std::string>& lineup, int player, int lives, int health, bool intro,
+    const std::string& map, std::string& error)
 {
+    if (!map.empty() && !FindCustomMap(map)) {
+        error = "no map " + map + " under mods/maps";
+        return false;
+    }
     if (lineup.size() != kFighters) {
         error = "a match needs 8 fighters";
         return false;
@@ -891,7 +930,8 @@ bool StartHvv(const std::vector<std::string>& lineup, int player, int lives, int
         player = 0;
     StartDevMap("hvv:" + text + " hvvplayer:" + std::to_string(player) +
         " hvvlives:" + std::to_string(lives > 0 ? lives : kDefaultLives) +
-        " hvvhealth:" + std::to_string(health > 0 ? health : kDefaultHealth) + (intro ? "" : " hvvintro:0"));
+        " hvvhealth:" + std::to_string(health > 0 ? health : kDefaultHealth) + (intro ? "" : " hvvintro:0") +
+        (map.empty() ? "" : " custommap:" + map));
     return true;
 }
 

@@ -25,6 +25,7 @@
 #include "game/characters.h"
 #include "game/coop.h"
 #include "game/customchars.h"
+#include "game/custommaps.h"
 #include "game/devmap.h"
 #include "game/devoptions.h"
 #include "game/fixes.h"
@@ -179,6 +180,7 @@ static void StartGame(const void* launchData)
     game::InstallCharacters();
     game::InstallMenus();
     game::InstallCoop();
+    game::InstallCustomMaps(g_Boot.paths.mods);
     game::InstallDevMap(g_Boot.paths.gameData, g_Boot.paths.mods);
     game::InstallHvv();
     game::InstallHvvMenu();

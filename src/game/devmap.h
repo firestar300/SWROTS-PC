@@ -17,6 +17,10 @@ void InstallDevMap(const std::wstring& gameData, const std::wstring& mods);
 // True when this start of the game loads the dev map in place of Grievous Survival.
 bool DevMapActive();
 
+// The map of a mod's own this start's dev map is (launch argument `custommap:<id>`, custommaps.h), or null.
+struct CustomMap;
+const CustomMap* DevMapCustomMap();
+
 // A launch argument of this start of the game (`name:value`, from its launch data, else from Default_Xbox.cfg).
 bool BootArgument(const char* name, std::string& value);
 

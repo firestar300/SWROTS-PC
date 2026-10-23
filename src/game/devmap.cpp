@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "core/log.h"
+#include "game/custommaps.h"
 #include "game/resources.h"
 #include "kernel/kernel.h"
 
@@ -24,6 +25,7 @@ constexpr const char* kDevMapArgument = "devmap:1";
 bool g_Active = false;
 DevMapLayout g_Layout;
 bool g_HasLayout = false;
+const CustomMap* g_Map = nullptr; // a map of a mod's own, from `custommap:<id>`
 std::string g_Arguments; // this start's launch arguments, or else its Default_Xbox.cfg
 
 void BuildLevel(std::vector<uint8_t>& data)
@@ -31,7 +33,10 @@ void BuildLevel(std::vector<uint8_t>& data)
     if (!g_Active)
         return;
     std::string report;
-    if (BuildDevMapLevel(data, report, g_HasLayout ? &g_Layout : nullptr))
+    DevMapLayout layout = g_Layout;
+    if (g_Map)
+        ApplyCustomMap(*g_Map, layout);
+    if (BuildDevMapLevel(data, report, g_HasLayout || g_Map ? &layout : nullptr))
         LOG_INFO("Dev map: level built (%zu bytes): %s", data.size(), report.c_str());
     else
         LOG_WARN("Dev map: the level file is not the one expected (%s); Grievous Survival loads as it is",
@@ -77,13 +82,22 @@ void InstallDevMap(const std::wstring& gameData, const std::wstring& mods)
     g_Active = BootArgument("devmap", value) && value == "1";
     g_Layout = {};
     g_HasLayout = false;
+    g_Map = nullptr;
+    if (g_Active && BootArgument("custommap", value)) {
+        g_Map = FindCustomMap(value);
+        if (!g_Map)
+            LOG_WARN("Dev map: there is no map %s under mods\\maps (the dev map's floor instead)", value.c_str());
+    }
     RegisterResourcePatch(kDevMapSource, &BuildLevel);
     RegisterResourcePatch(kDevMapFloorModel, &BuildFloor);
     if (g_Active)
-        LOG_INFO("Dev map: Grievous Survival loads as the developer map");
+        LOG_INFO("Dev map: Grievous Survival loads as the developer map%s%s", g_Map ? ", on " : "",
+            g_Map ? g_Map->name.c_str() : "");
 }
 
 bool DevMapActive() { return g_Active; }
+
+const CustomMap* DevMapCustomMap() { return g_Active ? g_Map : nullptr; }
 
 bool BootArgument(const char* name, std::string& value)
 {

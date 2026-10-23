@@ -1,0 +1,49 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "game/devmapbuild.h"
+
+namespace swrots::game {
+
+// Maps of mods' own (docs/modding/custom-maps.md): a folder under mods\maps\ with a map.ini makes a map the dev map
+// can be (its model in the place of the floor's, its collision boxes), played on with Heroes vs Villains (its two
+// lines, its spawns) or walked in (`devmap <map>`). The map's own coordinates are turned and moved so that the
+// middle between its lines is the dev map's middle and the heroes' line faces the villains' along +z.
+
+struct CustomMap {
+    std::string id;            // its folder's name, e.g. "cantina"
+    std::string name;          // as shown, e.g. "MOS EISLEY CANTINA"
+    std::string modelFolder;   // under meshes\, e.g. "maps\cantina\"
+    std::string modelName;     // e.g. "cantina"
+    uint32_t vertices = 0;     // the model's vertex count (its baked light has one entry per vertex)
+    float floor = 0;           // the height of the model's floor (its own y)
+    float heroes[2] = {}, villains[2] = {}; // the lines' middles (x, z)
+    float lineGap = 150;
+    std::vector<DevMapBox> boxes;           // in the map's own coordinates (cy from its y 0), yaw in radians
+    std::vector<std::pair<float, float>> spawns;
+    bool hasBounds = false;
+    float bounds[4] = {};      // x0 z0 x1 z1
+    // its place in the dev map: own coordinates (x, z) -> the dev map's
+    float yaw = 0, middle[2] = {};
+};
+
+// Each start of the game image, before the dev map: reads mods\maps\*\map.ini.
+void InstallCustomMaps(const std::wstring& mods);
+
+const std::vector<CustomMap>& CustomMaps();
+// A map by its id (case-insensitive), or null.
+const CustomMap* FindCustomMap(const std::string& id);
+
+// A point of the map's own (x, z) in the dev map.
+void CustomMapToWorld(const CustomMap& map, float x, float z, float& worldX, float& worldZ);
+// The map's turn in the dev map (radians, added to a yaw of its own).
+float CustomMapYaw(const CustomMap& map);
+// Its bounds in the dev map (x0, z0, x1, z1), the dev map's floor when it has none.
+void CustomMapBounds(const CustomMap& map, float (&bounds)[4]);
+
+// Puts the map in a dev map layout: its model, where it stands, its collision boxes.
+void ApplyCustomMap(const CustomMap& map, DevMapLayout& layout);
+
+} // namespace swrots::game

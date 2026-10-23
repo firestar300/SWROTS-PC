@@ -298,7 +298,7 @@ void PickPanel(const game::HvvPickState& p, const ImGuiViewport* vp, float u)
     Text(left + width / 2, top + height - 62 * u, 15 * u, kWhite, rules, 0.5f);
     Text(left + width / 2, top + height - 41 * u, 15 * u, kWhite, "MAP  " + p.map, 0.5f);
     Text(left + width / 2, top + height - 19 * u, 12 * u, kDim,
-        next < 8 ? "A ADD   B REMOVE   UP DOWN LIVES   X HEALTH   Y INTRO" : "", 0.5f);
+        next < 8 ? "A ADD   B REMOVE   UP DOWN LIVES   X HEALTH   Y INTRO   LB RB MAP" : "", 0.5f);
 }
 
 void DrawHvvHud()

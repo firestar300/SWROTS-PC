@@ -111,6 +111,7 @@ struct Tree {
     std::vector<size_t> hedrons; // where each hedron's data starts
     size_t planes = 0;
     uint32_t planeCount = 0;
+    size_t start = 0, end = 0;   // the whole tree's bytes
 };
 
 void Blob(Reader& r, std::vector<size_t>* at)
@@ -127,9 +128,11 @@ void Blob(Reader& r, std::vector<size_t>* at)
 
 bool ReadTree(Reader& r, Tree* tree)
 {
+    const size_t start = r.p;
     if (!r.U8())
         return false;
     Tree t;
+    t.start = start;
     for (uint32_t i = 0, n = r.Count(4); i < n && r.ok; ++i)
         Blob(r, &t.hedrons);
     r.Skip(uint64_t(r.U32()) * 8); // nodes
@@ -143,6 +146,7 @@ bool ReadTree(Reader& r, Tree* tree)
     }
     for (uint32_t i = 0, n = r.Count(4); i < n && r.ok; ++i)
         Blob(r, nullptr);
+    t.end = r.p;
     if (tree)
         *tree = std::move(t);
     return true;
@@ -426,11 +430,13 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
         ReadTree(r, nullptr);
     r.Skip(uint64_t(r.Count(4)) * 4);
     std::vector<Tree> brushes; // the collision
+    const size_t brushesCap = r.p, brushesCount = r.p + 4;
     for (uint32_t i = 0, n = r.Count(); i < n && r.ok; ++i) {
         Tree t;
         if (ReadTree(r, &t))
             brushes.push_back(std::move(t));
     }
+    const size_t brushesEnd = r.p;
     std::vector<Instance> instances;
     for (uint32_t i = 0, n = r.Count(); i < n && r.ok; ++i) {
         instances.emplace_back();
@@ -536,7 +542,12 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
     for (auto& g : statics) {
         const uint32_t model = U32Of(Find(g, "MGR_ManagedMeshID"));
         if (model == kCaveMesh) {
-            const float position[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, float(kFloorY), 0 };
+            float position[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, float(kFloorY), 0 };
+            if (layout && !layout->modelName.empty()) { // a map's model, where it stands
+                const float c = std::cos(layout->modelYaw), s = std::sin(layout->modelYaw);
+                const float placed[12] = { c, 0, -s, 0, 1, 0, s, 0, c, layout->modelX, float(kFloorY + layout->modelY), layout->modelZ };
+                std::copy(std::begin(placed), std::end(placed), position);
+            }
             const float ambient[3] = { kFloorAmbient, kFloorAmbient, kFloorAmbient };
             SetFloats(Find(g, "MGR_WorldPosition"), position);
             SetFloats(Find(g, "MGR_AmbientLight"), ambient);
@@ -559,7 +570,35 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
         return fail("the cave's static entry");
     say("statics: %zu of %zu kept; ", kept.size(), statics.size());
     list->data = WriteGroups(kept);
-    PutU32(d, floorLight->count1, kFloorVertices);
+    const bool mapModel = layout && !layout->modelName.empty() && layout->modelVertices > 0;
+    const uint32_t lightVertices = mapModel ? layout->modelVertices : kFloorVertices;
+    PutU32(d, floorLight->count1, lightVertices);
+    // A map's model in the cave's entry of the managed meshes (u32 capacity, u32 count, then per mesh its name and
+    // its folder under meshes\): the static entry's model then is the map's, read from its own folder.
+    if (mapModel) {
+        Property* meshes = Find(manager->props, "MGR_ManagedMeshData");
+        if (!meshes)
+            return fail("the managed meshes");
+        Reader m{ meshes->data };
+        const uint32_t cap = m.U32(), count = m.U32();
+        std::vector<std::pair<std::string, std::string>> entries;
+        for (uint32_t i = 0; i < count && m.ok; ++i) {
+            std::string name = m.String();
+            entries.push_back({ name, m.String() });
+        }
+        if (!m.ok || count <= kCaveMesh)
+            return fail("the managed meshes");
+        entries[kCaveMesh] = { layout->modelName, layout->modelFolder };
+        Writer w;
+        w.U32(cap);
+        w.U32(count);
+        for (const auto& e : entries) {
+            w.String(e.first);
+            w.String(e.second);
+        }
+        meshes->data = w.out;
+        say("model %s%s; ", layout->modelFolder.c_str(), layout->modelName.c_str());
+    }
 
     // spawn: the player's start in the middle of the floor, the sector's reference point (for the sky) too
     const double midX = (kSpace[0].lo + kSpace[0].hi) / 2, midZ = (kSpace[2].lo + kSpace[2].hi) / 2;
@@ -717,6 +756,66 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
         }
     }
 
+    // a map's collision boxes: copies of the cave's first wall brush (one box hedron: 8 vertices, 6 axis planes; its
+    // edges, faces and nodes only index them), each vertex moved to its corner of the box, each plane turned with it
+    Writer boxes;
+    const size_t boxCount = layout ? layout->boxes.size() : 0;
+    if (boxCount) {
+        const Tree& box = brushes[0];
+        if (box.hedrons.size() != 1 || HedronVertices(in, box.hedrons[0]) != 8 || box.planeCount != 6)
+            return fail("the box brush");
+        double boxCentre[3] = {};
+        for (uint8_t i = 0; i < 8; ++i)
+            for (int k = 0; k < 3; ++k)
+                boxCentre[k] += GetF(in, box.hedrons[0] + 4 + 12 * i + 4 * k) / 8;
+        for (const DevMapBox& b : layout->boxes) {
+            std::vector<uint8_t> t(in.begin() + box.start, in.begin() + box.end);
+            const size_t h = box.hedrons[0] - box.start, planes = box.planes - box.start;
+            const double c = std::cos(b.yaw), s = std::sin(b.yaw), half[3] = { b.hx, b.hy, b.hz };
+            const double place[3] = { b.cx, kFloorY + b.cy, b.cz };
+            for (uint8_t i = 0; i < 8; ++i) {
+                const size_t v = h + 4 + 12 * i;
+                double local[3];
+                for (int k = 0; k < 3; ++k)
+                    local[k] = GetF(t, v + 4 * k) > boxCentre[k] ? half[k] : -half[k];
+                PutF(t, v, place[0] + c * local[0] + s * local[2]);
+                PutF(t, v + 4, place[1] + local[1]);
+                PutF(t, v + 8, place[2] - s * local[0] + c * local[2]);
+            }
+            for (uint32_t i = 0; i < 6; ++i) {
+                const size_t p = planes + 16 * i;
+                const double nx = GetF(t, p), ny = GetF(t, p + 4), nz = GetF(t, p + 8);
+                const double wx = c * nx + s * nz, wz = -s * nx + c * nz;
+                PutF(t, p, wx);
+                PutF(t, p + 8, wz);
+                PutF(t, p + 12, wx * place[0] + ny * place[1] + wz * place[2] +
+                    std::fabs(nx) * half[0] + std::fabs(ny) * half[1] + std::fabs(nz) * half[2]);
+            }
+            boxes.Raw(t.data(), t.size());
+        }
+        uint32_t brushCap;
+        std::memcpy(&brushCap, d.data() + brushesCap, 4);
+        const uint32_t total = uint32_t(brushes.size() + boxCount);
+        PutU32(d, brushesCap, std::max(brushCap, total));
+        PutU32(d, brushesCount, total);
+        // the brush manager: a handle per brush (its id, its class and what it stops), the boxes as the first wall
+        Object* brushManager = FindObject(objects, "IBrushManager");
+        Property* count = brushManager ? Find(brushManager->props, "__handlecount") : nullptr;
+        Property* details = brushManager ? Find(brushManager->props, "__handledetails") : nullptr;
+        Groups handles;
+        if (!count || count->data.size() < 4 || !details || !ReadGroups(details->data, handles) || handles.empty())
+            return fail("the brush manager");
+        for (size_t i = 0; i < boxCount; ++i) {
+            std::vector<Property> handle = handles[0];
+            if (Property* id = Find(handle, "id"); id && id->data.size() >= 4)
+                PutU32(id->data, 0, kDevMapFirstBoxId + uint32_t(i));
+            handles.push_back(std::move(handle));
+        }
+        details->data = WriteGroups(handles);
+        PutU32(count->data, 0, uint32_t(handles.size()));
+        say("%zu collision boxes; ", boxCount);
+    }
+
     // objects: only what a level needs
     std::vector<Object> keptObjects;
     for (Object& o : objects) {
@@ -760,10 +859,12 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
     // the result: the edited bytes with the floor's light, the new portals and the new object section in place
     std::vector<uint8_t> out;
     out.reserve(d.size() + added.out.size());
-    out.insert(out.end(), d.begin(), d.begin() + floorLight->lightCount);
-    const uint32_t vertices = kFloorVertices;
+    out.insert(out.end(), d.begin(), d.begin() + brushesEnd);
+    out.insert(out.end(), boxes.out.begin(), boxes.out.end());
+    out.insert(out.end(), d.begin() + brushesEnd, d.begin() + floorLight->lightCount);
+    const uint32_t vertices = lightVertices;
     out.insert(out.end(), reinterpret_cast<const uint8_t*>(&vertices), reinterpret_cast<const uint8_t*>(&vertices) + 4);
-    out.insert(out.end(), size_t(kFloorVertices) * 4, 0xFF);
+    out.insert(out.end(), size_t(lightVertices) * 4, 0xFF);
     out.insert(out.end(), d.begin() + floorLight->lightEnd, d.begin() + portalsEnd);
     out.insert(out.end(), added.out.begin(), added.out.end());
     out.insert(out.end(), d.begin() + portalsEnd, d.begin() + objectsAt);

@@ -65,9 +65,10 @@ std::vector<std::string> HvvDefaultLineup();
 
 // Starts a match (the game restarts into it). `lineup`: 8 classes, heroes then villains; `player`: the player's
 // place in it; `lives`: each side's; `health`: every fighter's (0: the defaults, 35 and 250); `intro`: the lines
-// shown first. False with `error` set for a line-up the game cannot play.
+// shown first; `map`: a custom map's id (custommaps.h), empty for the dev map's floor. False with `error` set for a
+// line-up the game cannot play.
 bool StartHvv(const std::vector<std::string>& lineup, int player, int lives, int health, bool intro,
-    std::string& error);
+    const std::string& map, std::string& error);
 
 // Fighters for the match panel: the Versus fighters and the other saber duelists (registered classes only).
 std::vector<std::string> HvvFighterClasses();

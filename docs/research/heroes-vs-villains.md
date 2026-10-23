@@ -10,8 +10,9 @@ tab](../debug-menu.md#heroes-vs-villains-tab) or the console's `hvv`. Addresses 
 mode, with a panel over the right half: the line-up so far, the rules and the map. **A** adds the fighter under the
 cursor to the line-up (the first is you; then your three fellow heroes, then the four villains; Random picks any;
 fighters the profile has not unlocked for Versus can be picked too), **B** takes the last back (with none, back to
-the main menu), **Up/Down** set each side's lives (5 to 99), **X** the health (150 to 1000), **Y** the intro. The
-eighth pick starts the match. The map is the developer map for now.
+the main menu), **Up/Down** set each side's lives (5 to 99), **X** the health (150 to 1000), **Y** the intro,
+**LB/RB** (the Xbox pad's White/Black) the map: the developer map's floor or a [custom map](../modding/custom-maps.md).
+The eighth pick starts the match.
 
 **From the debug menu or the console:**
 
@@ -22,6 +23,7 @@ hvv IAnakin IObiwan IYoda IMace IVader IDooku IGrievous ISerra player 4 lives 10
                                         eight classes (heroes, then villains), your place in the line-up
                                         (0-7; 4 is Vader here), each side's lives (35), every fighter's
                                         health (250) and no intro
+hvv map cantina                         on a custom map (mods\maps\cantina, see custom maps)
 hvv board on|off                        the leaderboard pinned (as holding Tab shows it)
 ```
 
@@ -62,7 +64,11 @@ that points back at it.
 
 The launch arguments of a match (`kernel::LaunchGame`, see [starting a level](levels.md#starting-a-level)):
 `map:u107_uta_grievoussurvival devmap:1 hvv:<8 classes> hvvplayer:<0-7> hvvlives:<n> hvvhealth:<n>` (and
-`hvvintro:0`). They also work in `mods\Default_Xbox.cfg`.
+`hvvintro:0`, and `custommap:<map>`). They also work in `mods\Default_Xbox.cfg`.
+
+**On a custom map** the lines stand where the map's `HeroesLine` / `VillainsLine` say (the map turned so that they
+face each other along +z, as on the floor), `LineGap` apart; fighters come back at the map's `Spawns` (the one
+clearest of fighters and nearest the fight), else near the fight within its `Bounds`.
 
 ## How it works
 
@@ -132,6 +138,6 @@ played.
   (`cinematics\introcamera\<name>_Intro_Cam.cin`) the game plays in Versus.
 - Co-op's player 2 is not part of a match yet (with co-op on, they would join as a companion of their own).
 - A camera behind the player (Battlefront style), and a shared camera when two or more play on one screen.
-- Maps: the developer map only so far (custom maps to come); the select screen does not show a map picker yet.
+- Maps: the developer map's floor and [custom maps](../modding/custom-maps.md) (boxes for collision only).
 - More than two players: the port's input takes four controllers; the game's player slots and HUD are made for
   two.
