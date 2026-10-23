@@ -39,6 +39,8 @@ Costume=Luke             ; its costume's name
 Mesh=luke\luke           ; its body, under meshes\chars, without .msh
 Saber=0 255 0            ; its saber's colour, 0-255 each (optional; 0 255 0 is the game's own green)
 Blades=single            ; its saber: single, double (double-bladed) or dual (two sabers) (optional; the base's)
+Scale=1                  ; its size (optional; 0.86 makes a Jedi Brute body about as tall as Vader)
+Force=1000               ; the Force it holds (optional; the base's: the Jedi Brute has none, Anakin 1000)
 Side=Hero                ; Hero or Villain: its side in Heroes vs Villains by default
 Speaker=Luke             ; its name in subtitles (optional; the name's first word)
 Code=                    ; whose lines it says, a dialogue speaker code such as AKN or OBW (optional; the base's)
@@ -130,6 +132,10 @@ strip of heads.
 
 The strip of heads shows 11 fighters at a time; with more it scrolls with the cursor (the port draws the strip as the
 game does, 0x2D56F0, from the first fighter in view; a cursor whose fighter is out of view is hidden).
+
+In the duel a fighter needs intro and outro cameras (`cinematics\introcamera\<name>_Intro_Cam.cin`, outro the
+same): a custom character uses its base's, and a base that was never a duelist (the Jedi Brute) Vader's (without
+them the duel's start waits forever and a round's end crashes).
 
 The duel keeps a slot's fighter for the player whose chosen name equals the fighter's class name (0x27B7D0,
 compared at 0x27B8CD and 0x27B983); a custom character's fighter is its base class, so the port compares the chosen

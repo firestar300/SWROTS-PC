@@ -126,6 +126,10 @@ const char* __stdcall CameraName(const char* name, int slot)
         return name;
     if (slot >= kDuelistCount) {
         const char* standIn = ExtraFighterCameras(slot);
+        // a base that was never a duelist (a custom character's, e.g. the Jedi Brute) has none either: Vader's (a
+        // missing outro camera crashes the round's end, 0x27D64F, and a missing intro one stops the duel's start)
+        if (standIn && !(HasCamera(standIn, "intro") && HasCamera(standIn, "outro")))
+            standIn = "Vader";
         if (standIn)
             LOG_INFO("Versus: %s has no duel cameras; using %s's", name, standIn);
         return standIn ? standIn : name;

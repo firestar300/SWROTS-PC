@@ -144,8 +144,12 @@ duel's fighters, sounds, intro cameras and HUD art), whose level file the port s
 duel: the head-to-head flag, Grievous Survival's player start made player 1's spawn point and player 2's added
 (220 units apart across the middle), and the arena's own camera objects (from the arena's level file as it loads)
 turned and moved from the arena's fighters onto these, their focus on these spawn points. The arena's rail was
-laid out for its own room: on a map with walls a camera adjuster brings the camera nearer the fighters, along its
-line to them, to the last place that sees them (the map's boxes). Its row on the Select Arena screen (the arena list,
+laid out for its own room: on a map with walls the game's camera (the rail, the intro's shots) stays while it sees
+both fighters from above the floor, and where it does not, the port's own takes over for at least a second (side-on
+to the fighters, on the side that sees them, nearer them where a wall stands behind it; the map's boxes). Versus
+starts the arena's own music object (Type Music, "Trigger Flags" 0x20), so the map's track object takes its
+properties; the loading picture is the Utapau arena's (`load_back_uta_plain_`), served as the map's own; a map of its
+own has no sky around it. Its row on the Select Arena screen (the arena list,
 `ArenaList`: its entries built from the mission list's Duel rows, 0x2D2AB0) is an entry the port adds after the open
 arenas and Random (the cursor never moves onto a locked row, 0x2C69F0), the Utapau arena's level with the map's
 name; its pictures take places the port adds to the screen's picture sets, drawn with the map's own. Chosen, it

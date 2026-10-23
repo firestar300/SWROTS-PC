@@ -2,6 +2,7 @@
 // mission, is in docs/research/coop.md.
 
 #include "game/coop.h"
+#include "game/devmap.h"
 
 #include <windows.h>
 
@@ -308,6 +309,8 @@ constexpr size_t kScreenItemCount = 0x1D; // in the pause screen: after "pausesc
 
 void PatchPauseScreen(std::vector<uint8_t>& data)
 {
+    if (BootIsVersusDuel()) // a duel's pause screen (fewer rows): co-op is no part of it
+        return;
     size_t quit, quitEnd, resume, resumeEnd, settings, settingsEnd, existing, existingEnd;
     if (!MenuRowBlock(data, "quit", quit, quitEnd) || !MenuRowBlock(data, "resume", resume, resumeEnd) ||
         !MenuRowBlock(data, "settings", settings, settingsEnd) || MenuRowBlock(data, "coop", existing, existingEnd) ||

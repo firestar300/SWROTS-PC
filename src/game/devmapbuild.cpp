@@ -898,7 +898,8 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
     std::vector<Object> keptObjects;
     for (Object& o : objects) {
         const bool keep = std::any_of(std::begin(kKeep), std::end(kKeep), [&](const char* c) { return o.cls == c; }) ||
-            (o.cls == "IStatic" && Find(o.props, "Skybox Render Priority")) ||
+            // the sky (Utapau's): not around a map of its own (a closed room; outside it, nothing)
+            (o.cls == "IStatic" && Find(o.props, "Skybox Render Priority") && !(layout && !layout->modelName.empty())) ||
             (music && (U32Of(Find(o.props, "ID")) == sequencerId || U32Of(Find(o.props, "ID")) == trackId));
         if (keep)
             keptObjects.push_back(std::move(o));
@@ -943,6 +944,32 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
         place(second, midZ + layout->duelGap / 2, 3.14159265f);
         keptObjects.push_back(std::move(second));
         say(", a duel");
+        // the duel's music: Versus starts the arena's own music object (an IAudio of Type Music with "Trigger Flags"
+        // 0x20 and "3D?" off; no object triggers it), not Grievous Survival's (started by the player's start): the
+        // map's track object takes the arena's music object's properties, keeping its own id, name and track
+        if (music) {
+            std::vector<Object> sounds = ObjectsOfClasses(layout->duelArena, { "IAudio" });
+            Object* arenaMusic = nullptr;
+            for (Object& o : sounds) {
+                const Property* type = Find(o.props, "Type");
+                if (type && type->data.size() >= 9 && std::memcmp(type->data.data() + 4, "Music", 5) == 0 &&
+                    Find(o.props, "Trigger Flags")) {
+                    arenaMusic = &o;
+                    break;
+                }
+            }
+            for (Object& o : keptObjects) {
+                if (!arenaMusic || o.cls != "IAudio" || U32Of(Find(o.props, "ID")) != trackId)
+                    continue;
+                std::vector<Property> props = arenaMusic->props;
+                for (Property& p : props)
+                    if (p.name == "ID" || p.name == "Name" || p.name == "Sound Link" || p.name == "Transform")
+                        if (const Property* own = Find(o.props, p.name.c_str()))
+                            p.data = own->data;
+                o.props = std::move(props);
+                say(" (its music started by the duel)");
+            }
+        }
         // the arena's duel camera: its objects turned and moved from the arena's fighters (their spawn points'
         // middle, player 1 to player 2 along +z) onto these, their focus on these spawn points
         std::vector<Object> spawns = ObjectsOfClasses(layout->duelArena, { "IVaderMultiSpawnPoint" });

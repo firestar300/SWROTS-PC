@@ -788,10 +788,20 @@ void __fastcall TextureItemDrawHook(uint8_t* item, void*, void* context)
             index = i;
     // the set by its size: the busts (fighters, unused, extras, then three), the full bodies (two blocks and one)
     int extra = -1, kind = -1, player = 0;
-    if (index >= 0 && count == g_SlotCount + 3) {
+    // (and by its first picture's name: other sets can have the same size, e.g. the arena screen's arenas)
+    const auto named = [&](const char* part) {
+        const char* name = records && count > 0 && records[0] ? *reinterpret_cast<const char**>(records[0] + 8) : nullptr;
+        if (!name)
+            return false;
+        std::string lower = name;
+        for (char& c : lower)
+            c = char(tolower(static_cast<unsigned char>(c)));
+        return lower.find(part) != std::string::npos;
+    };
+    if (index >= 0 && count == g_SlotCount + 3 && named("bust")) {
         extra = index - kFirstExtraSlot;
         kind = 1;
-    } else if (index >= 0 && count == 2 * (g_SlotCount + 1) + 1) {
+    } else if (index >= 0 && count == 2 * (g_SlotCount + 1) + 1 && named("_fb_")) {
         player = index / (g_SlotCount + 1);
         extra = index % (g_SlotCount + 1) - kFirstExtraSlot;
         kind = player < 2 ? 2 + player : -1;
@@ -888,6 +898,10 @@ bool DrawSelectStrip(uint8_t* screen, uint32_t context)
             g_StripCursors[p] = cursors[p];
         }
     }
+    // player 1 has picked (+0x28): from then on the second cursor picks (the opponent's, starting at the first
+    // fighter), and stays in view
+    if (*reinterpret_cast<uint8_t*>(screen + 0x28) && !*reinterpret_cast<uint8_t*>(screen + 0x2A))
+        follow = cursors[1];
     if (follow >= 0) {
         if (follow < g_StripFirst)
             g_StripFirst = follow;

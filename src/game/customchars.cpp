@@ -225,10 +225,17 @@ void AssignString(uint8_t* string, const char* text)
 void __cdecl ApplyBlades(uint8_t* character)
 {
     const CustomCharacter* custom = CustomCharacterOf(character);
-    if (!custom || !custom->blades)
+    if (!custom)
         return;
     uint8_t* first = character + kWeaponRecords;
     uint8_t* second = first + kWeaponRecordSize;
+    // its colour as the records' own too: some moves (a special's power-up) put a saber back to its record's colour,
+    // which the +0xF20 override does not cover (the Jedi Brute's is the green key colour)
+    if (custom->hasSaber)
+        for (int i = 0; i < 2; ++i)
+            std::memcpy(first + i * kWeaponRecordSize + 8, custom->saber, sizeof custom->saber);
+    if (!custom->blades)
+        return;
     const char* hilt = *reinterpret_cast<const char**>(first + 4);
     const bool hadDouble = first[0] != 0;
     if (custom->blades == 2) {
@@ -248,6 +255,31 @@ void __cdecl ApplyBlades(uint8_t* character)
     second[0] = 0; // dual: a second saber like the first, in the other hand
     AssignString(second + 4, *reinterpret_cast<const char**>(first + 4));
     std::memcpy(second + 8, first + 8, 12);
+}
+
+// The Jedi set-up (0x2814C0, thiscall () -> bool: the sabers made, then the Force set to a constant, +0xA40 and its
+// most +0xA44; a class whose Init sets no Force of its own after it, as the Jedi Brute, has none): a custom
+// character's Force and size after it. Its first instructions: push esi; mov esi, ecx; call 0x2670F0 (relative,
+// re-made in the stub).
+constexpr uint32_t kJediSetup = 0x002814C0;
+constexpr uint8_t kJediSetupBytes[] = { 0x56, 0x8B, 0xF1, 0xE8 };
+constexpr uint32_t kJediSetupCallee = 0x002670F0;
+constexpr uint32_t kCharacterForce = 0xA40, kCharacterMaxForce = 0xA44, kObjectScale = 0x194;
+using JediSetupFn = bool(__fastcall*)(uint8_t*, void*);
+JediSetupFn g_OriginalJediSetup = nullptr;
+
+bool __fastcall JediSetupHook(uint8_t* character, void*)
+{
+    const bool result = g_OriginalJediSetup(character, nullptr);
+    if (const CustomCharacter* custom = CustomCharacterOf(character)) {
+        if (custom->force >= 0) {
+            *reinterpret_cast<float*>(character + kCharacterForce) = custom->force;
+            *reinterpret_cast<float*>(character + kCharacterMaxForce) = custom->force;
+        }
+        if (custom->scale != 1.0f)
+            *reinterpret_cast<float*>(character + kObjectScale) = custom->scale;
+    }
+    return result;
 }
 
 __declspec(naked) void SaberSetupHook()
@@ -411,6 +443,9 @@ void ReadCharacters(const std::wstring& mods)
             c.saber[2] = b / 255.0f;
         }
         c.side = _stricmp(Profile(file, L"Side", L"Hero").c_str(), "villain") == 0 ? 1 : 0;
+        c.scale = std::clamp(float(atof(Profile(file, L"Scale", L"1").c_str())), 0.5f, 2.0f);
+        const std::string force = Profile(file, L"Force");
+        c.force = force.empty() ? -1.0f : std::clamp(float(atof(force.c_str())), 0.0f, 10000.0f);
         const std::string blades = Profile(file, L"Blades");
         c.blades = _stricmp(blades.c_str(), "single") == 0 ? 1 : _stricmp(blades.c_str(), "double") == 0 ? 2
             : _stricmp(blades.c_str(), "dual") == 0 ? 3 : 0;
@@ -638,6 +673,23 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
     }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kSaberSetup)), kSaberSetupBytes, sizeof kSaberSetupBytes) == 0)
         PatchCall(kSaberSetup, reinterpret_cast<const void*>(&SaberSetupHook), sizeof kSaberSetupBytes);
+    if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kJediSetup)), kJediSetupBytes, sizeof kJediSetupBytes) == 0) {
+        static uint8_t* jediStub = [] { // once: the port's memory outlives the game's restarts
+            uint8_t* s = AllocStub(13);
+            s[0] = 0x56; // push esi
+            s[1] = 0x8B; // mov esi, ecx
+            s[2] = 0xF1;
+            s[3] = 0xE8; // call 0x2670F0
+            const int32_t call = int32_t(kJediSetupCallee) - int32_t(uintptr_t(s) + 8);
+            std::memcpy(s + 4, &call, 4);
+            s[8] = 0xE9; // jmp back after the call
+            const int32_t back = int32_t(kJediSetup + 8) - int32_t(uintptr_t(s) + 13);
+            std::memcpy(s + 9, &back, 4);
+            return s;
+        }();
+        g_OriginalJediSetup = reinterpret_cast<JediSetupFn>(jediStub);
+        PatchJump(kJediSetup, reinterpret_cast<const void*>(&JediSetupHook));
+    }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kSpeakerNameStore)), kSpeakerNameStoreBytes,
             sizeof kSpeakerNameStoreBytes) == 0)
         PatchCall(kSpeakerNameStore, reinterpret_cast<const void*>(&SpeakerNameStore), sizeof kSpeakerNameStoreBytes);

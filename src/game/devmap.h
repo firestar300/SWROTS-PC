@@ -23,6 +23,8 @@ const CustomMap* DevMapCustomMap();
 
 // A launch argument of this start of the game (`name:value`, from its launch data, else from Default_Xbox.cfg).
 bool BootArgument(const char* name, std::string& value);
+// Whether this start is a Versus duel (one of the game's duel arenas, or the dev map's duel).
+bool BootIsVersusDuel();
 
 // What a mode puts on this start's dev map (before the level loads).
 void SetDevMapLayout(const DevMapLayout& layout);

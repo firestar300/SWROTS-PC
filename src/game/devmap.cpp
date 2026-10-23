@@ -77,9 +77,47 @@ void BuildDuel(std::vector<uint8_t>& data)
     data.swap(level);
 }
 
-// The duel's camera on a map with walls: the arena's rail was laid out for its open floor; where a wall stands
-// between the camera and the two fighters, the camera comes nearer them along that line, to the last place that sees
-// them (the map's collision boxes).
+// The duel's camera on a map with walls: the arena's rail was laid out for its open floor. The game's camera (the
+// rail, the intro's shots) stays while it sees both fighters from above the floor; where it does not (a wall or the
+// map's furniture between, below their feet's height), the port's own takes over for at least a second: side-on to
+// the line between the fighters, as far as they are apart, on the side that sees them, nearer them where a wall stands
+// behind it (the map's collision boxes), looking at their middle.
+constexpr float kDuelEyeHeight = 75, kDuelFocusHeight = 45, kDuelLowest = 30;
+ULONGLONG g_DuelOwnUntil = 0;
+float g_DuelEye[3] = {};
+bool g_DuelEyeSet = false;
+float g_DuelSide = 1;
+
+void LookAt(const float eye[3], const float target[3], float m[16])
+{
+    float f[3] = { target[0] - eye[0], target[1] - eye[1], target[2] - eye[2] };
+    const float fl = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+    for (float& v : f)
+        v /= fl > 0 ? fl : 1;
+    float r[3] = { f[2], 0, -f[0] };
+    const float rl = std::sqrt(r[0] * r[0] + r[2] * r[2]);
+    for (float& v : r)
+        v /= rl > 0 ? rl : 1;
+    const float u[3] = { f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0] };
+    const float rows[16] = { r[0], r[1], r[2], 0, u[0], u[1], u[2], 0, f[0], f[1], f[2], 0, eye[0], eye[1], eye[2], 1 };
+    std::copy(std::begin(rows), std::end(rows), m);
+}
+
+// How far from `focus` along `direction` (unit, flat) the eye can stand and still see `a` and `b` (the walls).
+float ClearDistance(const float focus[3], const float direction[3], float wanted, const float a[3], const float b[3])
+{
+    float best = 0;
+    for (int i = 1; i <= 16; ++i) {
+        const float d = wanted * float(i) / 16;
+        const float eye[3] = { focus[0] + direction[0] * d, focus[1] + direction[1] * d, focus[2] + direction[2] * d };
+        if (!CustomMapLineOfSight(*g_Map, focus, eye) || !CustomMapLineOfSight(*g_Map, a, eye) ||
+            !CustomMapLineOfSight(*g_Map, b, eye))
+            break;
+        best = d;
+    }
+    return best;
+}
+
 bool DuelCamera(float m[16], float)
 {
     uint8_t* player = PlayerObject();
@@ -87,34 +125,63 @@ bool DuelCamera(float m[16], float)
         return false;
     auto position = [](uint8_t* c) { return reinterpret_cast<const float*>(c + 0x150 + 48); }; // transform's row 4
     const float* p = position(player);
-    float focus[3] = { p[0], p[1], p[2] };
+    const float* q = nullptr;
     float nearest = 1e30f;
     for (uint8_t* c : LevelCharacters()) { // the opponent: the nearest other character standing
         if (c == player || *reinterpret_cast<const float*>(c + 0x130) <= 0)
             continue;
-        const float* q = position(c);
-        const float d = std::hypot(q[0] - p[0], q[2] - p[2]);
+        const float* o = position(c);
+        const float d = std::hypot(o[0] - p[0], o[2] - p[2]);
         if (d < nearest) {
             nearest = d;
-            focus[0] = (p[0] + q[0]) / 2;
-            focus[2] = (p[2] + q[2]) / 2;
+            q = o;
         }
     }
-    focus[1] += 45;
+    const float floorY = q ? std::min(p[1], q[1]) : p[1];
+    const float a[3] = { p[0], p[1] + kDuelFocusHeight, p[2] };
+    const float b[3] = { q ? q[0] : p[0], (q ? q[1] : p[1]) + kDuelFocusHeight, q ? q[2] : p[2] };
+    const float focus[3] = { (a[0] + b[0]) / 2, floorY + kDuelFocusHeight, (a[2] + b[2]) / 2 };
     const float eye[3] = { m[12], m[13], m[14] };
-    if (CustomMapLineOfSight(*g_Map, focus, eye))
+    const ULONGLONG now = GetTickCount64();
+    const bool gameGood = eye[1] > floorY + kDuelLowest && CustomMapLineOfSight(*g_Map, a, eye) &&
+        CustomMapLineOfSight(*g_Map, b, eye);
+    if (gameGood && now >= g_DuelOwnUntil) {
+        g_DuelEyeSet = false;
         return false;
-    float clear = 0;
-    for (int i = 1; i <= 24; ++i) {
-        const float t = float(i) / 24, at[3] = { focus[0] + (eye[0] - focus[0]) * t, focus[1] + (eye[1] - focus[1]) * t,
-            focus[2] + (eye[2] - focus[2]) * t };
-        if (!CustomMapLineOfSight(*g_Map, focus, at))
-            break;
-        clear = t;
     }
-    const float t = std::max(0.25f, clear * 0.9f);
-    for (int k = 0; k < 3; ++k)
-        m[12 + k] = focus[k] + (eye[k] - focus[k]) * t;
+    if (!gameGood)
+        g_DuelOwnUntil = now + 1000;
+    // the port's: side-on to the fighters' line
+    float dx = b[0] - a[0], dz = b[2] - a[2];
+    const float apart = std::hypot(dx, dz);
+    if (apart < 1) {
+        dx = 0;
+        dz = 1;
+    } else {
+        dx /= apart;
+        dz /= apart;
+    }
+    const float wanted = std::clamp(apart * 0.8f + 170, 200.0f, 460.0f);
+    float best = -1, bestSide = g_DuelSide;
+    for (float side : { g_DuelSide, -g_DuelSide }) { // the side it was on first: no swapping while it sees them
+        const float direction[3] = { -dz * side, (kDuelEyeHeight - kDuelFocusHeight) / wanted, dx * side };
+        const float clear = ClearDistance(focus, direction, wanted, a, b);
+        if (clear > best + (side == g_DuelSide ? 0 : 40)) {
+            best = clear;
+            bestSide = side;
+        }
+    }
+    g_DuelSide = bestSide;
+    const float d = std::max(best, 60.0f);
+    const float target[3] = { focus[0] - dz * bestSide * d, focus[1] + (kDuelEyeHeight - kDuelFocusHeight) * d / wanted,
+        focus[2] + dx * bestSide * d };
+    if (!g_DuelEyeSet) {
+        std::copy(target, target + 3, g_DuelEye);
+        g_DuelEyeSet = true;
+    }
+    for (int k = 0; k < 3; ++k) // eased: no jumps
+        g_DuelEye[k] += (target[k] - g_DuelEye[k]) * 0.15f;
+    LookAt(g_DuelEye, focus, m);
     return true;
 }
 
@@ -130,6 +197,9 @@ void BuildFloor(std::vector<uint8_t>& data)
 // empty prefix asks for load_back_v2_a/b/c, which no PAK has), or as a custom map's own (mods\maps\<id>\load_a/b/c.stx).
 const char* const kMapLoadPictures[3] = { "interfc\\front_end\\loading\\load_back_uta_griev_a.stx",
     "interfc\\front_end\\loading\\load_back_uta_griev_b.stx", "interfc\\front_end\\loading\\load_back_uta_griev_c.stx" };
+// the Utapau duel arena's (the dev map's duel loads as it: Utapau without Grievous)
+const char* const kDuelLoadPictures[3] = { "interfc\\front_end\\loading\\load_back_uta_plain_a.stx",
+    "interfc\\front_end\\loading\\load_back_uta_plain_b.stx", "interfc\\front_end\\loading\\load_back_uta_plain_c.stx" };
 std::vector<uint8_t> g_LoadPictures[3]; // this start's custom map's, when it has all three
 
 constexpr size_t kStxHeader = 0x184, kStxName = 0x40, kStxNameLength = 0x28, kStxKind = 8;
@@ -234,8 +304,10 @@ void InstallDevMap(const std::wstring& gameData, const std::wstring& mods)
                 picture.clear();
     }
     static const ResourcePatch kServe[3] = { &ServeLoadA, &ServeLoadB, &ServeLoadC };
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 3; ++i) {
         RegisterResourcePatch(kMapLoadPictures[i], kServe[i]);
+        RegisterResourcePatch(kDuelLoadPictures[i], kServe[i]);
+    }
     // the dev map by itself (no mode on it): the player is Anakin, not Grievous Survival's Grievous
     SetLevelPlayerDefault(g_Active && !g_Duel && !BootArgument("hvv", value) ? "IAnakin" : nullptr);
     RegisterResourcePatch(kDevMapSource, &BuildLevel);
@@ -263,6 +335,23 @@ bool BootArgument(const char* name, std::string& value)
             return true;
         }
     }
+    return false;
+}
+
+bool BootIsVersusDuel()
+{
+    // the mission list's Duel levels
+    static const char* const kArenas[] = { "u103_sep_throneroom_01", "u103_sep_throneroom_02", "u107_uta_grievous_01",
+        "u107_uta_grievous_02", "u108_cor_palpatine_01", "u108_cor_palpatine_02", "u110_cor_training_00",
+        "u110_cor_training_01", "u110_cor_training_02", "u140_mus_theduel_01", "u140_mus_theduel_02",
+        "u150_mus_theduel_01", "u150_mus_theduel_02", "u170_ep4_deathstar_02" };
+    std::string value;
+    if (g_Duel || (BootArgument("v_versusMode", value) && value == "1"))
+        return true;
+    if (BootArgument("map", value))
+        for (const char* arena : kArenas)
+            if (_stricmp(value.c_str(), arena) == 0)
+                return true;
     return false;
 }
 
