@@ -38,6 +38,15 @@ struct DevMapLayout {
     uint32_t modelVertices = 0;
     float modelX = 0, modelY = 0, modelZ = 0, modelYaw = 0; // modelY: from the floor
     std::vector<DevMapBox> boxes;
+    // Its light: the model's ambient (negative: the floor's), its baked light (one colour a vertex, 0xAARRGGBB; with
+    // none, white), the characters' ambient (negative: the dev map's) and the point lights' intensity scale.
+    float modelAmbient[3] = { -1, -1, -1 };
+    std::vector<uint32_t> bakedLight;
+    float characterAmbient[3] = { -1, -1, -1 };
+    float lightScale = 1.0f;
+    // Its music: a track of the game's sound table (e.g. "mus_m13_templebattle01_lp"), played from the start (one of
+    // the level's music objects kept and pointed at it); empty: none.
+    std::string music;
 };
 // The ids the dev map's own objects take (the level's run far below).
 constexpr uint32_t kDevMapFirstId = 0x00300001;

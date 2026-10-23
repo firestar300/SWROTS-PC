@@ -936,39 +936,54 @@ void HvvTab()
 {
     struct Picks {
         bool loaded = false;
-        std::vector<std::string> lineup;
-        int player = 0, lives = 35, health = 250;
+        std::vector<std::string> heroes, villains;
+        int player = 0, lives = 35, health = 250, heroCount = 4, villainCount = 4;
         bool intro = true;
     };
     static Picks picks;
     static std::vector<std::string> classes;
     if (!picks.loaded) {
-        picks.lineup = game::HvvDefaultLineup();
+        const std::vector<std::string> lineup = game::HvvDefaultLineup();
+        picks.heroes.assign(lineup.begin(), lineup.begin() + 4);
+        picks.villains.assign(lineup.begin() + 4, lineup.end());
         picks.loaded = true;
     }
     if (classes.empty())
         classes = game::HvvFighterClasses(); // empty until the game has registered its classes
-    ImGui::TextWrapped("Four heroes against four villains on the developer map. Each side has its lives: a fighter "
-                       "that falls comes back near the fight while its side has lives left. The game restarts into "
-                       "the match.");
+    ImGui::TextWrapped("Heroes against villains on the developer map (1 to 8 a side). Each side has its lives: a "
+                       "fighter that falls comes back near the fight while its side has lives left. The game "
+                       "restarts into the match.");
+    ImGui::SetNextItemWidth(120.0f * float(g_Scale));
+    ImGui::SliderInt("Heroes", &picks.heroCount, 1, 8);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(120.0f * float(g_Scale));
+    ImGui::SliderInt("Villains", &picks.villainCount, 1, 8);
+    // a side grows with copies of its first fighter (or the default line-up's), and keeps its picks when it shrinks
+    const std::vector<std::string> defaults = game::HvvDefaultLineup();
+    picks.heroes.resize(size_t(picks.heroCount), picks.heroes.empty() ? defaults[0] : picks.heroes[0]);
+    picks.villains.resize(size_t(picks.villainCount), picks.villains.empty() ? defaults[4] : picks.villains[0]);
+    picks.player = std::clamp(picks.player, 0, picks.heroCount + picks.villainCount - 1);
     if (ImGui::BeginTable("lineup", 2, ImGuiTableFlags_SizingStretchSame)) {
         ImGui::TableSetupColumn("Heroes");
         ImGui::TableSetupColumn("Villains");
         ImGui::TableHeadersRow();
-        for (int row = 0; row < 4; ++row) {
+        for (int row = 0; row < std::max(picks.heroCount, picks.villainCount); ++row) {
             for (int side = 0; side < 2; ++side) {
                 ImGui::TableNextColumn();
-                const int slot = side * 4 + row;
+                std::vector<std::string>& list = side == 0 ? picks.heroes : picks.villains;
+                if (row >= int(list.size()))
+                    continue;
+                const int slot = side == 0 ? row : picks.heroCount + row;
                 ImGui::PushID(slot);
                 ImGui::RadioButton("##you", &picks.player, slot);
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("You play this one.");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(-FLT_MIN);
-                if (ImGui::BeginCombo("##class", picks.lineup[slot].c_str())) {
+                if (ImGui::BeginCombo("##class", list[size_t(row)].c_str())) {
                     for (const std::string& c : classes)
-                        if (ImGui::Selectable(c.c_str(), c == picks.lineup[slot]))
-                            picks.lineup[slot] = c;
+                        if (ImGui::Selectable(c.c_str(), c == list[size_t(row)]))
+                            list[size_t(row)] = c;
                     ImGui::EndCombo();
                 }
                 ImGui::PopID();
@@ -988,9 +1003,12 @@ void HvvTab()
     ImGui::SameLine();
     if (ImGui::Button("Start")) {
         std::string command = "hvv";
-        for (const std::string& c : picks.lineup)
+        for (const std::string& c : picks.heroes)
             command += " " + c;
-        command += " player " + std::to_string(picks.player) + " lives " + std::to_string(picks.lives) +
+        for (const std::string& c : picks.villains)
+            command += " " + c;
+        command += " heroes " + std::to_string(picks.heroCount) + " player " + std::to_string(picks.player) +
+            " lives " + std::to_string(picks.lives) +
             " health " + std::to_string(picks.health) + (picks.intro ? "" : " intro off");
         Submit(command);
     }

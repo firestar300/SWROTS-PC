@@ -548,12 +548,16 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
                 const float placed[12] = { c, 0, -s, 0, 1, 0, s, 0, c, layout->modelX, float(kFloorY + layout->modelY), layout->modelZ };
                 std::copy(std::begin(placed), std::end(placed), position);
             }
-            const float ambient[3] = { kFloorAmbient, kFloorAmbient, kFloorAmbient };
+            float ambient[3] = { kFloorAmbient, kFloorAmbient, kFloorAmbient };
+            if (layout && layout->modelAmbient[0] >= 0)
+                std::copy(std::begin(layout->modelAmbient), std::end(layout->modelAmbient), ambient);
             SetFloats(Find(g, "MGR_WorldPosition"), position);
             SetFloats(Find(g, "MGR_AmbientLight"), ambient);
+            // lit by its ambient alone, unless a map brings its own baked light
+            const bool baked = layout && !layout->bakedLight.empty() && layout->bakedLight.size() == layout->modelVertices;
             if (Property* p = Find(g, "MGR_Ambientlightingonly"); p && p->data.size() >= 4) {
-                const uint32_t one = 1;
-                std::memcpy(p->data.data(), &one, 4);
+                const uint32_t only = baked ? 0 : 1;
+                std::memcpy(p->data.data(), &only, 4);
             }
             floorHandle = U32Of(Find(g, "MGR___lighthandle"));
             haveFloor = true;
@@ -627,7 +631,9 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
     Groups lightGroups;
     if (!properties || !lightList || !ReadGroups(lightList->data, lightGroups))
         return fail("the lights");
-    const float characterAmbient[3] = { kCharacterAmbient, kCharacterAmbient, kCharacterAmbient };
+    float characterAmbient[3] = { kCharacterAmbient, kCharacterAmbient, kCharacterAmbient };
+    if (layout && layout->characterAmbient[0] >= 0)
+        std::copy(std::begin(layout->characterAmbient), std::end(layout->characterAmbient), characterAmbient);
     SetFloats(Find(properties->props, "Character ambient color"), characterAmbient);
     SetFloats(Find(properties->props, "Dynamic-mesh ambient color"), characterAmbient);
     const double dx = midX - kCaveCentreX, dz = midZ - kCaveCentreZ;
@@ -643,6 +649,8 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
                 v = float(double(v) + dz);
             else if (p.name == "__rng")
                 std::memcpy(&v, &kLightRange, 4);
+            else if (p.name == "__intn" && layout)
+                v *= layout->lightScale;
             std::memcpy(p.data.data(), &v, 4);
         }
     }
@@ -816,11 +824,39 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
         say("%zu collision boxes; ", boxCount);
     }
 
-    // objects: only what a level needs
+    // objects: only what a level needs. With a map's music, the level's own music start is kept as it is: the
+    // player's start triggers a sequencer (its first trigger) that picks one of the cave's four music objects
+    // (IAudio of Type Music, event triggered) at random; all four now name the map's track.
+    const bool music = layout && !layout->music.empty();
+    uint32_t sequencerId = 0;
+    int tracks = 0;
+    if (music) {
+        Object* spawn = FindObject(objects, "IPointSpawnPlayer");
+        Property* triggers = spawn ? Find(spawn->props, "Initially trigger objects") : nullptr;
+        if (triggers && triggers->data.size() >= 12)
+            std::memcpy(&sequencerId, triggers->data.data() + 8, 4);
+        for (Object& o : objects) {
+            Property* type = Find(o.props, "Type");
+            Property* link = Find(o.props, "Sound Link");
+            if (o.cls != "IAudio" || !type || !link || type->data.size() < 9 ||
+                std::memcmp(type->data.data() + 4, "Music", 5) != 0)
+                continue;
+            Writer name;
+            name.String("ep3\\Ep3_Streaming\\music\\" + layout->music);
+            link->data = name.out;
+            ++tracks;
+        }
+        if (!sequencerId || !tracks)
+            return fail("the level's music");
+        say("music %s; ", layout->music.c_str());
+    }
     std::vector<Object> keptObjects;
     for (Object& o : objects) {
         const bool keep = std::any_of(std::begin(kKeep), std::end(kKeep), [&](const char* c) { return o.cls == c; }) ||
-            (o.cls == "IStatic" && Find(o.props, "Skybox Render Priority"));
+            (o.cls == "IStatic" && Find(o.props, "Skybox Render Priority")) ||
+            (music && o.cls == "IAudio" && Find(o.props, "Type") && Find(o.props, "Type")->data.size() >= 9 &&
+                std::memcmp(Find(o.props, "Type")->data.data() + 4, "Music", 5) == 0) ||
+            (music && U32Of(Find(o.props, "ID")) == sequencerId);
         if (keep)
             keptObjects.push_back(std::move(o));
     }
@@ -864,7 +900,11 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
     out.insert(out.end(), d.begin() + brushesEnd, d.begin() + floorLight->lightCount);
     const uint32_t vertices = lightVertices;
     out.insert(out.end(), reinterpret_cast<const uint8_t*>(&vertices), reinterpret_cast<const uint8_t*>(&vertices) + 4);
-    out.insert(out.end(), size_t(lightVertices) * 4, 0xFF);
+    if (mapModel && layout->bakedLight.size() == lightVertices)
+        out.insert(out.end(), reinterpret_cast<const uint8_t*>(layout->bakedLight.data()),
+            reinterpret_cast<const uint8_t*>(layout->bakedLight.data() + lightVertices));
+    else
+        out.insert(out.end(), size_t(lightVertices) * 4, 0xFF);
     out.insert(out.end(), d.begin() + floorLight->lightEnd, d.begin() + portalsEnd);
     out.insert(out.end(), added.out.begin(), added.out.end());
     out.insert(out.end(), d.begin() + portalsEnd, d.begin() + objectsAt);

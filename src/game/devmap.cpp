@@ -26,6 +26,7 @@ bool g_Active = false;
 DevMapLayout g_Layout;
 bool g_HasLayout = false;
 const CustomMap* g_Map = nullptr; // a map of a mod's own, from `custommap:<id>`
+std::string g_MusicServed;        // the disc's music file its track is served for
 std::string g_Arguments; // this start's launch arguments, or else its Default_Xbox.cfg
 
 void BuildLevel(std::vector<uint8_t>& data)
@@ -82,9 +83,16 @@ void InstallDevMap(const std::wstring& gameData, const std::wstring& mods)
     g_Active = BootArgument("devmap", value) && value == "1";
     g_Layout = {};
     g_HasLayout = false;
+    if (g_MusicServed.size()) // the last start's map's track: the disc's own again
+        kernel::SetDiscFileOverride(g_MusicServed, L"");
+    g_MusicServed.clear();
     g_Map = nullptr;
     if (g_Active && BootArgument("custommap", value)) {
         g_Map = FindCustomMap(value);
+        if (g_Map && !g_Map->music.empty()) { // its track in the slot's place, for this start only
+            g_MusicServed = "\\audio\\xbox\\" + g_Map->music + ".hwx";
+            kernel::SetDiscFileOverride(g_MusicServed, g_Map->musicFile);
+        }
         if (!g_Map)
             LOG_WARN("Dev map: there is no map %s under mods\\maps (the dev map's floor instead)", value.c_str());
     }

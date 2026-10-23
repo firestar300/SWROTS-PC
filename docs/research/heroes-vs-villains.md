@@ -1,18 +1,20 @@
 # Heroes vs Villains
 
-A team mode (4 against 4, as in Battlefront II's Heroes vs Villains). A first version (a prototype) is in the
-port: on the [developer map](levels.md#the-developer-map), started from the debug menu's [Heroes vs Villains
-tab](../debug-menu.md#heroes-vs-villains-tab) or the console's `hvv`. Addresses are for the supported retail XBE.
+A team mode (as Battlefront II's Heroes vs Villains): 4 against 4 by default, any size from 1 against 1 to 8 against
+8. On the [developer map](levels.md#the-developer-map) or a [custom map](../modding/custom-maps.md), started from the
+main menu, the debug menu's [Heroes vs Villains tab](../debug-menu.md#heroes-vs-villains-tab) or the console's `hvv`.
+Addresses are for the supported retail XBE.
 
 ## Playing it
 
 **From the main menu**: Multi Player > **Heroes vs Villains** opens the Versus character select in Heroes vs Villains
 mode, with a panel over the right half: the line-up so far, the rules and the map. **A** adds the fighter under the
-cursor to the line-up (the first is you; then your three fellow heroes, then the four villains; Random picks any;
-fighters the profile has not unlocked for Versus can be picked too), **B** takes the last back (with none, back to
-the main menu), **Up/Down** set each side's lives (5 to 99), **X** the health (150 to 1000), **Y** the intro,
-**LB/RB** (the Xbox pad's White/Black) the map: the developer map's floor or a [custom map](../modding/custom-maps.md).
-The eighth pick starts the match.
+cursor to the line-up (the first is you; then your fellow heroes, then the villains; Random picks any; fighters the
+profile has not unlocked for Versus can be picked too), **B** takes the last back (with none, back to the main menu),
+**LT/RT** the team size before the first pick (1v1 to 6v6), **Up/Down** set each side's lives (5 to 99), **X** the
+health (150 to 1000), **Y** the intro, **LB/RB** (the Xbox pad's White/Black) the map: the developer map's floor or a
+[custom map](../modding/custom-maps.md). The last pick (both sides full) starts the match. When it ends (the top five,
+12 s), the game goes back to the main menu, with your profile.
 
 **From the debug menu or the console:**
 
@@ -23,13 +25,17 @@ hvv IAnakin IObiwan IYoda IMace IVader IDooku IGrievous ISerra player 4 lives 10
                                         eight classes (heroes, then villains), your place in the line-up
                                         (0-7; 4 is Vader here), each side's lives (35), every fighter's
                                         health (250) and no intro
+hvv ILuke IVader                        one against one (any number of classes: heroes, then villains, half
+                                        each)
+hvv IObiwan IYoda IVader IDooku IGrievous heroes 2
+                                        two against three (`heroes`: how many of the classes are heroes)
 hvv map cantina                         on a custom map (mods\maps\cantina, see custom maps)
 hvv board on|off                        the leaderboard pinned (as holding Tab shows it)
 ```
 
 The game restarts into the match, as a level change does: the fighters stand in two lines facing each other in
-the middle of the floor. **The intro** (about 7 s): for each side a 1.5 s shot of its line from the front, its
-fighters playing their Versus intros, then a 1.5 s close shot along the line ("HEROES" / "VILLAINS" with the four
+the middle of the floor. **The intro** (about 9 s): for each side a 2.6 s shot of its line from the front, its
+fighters playing their Versus intros, then a 1.6 s close shot along the line ("HEROES" / "VILLAINS" with the
 names); then the camera glides back behind you and "FIGHT!". Everyone holds still meanwhile (the game's
 `aiDisabled`, your controls held).
 
@@ -44,13 +50,19 @@ a teammate still fighting); when none is left, the other side wins. The game nev
 end the mission with its Game Over screen): see [how it works](#how-it-works).
 
 **Health**: every fighter has the game's 1000, and the damage it takes is scaled to the mode's health (250: four
-times): the HUD's health bar is as long as the maximum (`max x constant`, 0x25D1A0), so a lower maximum would show
-a stub.
+times): the HUD's health bar and its frame are as long as the maximum (`max x 1/1500`, 0x25D1A0), so a lower
+maximum would show a stub; 1000 matches the Force bar under it. While you are down the game's HUD is hidden.
+
+**Slow motion and the saber lock's camera** are the game's own, made for duels with the player in them: they slow
+the whole game and pull the camera. In a match they reach you only from moves you are part of (you do the move,
+are its target or are locked in it); settings.ini `[HvV] OthersSlowMotion=1` lets every fighter's through.
 
 **On screen** (drawn over the picture, in the game's own HUD font, `interfc\fonts\font_large_white`):
 
 - the scoreboard: each side's lives and a mark for each fighter, lit while it stands (yours ringed);
 - a marker over each of your teammates (a chevron above the head, smaller far away);
+- over the fighters' heads (small, fading with distance): a mark of their side, their name, their health and Force
+  bars; an enemy's only while in sight (settings.ini `[HvV] OverheadInfo`: 0 off, 1 allies only, 2 everyone);
 - the kill feed (top right): who defeated whom, or who fell by themselves (names are the characters', yours too,
   your lines marked);
 - your notices: "DEFEATED <NAME>" with your killstreak and the points, "ASSIST <NAME>", "DEFEATED BY <NAME>";
@@ -115,6 +127,34 @@ clearest of fighters and nearest the fight), else near the fight within its `Bou
   The kill camera (the mode's camera adjuster) starts from the game's camera, moves a third of the way to the body
   and a little up (the side the game's camera was on is free of walls; behind the body from the killer, it went
   into them) and turns to the killer; 4.5 s after the fatal hit the fighter comes back.
+- **Slow motion and the lock camera**: the moves' scripts slow the game through one call, 0x176BF0 (cdecl (float
+  scale, int rampIn, int hold, int rampOut); it skips when the script effects are off, byte 0x6943D0, then jumps to
+  0xA20E0, which sets the time manager's ramp; the scale multiplies every frame's time). A slowing holds 9999 frames
+  until the move's script restores 1, and there is no stack: anyone's restore ends anyone's slowing. The saber lock's
+  camera is "combateffect" (0x2BB250, cdecl, 9 arguments, the first: on), called from the six saber-lock sequence
+  sites (0x408B52, 0x408BAE, 0x408DE1, 0x408E27, 0x40907B, 0x4090C1); it frames the player and the instigator's
+  target. The instigator is the running script's character ([[0x6943CC] +0x68]); a kill move, grab or lock links two
+  fighters ([0x6943CC] +0x23C, their ids at +0xC and +0x10). The port's hooks let an effect start only when the
+  player is the instigator, linked to it or its AI's target, and let its end through for whoever started it; a
+  slowing whose owner falls is ended (0xA2110). The pause's freeze is a separate stack (`src/game/fixes.cpp`).
+- **Fighters that cannot reach their target**: the AI walks straight at its target (the dev map has no paths), so a
+  wall, the bar or a platform it cannot step onto stops it. A fighter that stays put for 5 s with its target more
+  than 260 units away, or stands near it for 12 s without a blow either way, is moved beside its target to a spot
+  clear of the map's boxes (a ring around the target, else the map's spawn nearest it) and set on it again.
+- **The player's death**: the fatal hit is kept from the game; on the next frame the live player change gives the
+  controls to a fresh fighter (the old body removed, as any live change does), placed where it will come back, held,
+  shielded and "Ignored By AI" (AI data +0x52). Where the old body fell, a double of it (an ordinary spawned
+  character) is dealt the death by the killer and dies there. Keeping the player's own body in the level to die
+  froze the game once (an object list, next pointer +0x24, walked at 0x1F3DB0, went round in a circle).
+- **Back to the main menu**: a level change is a reboot; the game keeps the profile across one in `Z:\persist.tmp`
+  (`cache\persist.tmp`), saved by 0x24D300 (thiscall on the profile [0x7E8F24]; nothing without the profile's data at
+  +0x3C) and read by the next start only with `v_sessionCreated:1`, which also lands the menus on the main menu
+  (0x2FAFA0) instead of the title. A match started from the menus saves it and passes `v_sessionCreated:1
+  playlicensemovie:0 title:0 controller:<n> memoryunit:<n>` (the session settings [[0x66F7A4] +4]: +0x84, +0x80);
+  after the end it saves again and starts `map:` (empty: the menus) with them. A match started from
+  Default_Xbox.cfg plays again instead (the file's `map:` would be read again). The port drops its own arguments
+  (`devmap:`, `custommap:`, `hvv...`) from every start whose map is not the dev map's level: the game's level
+  changes keep every argument but the map, so a Quit from a match would carry them on.
 - **Who hit whom**: the health change's last argument names the attacker (see Points). Some hits name no one
   (null): Force lightning's steady damage and some finishing moves. Those go to the nearest enemy within 450 units,
   one whose AI is set on the victim first (the player counting as one).
@@ -152,6 +192,7 @@ played.
   (`cinematics\introcamera\<name>_Intro_Cam.cin`) the game plays in Versus.
 - Co-op's player 2 is not part of a match yet (with co-op on, they would join as a companion of their own).
 - A camera behind the player (Battlefront style), and a shared camera when two or more play on one screen.
-- Maps: the developer map's floor and [custom maps](../modding/custom-maps.md) (boxes for collision only).
+- Maps: the developer map's floor and [custom maps](../modding/custom-maps.md) (boxes for collision only; the AI has
+  no paths, so fighters that cannot reach their target are moved beside it).
 - More than two players: the port's input takes four controllers; the game's player slots and HUD are made for
   two.

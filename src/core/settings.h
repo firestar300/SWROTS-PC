@@ -30,6 +30,9 @@ struct Settings {
     bool coopFriendlyFire = false; // the two players' blows hurt each other (they stay allies)
     int coopCamera = 0;       // 0 a shared camera that keeps both players in view, 1 it follows player 1 alone
     std::string coopPlayer2;  // player 2's class when the mission has no companion (e.g. "IObiwan"); empty: automatic
+    // Heroes vs Villains (game/hvv.h)
+    int hvvOverheadInfo = 2;  // over the fighters' heads: their name, health and Force: 0 off, 1 allies, 2 everyone
+    bool hvvOthersSlowMotion = false; // other fighters' slow motion and camera moves reach the player too
 };
 
 const Settings& GetSettings();

@@ -217,6 +217,16 @@ mesh is loaded, which the port keeps for the level (see below), so the port reco
 every body it places in a costume of its own (spawns, players) and refuses a spawn of another class
 in one; a spawn takes no other body.
 
+**Grievous's sabers.** A character's sabers are made in its Init (IJedi::Init 0x2814C0, each named slot
+through 0x280480, attached to Att-RH, Att-LH, Att-AUX1 and Att-AUX2); a slot record is char+0x1064+slot*0x20
+(+1 hidden, +0x1C the saber). Grievous has two sets of arms; his class script's Init (0x3BD2F0) sends
+"SetTwoArms" (0x3BC820: the B arms' materials hidden, sabers 3 and 4 switched off, their hidden flags left
+clear). A character created once the level is loaded runs that Init inside the spawn (0xA2DE0 -> 0xB6540 ->
+vfunc +0x220), so the activation after it (IJedi's +0xB4, 0x280790: every saber not flagged hidden on)
+brought sabers 3 and 4 back at his hidden wrists: sabers floating. The port sends "SetTwoArms" again after
+activating a Grievous (vfunc +0x2AC, thiscall `(event, float delay)`, as the game's script call does):
+`SettleActivated` in `src/game/characters.cpp`.
+
 ## Changing the player live
 
 Reloading the body in place does not work: re-running the body load's mesh part on the live player

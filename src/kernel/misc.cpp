@@ -524,8 +524,35 @@ void BootInit(const void* launchData)
         void* page = MmAllocateContiguousMemoryEx(4096, 0, 0xFFFFFFFF, 0, PAGE_READWRITE);
         std::memcpy(page, launchData, 4096);
         LaunchDataPage = page;
-        const char* text = static_cast<const char*>(page) + 0x400;
+        char* text = static_cast<char*>(page) + 0x400;
         g_BootArguments.assign(text, strnlen(text, 3072));
+        // The port's own arguments for the dev map and Heroes vs Villains (game/devmap.h, game/hvv.h) belong to its
+        // level alone: the game's level changes keep every argument but the map (a Quit from a match to the
+        // menus would carry them into every later level), so they go unless the map is the dev map's level.
+        static const char* const kLevelOnly[] = { "devmap:", "custommap:", "hvv" };
+        std::string lower = " " + g_BootArguments + " ";
+        for (char& c : lower)
+            c = char(tolower(static_cast<unsigned char>(c)));
+        if (lower.find(" map:u107_uta_grievoussurvival ") == std::string::npos) { // (not previousmap:)
+            std::string kept, word;
+            for (size_t i = 0; i <= g_BootArguments.size(); ++i) {
+                if (i < g_BootArguments.size() && g_BootArguments[i] != ' ') {
+                    word += g_BootArguments[i];
+                    continue;
+                }
+                bool levelOnly = false;
+                for (const char* prefix : kLevelOnly)
+                    levelOnly |= _strnicmp(word.c_str(), prefix, strlen(prefix)) == 0;
+                if (!word.empty() && !levelOnly)
+                    kept += (kept.empty() ? "" : " ") + word;
+                word.clear();
+            }
+            if (kept.size() != g_BootArguments.size()) {
+                g_BootArguments = kept;
+                std::memset(text, 0, 3072);
+                std::memcpy(text, kept.data(), std::min<size_t>(kept.size(), 3071));
+            }
+        }
         // only the level from the arguments: they can hold the player's profile name, and logs get shared
         std::string map;
         const size_t at = g_BootArguments.find("map:");

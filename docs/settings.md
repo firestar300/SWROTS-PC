@@ -30,6 +30,10 @@ Camera=0            ; 0: a shared camera keeps both players in the picture; 1: i
 FriendlyFire=0      ; 1: the two players' blows hurt each other (they stay allies)
 Boss=1              ; 1: in boss fights player 2 plays the boss, as in Versus; 0: fights beside player 1
 Player2=            ; player 2's character where the mission has no companion (e.g. IAnakin); empty: automatic
+
+[HvV]
+OverheadInfo=2      ; over the fighters' heads, their name, health and Force: 0 off, 1 allies only, 2 everyone
+OthersSlowMotion=0  ; 1: other fighters' slow motion and saber-lock camera reach you too (0: only moves you are in)
 ```
 
 Notes:

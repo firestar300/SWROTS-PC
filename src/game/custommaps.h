@@ -25,6 +25,12 @@ struct CustomMap {
     std::vector<std::pair<float, float>> spawns;
     bool hasBounds = false;
     float bounds[4] = {};      // x0 z0 x1 z1
+    // its light ([Lighting]): negative: the dev map's
+    float ambient[3] = { -1, -1, -1 }, characterAmbient[3] = { -1, -1, -1 };
+    float lightScale = 1.0f;
+    std::vector<uint32_t> bakedLight; // a colour a vertex, from its Baked file
+    std::string music;         // its track: a music slot of the game's (e.g. mus_m13_templebattle01_lp), empty: none
+    std::wstring musicFile;    // the track's file (<map folder>\<slot>.hwx)
     // its place in the dev map: own coordinates (x, z) -> the dev map's
     float yaw = 0, middle[2] = {};
 };

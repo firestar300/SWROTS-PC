@@ -480,6 +480,23 @@ uint8_t* CreateCharacter(const char* name, const std::string& costume, const std
     return object;
 }
 
+// Grievous has two sets of arms, the second with sabers 3 and 4 (attach points AUX1/AUX2); his class script's Init
+// (0x3BD2F0) sends "SetTwoArms" (0x3BC820: the B arms' materials hidden, sabers 3 and 4 switched off, their hidden
+// flags left clear). A character created once the level is loaded runs that Init inside the spawn (0xA2DE0 ->
+// 0xB6540 -> vfunc +0x220), so the activation after it (IJedi's +0xB4, 0x280790, switches on every saber not flagged
+// hidden) brought sabers 3 and 4 back at his hidden wrists: floating. Sent again after the activation, as the game's
+// script call does (vfunc +0x2AC, thiscall (event, delay)).
+constexpr uint32_t kGrievousVtable = 0x005C0E48;
+constexpr uint32_t kSendScriptEvent = 0x2AC;
+
+void SettleGrievous(uint8_t* character)
+{
+    if (!character || *reinterpret_cast<uint32_t*>(character) != kGrievousVtable)
+        return;
+    reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, const char*, float)>(
+        (*reinterpret_cast<void* const* const*>(character))[kSendScriptEvent / 4])(character, nullptr, "SetTwoArms", 0.0f);
+}
+
 bool PlaceCharacter(uint8_t* object, const float* m, const char* name, std::string& error)
 {
     const bool spawned = reinterpret_cast<bool(__cdecl*)(uint8_t*, void*, const float*, int)>(
@@ -491,6 +508,7 @@ bool PlaceCharacter(uint8_t* object, const float* m, const char* name, std::stri
     // Then activated, as the dev item spawner (0x2DF849) and the player's creation (0xB1D60) do.
     reinterpret_cast<void(__fastcall*)(uint8_t*, void*)>((*reinterpret_cast<void* const* const*>(object))[kActivate / 4])(
         object, nullptr);
+    SettleGrievous(object);
     return true;
 }
 
@@ -1581,7 +1599,7 @@ bool BodyBoundToAnotherClass(uint8_t* character)
     return it != g_BodyClasses.end() && it->second != CharacterType(character);
 }
 
-bool ReplacePlayer(std::string& error, uint8_t** keepOld)
+bool ReplacePlayer(std::string& error)
 {
     if (!PlayerAlive()) {
         error = g_PlayerSpawned ? "only in story levels, not in Versus" : "no mission is running";
@@ -1663,10 +1681,7 @@ bool ReplacePlayer(std::string& error, uint8_t** keepOld)
     *reinterpret_cast<int*>(old + kCharacterControl) = 0;
     reinterpret_cast<void(__fastcall*)(uint8_t*, void*, int)>(uintptr_t(kBindController))(old, nullptr, -1);
     RemoveProjectiles();
-    if (keepOld)
-        *keepOld = old;
-    else
-        DestroyObject(old);
+    DestroyObject(old);
     if (!ControllerBoundTo(fresh)) {
         LOG_WARN("Characters: controller 0 lost the new player; bound again");
         reinterpret_cast<void(__fastcall*)(uint8_t*, void*, int)>(uintptr_t(kBindController))(fresh, nullptr, 0);
@@ -2032,6 +2047,11 @@ bool SetPlayerClass(const char* className, bool checked)
 const char* PlayerClass()
 {
     return g_PlayerClass;
+}
+
+void SettleActivated(uint8_t* character)
+{
+    SettleGrievous(character);
 }
 
 } // namespace swrots::game

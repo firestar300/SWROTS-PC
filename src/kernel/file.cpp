@@ -51,6 +51,8 @@ static std::wstring g_Mods;
 static std::wstring g_Logs;
 
 static std::mutex g_LinkLock;
+static std::mutex g_OverrideLock;
+static std::map<std::string, std::wstring> g_DiscOverrides; // lower-case disc path -> the PC's file
 static std::map<std::string, std::string> g_Links; // lower-case link name -> target
 
 static std::string Lower(std::string s)
@@ -155,6 +157,15 @@ static std::wstring GeneratedPath(const std::string& rest)
     return g_Cache + L"\\disc" + Widen(rest);
 }
 
+void SetDiscFileOverride(const std::string& rest, const std::wstring& host)
+{
+    std::lock_guard<std::mutex> lock(g_OverrideLock);
+    if (host.empty())
+        g_DiscOverrides.erase(Lower(rest));
+    else
+        g_DiscOverrides[Lower(rest)] = host;
+}
+
 // Resolves an Xbox object name to a host NT path ("\??\C:\...").
 static bool ResolveDevicePath(const std::string& path, std::wstring& host)
 {
@@ -187,6 +198,15 @@ static bool ResolveDevicePath(const std::string& path, std::wstring& host)
         if (!g_Logs.empty() && Lower(rest) == "\\message.log") {
             host = L"\\??\\" + g_Logs + L"\\Message.log";
             return true;
+        }
+        // A file this start serves in a disc file's place (SetDiscFileOverride), ahead of mods\.
+        {
+            std::lock_guard<std::mutex> lock(g_OverrideLock);
+            auto it = g_DiscOverrides.find(Lower(rest));
+            if (it != g_DiscOverrides.end()) {
+                host = L"\\??\\" + it->second;
+                return true;
+            }
         }
         // Mod overrides: a file at the same relative path under mods\ replaces
         // the disc's copy. Directories resolve to mods\ only when the disc has

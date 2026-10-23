@@ -41,8 +41,8 @@ Up/Down recall earlier commands.
 | `characters` | every character in the level: side, AI controller, health, distance, target |
 | `despawn` | removes the characters you spawned in this level (the Characters tab's Remove spawned) |
 | `restart` | restarts the running mission (as the pause menu's Restart Mission does) |
-| `devmap` | the game restarts into the developer map: an empty, lit, flat floor under the sky with nothing on it but you, to test anything (see the [Game tab](#game-tab)) |
-| `hvv [<8 classes>] [player <0-7>] [lives <n>] [health <n>]` | prototype: Heroes vs Villains, four heroes against four villains on the developer map, with lives and a scoreboard ([how to play it](research/heroes-vs-villains.md#playing-it)) |
+| `devmap [<map>]` | the game restarts into the developer map: an empty, lit, flat floor under the sky with nothing on it but you, to test anything (see the [Game tab](#game-tab)); with a map's name, a [custom map](modding/custom-maps.md) on it |
+| `hvv [<classes>] [heroes <n>] [player <n>] [lives <n>] [health <n>] [intro on\|off] [map <map>]` | Heroes vs Villains: heroes against villains (2 to 16 classes, half each unless `heroes` says) on the developer map or a custom map, with lives and a scoreboard ([how to play it](research/heroes-vs-villains.md#playing-it)) |
 | `autorestart [on\|off]` | whether a `player` change applies at once during a mission: live, or by restarting it (on by default) |
 | `variants <class>` | lists a character class's costumes and texture sets |
 | `meshes [text]` | lists the character bodies on the disc and under `mods\` (those containing the text) |
@@ -330,9 +330,9 @@ switches, in one place.
 
 ## Heroes vs Villains tab
 
-A prototype of a 4 against 4 team mode on the developer map ([Heroes vs
-Villains](research/heroes-vs-villains.md)): pick the four heroes and four villains (the Versus fighters and the
-other saber duelists), mark the one you play, set each side's **lives** (35) and every fighter's **health** (250;
+A team mode on the developer map ([Heroes vs Villains](research/heroes-vs-villains.md)): set how many
+**heroes** and **villains** fight (1 to 8 each; 4 against 4 by default), pick them (the Versus fighters, the other
+saber duelists and custom characters), mark the one you play, set each side's **lives** (35) and every fighter's **health** (250;
 less makes for quicker falls), and whether the **intro** plays, then **Start**: the game restarts into the match
 (the `hvv` command, which the tab writes for you). **Defaults** puts the default line-up back. Below, the running
 match: each side's lives and fighters standing, the winner, and **Play it again**.

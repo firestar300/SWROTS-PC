@@ -16,6 +16,7 @@ struct HvvPickState {
     std::vector<std::string> picks;  // classes so far: heroes first, then villains (the first is the player's)
     std::string highlighted;         // the class under the cursor
     std::string map;                 // the map, as shown
+    int perSide = 4;                 // fighters a side (the line-up's length is twice that)
     int lives = 0, health = 0;
     bool intro = true;
 };

@@ -11,6 +11,8 @@ A custom map comes as a folder to drop into the game's `mods\` folder:
 
 ```
 mods\maps\cantina\map.ini               the map
+mods\maps\cantina\cantina_light.bin     its baked light (optional)
+mods\maps\cantina\mus_<slot>.hwx        its music (optional)
 mods\meshes\maps\cantina\cantina.msh    its model
 mods\meshes\maps\cantina\*.stx          its textures (named as the model names them)
 ```
@@ -31,6 +33,7 @@ the human characters are 73-75 units tall):
 ```ini
 [Map]
 Name=Mos Eisley Cantina          ; as shown
+Music=mus_m13_templebattle01_lp  ; its music (optional): a music slot of the game, the track beside map.ini
 Model=maps\cantina\cantina       ; its model under meshes\, without .msh
 Vertices=10234                   ; the model's vertex count (all its parts)
 Floor=0                          ; the height (y) of its floor: it stands there on the dev map's floor
@@ -43,10 +46,33 @@ Bounds=-900 -900 900 900         ; x0 z0 x1 z1: where fighters may come back
 [Collision]
 Box1=0 100 450 600 100 20 0      ; a box: its centre (x y z), half its size (x y z), its turn (degrees, about y)
 Box2=...                         ; numbered from 1, without gaps
+
+[Lighting]                       ; all optional; a colour is one number (grey) or three (red green blue)
+Ambient=0.10 0.09 0.08           ; the model's ambient light (the floor's is 0.8)
+Baked=cantina_light.bin          ; its baked light: a colour a vertex (u32 0xAARRGGBB, the model's vertex order)
+BakedScale=0.5                   ; the baked light dimmed (below 1) or brightened
+CharacterAmbient=0.26 0.23 0.20  ; the characters' ambient light (the dev map's is 0.55)
+Lights=0.6                       ; the level's point lights' intensity, scaled
 ```
 
 The map is turned and moved so that the middle between its two lines is the dev map's middle and the heroes face the
 villains along +z: the intro's camera, the line-up and the end are then the same as on the floor.
+
+## Light
+
+Without `[Lighting]` the model is lit by a bright ambient light alone, as the floor. With a baked light the level's
+static entry takes it per vertex (its "ambient lighting only" turned off): a converted map can keep the lighting its
+first game baked. Dim it all to taste: the cantina uses its Battlefront II light at half, a low ambient and dimmer
+characters.
+
+## Music
+
+`Music=` names one of the game's music slots (the files `audio\xbox\mus_*.hwx`); the track beside map.ini, named
+after the slot, plays in its place while the map plays (only then: other levels keep the slot's own track, and the
+`mods\audio\xbox\` music replacements are not touched). The track must be in the slot's format: Xbox ADPCM, at the
+slot's sample rate and exactly its length (`tools/audio/hwx.py encode`, see [replacing music](replacing-music.md)).
+The level's own music start is kept: its player start triggers a sequencer that picks one of its four music objects
+at random; all four name the map's slot.
 
 ## The model
 
@@ -72,9 +98,20 @@ vertex, is white: hence `Vertices`).
   characters, projectiles, the camera, ...; a copy of the wall's) and its `__handlecount` grows.
 - The loose model and the textures in its folder are declared to the level when the level asks for the model, as
   for a custom character's body.
+- **The light**: the static entry's `MGR_AmbientLight` and `MGR_Ambientlightingonly`; the static instance's baked
+  light (one u32 a vertex); `ILevelProperties`' "Character ambient color" and "Dynamic-mesh ambient color"; the light
+  manager's lights' `__intn`.
+- **The music**: Grievous Survival's player start (`IPointSpawnPlayer`, "Initially trigger objects") triggers a
+  sequencer (`ISequencer_x`, "Single Random Event") over four `IAudio` objects of Type Music, event triggered; the
+  dev map keeps them, their "Sound Link" (`ep3\Ep3_Streaming\music\<slot>`) naming the map's slot, and the port
+  serves the map's file in the slot file's place for that start (`kernel::SetDiscFileOverride`, ahead of mods\).
+- **The AI has no paths** on the dev map: it walks straight at its target. In Heroes vs Villains a fighter that a
+  wall, the bar or a platform keeps from its target is moved beside it (see [Heroes vs
+  Villains](../research/heroes-vs-villains.md#how-it-works)).
 
 ## Not yet
 
 - Collision other than boxes (a model's own shape: ramps, stairs); fighters stand on the dev map's floor.
+- Paths for the AI (a map's own navigation).
 - Versus on a custom map.
-- The map's own lights and sky.
+- The map's own point lights and sky (its light so far: baked, ambient, and the level's lights scaled).

@@ -11,6 +11,7 @@
 #include <string>
 
 #include "debug/console.h"
+#include "core/settings.h"
 #include "debug/gamefont.h"
 #include "game/freecam.h"
 #include "game/hvv.h"
@@ -91,8 +92,9 @@ void Scoreboard(const game::HvvState& s, const ImGuiViewport* vp, float u)
         Text(middle + sign * 18 * u, top, h, SideColour(side), line, side == 0 ? 1.0f : 0.0f);
         Text(middle + sign * 70 * u, top + 6 * u, h * 0.6f, Faded(SideColour(side), 0.85f),
             side == 0 ? "HEROES" : "VILLAINS", side == 0 ? 1.0f : 0.0f);
-        for (int k = 0; k < 4; ++k) {
-            const auto& f = s.fighters[side * 4 + k];
+        const int from = side == 0 ? 0 : s.heroes, to = side == 0 ? s.heroes : int(s.fighters.size());
+        for (int k = 0; k < to - from; ++k) {
+            const auto& f = s.fighters[size_t(from + k)];
             const ImVec2 at(middle + sign * (24 + k * 16) * u, top + h + 9 * u);
             g_Draw->AddCircleFilled(at, 5 * u, f.standing || !s.started ? SideColour(side) : kDim);
             if (f.isPlayer)
@@ -102,12 +104,56 @@ void Scoreboard(const game::HvvState& s, const ImGuiViewport* vp, float u)
     g_Draw->AddLine(ImVec2(middle, top), ImVec2(middle, top + h), IM_COL32(230, 230, 230, 200), 2 * u);
 }
 
+// Over a fighter's head (as Battlefront's, small): its side's mark, its name, its health and its Force, fading out
+// with distance; for everyone or the allies only, as settings.ini's [HvV] OverheadInfo says.
+void OverheadInfo(const game::HvvState& s, const ImGuiViewport* vp, float u)
+{
+    const int show = GetSettings().hvvOverheadInfo;
+    if (!s.fighting || show == 0)
+        return;
+    const int mySide = s.fighters[size_t(s.player)].side;
+    for (const auto& f : s.fighters) {
+        if (f.isPlayer || !f.standing || !f.placed || (show == 1 && f.side != mySide))
+            continue;
+        ImVec2 at;
+        float depth = 0;
+        if (!OnScreen(f.head, vp, at, &depth) || depth > 2200.0f)
+            continue;
+        // an enemy's only while in sight (an ally's through walls too, as the markers)
+        float m[16], fov = 0;
+        if (f.side != mySide && game::GameCameraPlacement(m, fov) && !game::HvvLineOfSight(m + 12, f.head))
+            continue;
+        const float alpha = std::clamp((2200.0f - depth) / 700.0f, 0.0f, 1.0f) * 0.9f;
+        const float k = std::clamp(700.0f / std::max(depth, 1.0f), 0.65f, 1.0f); // a little smaller far away
+        const float w = 54 * u * k, bar = 3.5f * u * k;
+        const float top = at.y - (f.side == mySide ? 30 : 20) * u * k; // above the allies' chevrons
+        const ImU32 colour = SideColour(f.side);
+        // the bars: health (the side's colour), Force under it (blue-white)
+        const float x0 = at.x - w / 2;
+        float y = top;
+        g_Draw->AddRectFilled(ImVec2(x0 - 1, y - 1), ImVec2(x0 + w + 1, y + bar + 1), IM_COL32(0, 0, 0, int(160 * alpha)));
+        g_Draw->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + w * f.health, y + bar), Faded(colour, alpha));
+        if (f.force >= 0) {
+            y += bar + 1.5f * u;
+            const float fb = bar * 0.6f;
+            g_Draw->AddRectFilled(ImVec2(x0 - 1, y - 1), ImVec2(x0 + w + 1, y + fb + 1), IM_COL32(0, 0, 0, int(160 * alpha)));
+            g_Draw->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + w * f.force, y + fb), Faded(IM_COL32(150, 200, 255, 255), alpha));
+        }
+        // the name, with the side's mark before it
+        const float th = 11 * u * k;
+        const float nameW = Width(th, f.name), mark = 3 * u * k;
+        const float nx = at.x - (nameW + 3 * mark) / 2;
+        g_Draw->AddCircleFilled(ImVec2(nx + mark, top - th * 0.55f - 2 * u), mark, Faded(colour, alpha));
+        Text(nx + 3 * mark, top - th - 3 * u, th, Faded(kWhite, alpha), f.name);
+    }
+}
+
 // Over each teammate standing: a small marker of the side's colour (as Battlefront's).
 void Markers(const game::HvvState& s, const ImGuiViewport* vp, float u)
 {
     if (!s.fighting)
         return;
-    const int mySide = s.fighters[s.player].side;
+    const int mySide = s.fighters[size_t(s.player)].side;
     for (const auto& f : s.fighters) {
         if (f.isPlayer || !f.standing || !f.placed || f.side != mySide)
             continue;
@@ -200,7 +246,8 @@ void Leaderboard(const game::HvvState& s, const ImGuiViewport* vp, float u)
     const float rowH = 22 * u, colW = 330 * u, gap = 24 * u;
     const float width = 2 * colW + gap, left = vp->Pos.x + (vp->Size.x - width) / 2;
     const float top = vp->Pos.y + vp->Size.y * 0.2f;
-    g_Draw->AddRectFilled(ImVec2(left - 14 * u, top - 14 * u), ImVec2(left + width + 14 * u, top + 7 * rowH + 6 * u),
+    const int rows = std::max(s.heroes, int(s.fighters.size()) - s.heroes);
+    g_Draw->AddRectFilled(ImVec2(left - 14 * u, top - 14 * u), ImVec2(left + width + 14 * u, top + (rows + 3) * rowH + 6 * u),
         kPanel, 6 * u);
     for (int side = 0; side < 2; ++side) {
         const float x = left + side * (colW + gap);
@@ -210,7 +257,7 @@ void Leaderboard(const game::HvvState& s, const ImGuiViewport* vp, float u)
         for (int c = 0; c < 4; ++c)
             Text(cols[c], top + 6 * u, 12 * u, kDim, heads[c], 1.0f);
         std::vector<int> order;
-        for (int i = side * 4; i < side * 4 + 4; ++i)
+        for (int i = side == 0 ? 0 : s.heroes; i < (side == 0 ? s.heroes : int(s.fighters.size())); ++i)
             order.push_back(i);
         std::sort(order.begin(), order.end(), [&](int a, int b) { return s.fighters[a].score > s.fighters[b].score; });
         float y = top + 1.6f * rowH;
@@ -286,8 +333,8 @@ void PickPanel(const game::HvvPickState& p, const ImGuiViewport* vp, float u)
         float y = top + 42 * u;
         Text(x, y, 18 * u, SideColour(side), side == 0 ? "HEROES" : "VILLAINS");
         y += 26 * u;
-        for (int k = 0; k < 4; ++k) {
-            const size_t i = size_t(side * 4 + k);
+        for (int k = 0; k < p.perSide; ++k) {
+            const size_t i = size_t(side * p.perSide + k);
             const bool current = i == next;
             std::string name = i < p.picks.size() ? game::HvvDisplayName(p.picks[i])
                 : current && !p.highlighted.empty() ? game::HvvDisplayName(p.highlighted) : "-";
@@ -300,11 +347,13 @@ void PickPanel(const game::HvvPickState& p, const ImGuiViewport* vp, float u)
         }
     }
     char rules[96];
-    snprintf(rules, sizeof rules, "LIVES %d   HEALTH %d   INTRO %s", p.lives, p.health, p.intro ? "ON" : "OFF");
+    snprintf(rules, sizeof rules, "%dV%d   LIVES %d   HEALTH %d   INTRO %s", p.perSide, p.perSide, p.lives, p.health,
+        p.intro ? "ON" : "OFF");
     Text(left + width / 2, top + height - 62 * u, 15 * u, kWhite, rules, 0.5f);
     Text(left + width / 2, top + height - 41 * u, 15 * u, kWhite, "MAP  " + p.map, 0.5f);
     Text(left + width / 2, top + height - 19 * u, 12 * u, kDim,
-        next < 8 ? "A ADD   B REMOVE   UP DOWN LIVES   X HEALTH   Y INTRO   LB RB MAP" : "", 0.5f);
+        next < size_t(2 * p.perSide) ? "A ADD   B REMOVE   UP DOWN LIVES   X HEALTH   Y INTRO   LB RB MAP   LT RT TEAMS"
+                                     : "", 0.5f);
 }
 
 void DrawHvvHud()
@@ -317,10 +366,12 @@ void DrawHvvHud()
         return;
     }
     const game::HvvState s = game::GetHvvState();
-    // the game's own HUD hidden for the end (its `hud` variable, the opacity), given back after
+    // the game's own HUD hidden for the end and while the player is down (its `hud` variable, the opacity), given
+    // back after
     static bool hudHidden = false;
-    if (s.ending != hudHidden) {
-        hudHidden = s.ending;
+    const bool hide = s.active && (s.ending || s.playerDown);
+    if (hide != hudHidden) {
+        hudHidden = hide;
         WriteGameVariable("hud", hudHidden ? "0" : "1");
     }
     if (!s.active)
@@ -332,6 +383,7 @@ void DrawHvvHud()
         EndScreen(s, vp, u);
         return;
     }
+    OverheadInfo(s, vp, u);
     Markers(s, vp, u);
     Scoreboard(s, vp, u);
     KillFeed(s, vp, u);

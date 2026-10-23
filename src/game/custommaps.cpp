@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "core/log.h"
 
@@ -20,6 +21,23 @@ constexpr float kPi = 3.14159265f;
 constexpr float kFloorBounds[4] = { 1500.0f, 2700.0f, 24000.0f, 13500.0f };
 
 std::vector<CustomMap> g_Maps;
+std::wstring g_Mods;
+
+bool ReadAll(const std::wstring& path, std::vector<uint8_t>& data)
+{
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+    LARGE_INTEGER size{};
+    bool ok = GetFileSizeEx(file, &size) && size.QuadPart < (64 << 20);
+    if (ok) {
+        data.resize(size_t(size.QuadPart));
+        DWORD read = 0;
+        ok = ReadFile(file, data.data(), DWORD(data.size()), &read, nullptr) && read == data.size();
+    }
+    CloseHandle(file);
+    return ok;
+}
 
 std::string Profile(const std::wstring& file, const wchar_t* section, const wchar_t* key)
 {
@@ -122,6 +140,61 @@ bool ReadMap(const std::wstring& file, const std::string& id, CustomMap& m)
             break;
         m.boxes.push_back({ v[0], v[1], v[2], v[3], v[4], v[5], v.size() > 6 ? v[6] * kPi / 180 : 0.0f });
     }
+    // its light: one number (grey) or three (red, green, blue) each
+    auto colour = [&](const wchar_t* key, float (&out)[3]) {
+        const std::vector<float> c = Numbers(Profile(file, L"Lighting", key));
+        if (c.size() >= 3)
+            std::copy(c.begin(), c.begin() + 3, out);
+        else if (c.size() == 1)
+            out[0] = out[1] = out[2] = c[0];
+    };
+    colour(L"Ambient", m.ambient);
+    colour(L"CharacterAmbient", m.characterAmbient);
+    v = Numbers(Profile(file, L"Lighting", L"Lights"));
+    if (!v.empty() && v[0] >= 0)
+        m.lightScale = v[0];
+    const std::string baked = Profile(file, L"Lighting", L"Baked");
+    if (!baked.empty()) { // in the map's folder, else the model's
+        std::vector<uint8_t> data;
+        const std::wstring folder = file.substr(0, file.find_last_of(L'\\') + 1);
+        const std::wstring name(baked.begin(), baked.end());
+        if (!ReadAll(folder + name, data) && !ReadAll(g_Mods + L"\\meshes\\" +
+                std::wstring(m.modelFolder.begin(), m.modelFolder.end()) + name, data))
+            LOG_WARN("Custom maps: %s's baked light %s is missing", id.c_str(), baked.c_str());
+        else if (data.size() != size_t(m.vertices) * 4)
+            LOG_WARN("Custom maps: %s's baked light has %zu colours, not one for each of its %u vertices", id.c_str(),
+                data.size() / 4, m.vertices);
+        else {
+            m.bakedLight.resize(m.vertices);
+            std::memcpy(m.bakedLight.data(), data.data(), data.size());
+            // BakedScale: the baked light dimmed or brightened (its red, green and blue)
+            const std::vector<float> scale = Numbers(Profile(file, L"Lighting", L"BakedScale"));
+            if (!scale.empty() && scale[0] >= 0 && scale[0] != 1.0f) {
+                for (uint32_t& c : m.bakedLight) {
+                    uint32_t out = c & 0xFF000000;
+                    for (int shift = 0; shift < 24; shift += 8)
+                        out |= uint32_t(std::min(255.0f, float((c >> shift) & 0xFF) * scale[0])) << shift;
+                    c = out;
+                }
+            }
+        }
+    }
+    // its music: Music=<a slot of the game's sound table>, the track <map folder>\<slot>.hwx in the slot's format
+    // (Xbox ADPCM at the slot's rate and length: tools/audio/hwx.py)
+    std::string music = Profile(file, L"Map", L"Music");
+    for (char& c : music)
+        c = char(tolower(static_cast<unsigned char>(c)));
+    if (!music.empty()) {
+        const std::wstring track = file.substr(0, file.find_last_of(L'\\') + 1) + std::wstring(music.begin(), music.end()) +
+            L".hwx";
+        if (music.rfind("mus_", 0) != 0 || GetFileAttributesW(track.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            LOG_WARN("Custom maps: %s's music %s needs %s.hwx in its folder (a mus_ slot)", id.c_str(), music.c_str(),
+                music.c_str());
+        } else {
+            m.music = music;
+            m.musicFile = track;
+        }
+    }
     // its place: the middle between the lines at the dev map's middle, the heroes' line facing +z
     m.middle[0] = (m.heroes[0] + m.villains[0]) / 2;
     m.middle[1] = (m.heroes[1] + m.villains[1]) / 2;
@@ -135,6 +208,7 @@ bool ReadMap(const std::wstring& file, const std::string& id, CustomMap& m)
 void InstallCustomMaps(const std::wstring& mods)
 {
     g_Maps.clear();
+    g_Mods = mods;
     WIN32_FIND_DATAW found;
     const std::wstring folder = mods + L"\\maps\\";
     HANDLE find = FindFirstFileW((folder + L"*").c_str(), &found);
@@ -203,6 +277,11 @@ void ApplyCustomMap(const CustomMap& map, DevMapLayout& layout)
     CustomMapToWorld(map, 0, 0, layout.modelX, layout.modelZ);
     layout.modelY = -map.floor;
     layout.modelYaw = map.yaw;
+    std::copy(std::begin(map.ambient), std::end(map.ambient), layout.modelAmbient);
+    std::copy(std::begin(map.characterAmbient), std::end(map.characterAmbient), layout.characterAmbient);
+    layout.lightScale = map.lightScale;
+    layout.bakedLight = map.bakedLight;
+    layout.music = map.music;
     layout.boxes.clear();
     for (const DevMapBox& b : map.boxes) {
         DevMapBox w = b;

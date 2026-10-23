@@ -130,8 +130,11 @@ bool RemoveSpawnedCharacter(uint8_t* character);
 // Changes the running level's player at once, where it stands, to the current choice (class, costume,
 // texture set, body; the player's own class when none is chosen): a new character takes over the
 // controls, the camera and the level's references to the player. False with `error` set when it cannot.
-// `keepOld`: the old body stays in the level (a character without controls, e.g. to die there), handed back.
-bool ReplacePlayer(std::string& error, uint8_t** keepOld = nullptr);
+bool ReplacePlayer(std::string& error);
+
+// After the port activates a character the level holds (vfunc +0xB4): puts back what its class script had set that
+// the activation undid (Grievous's second arms' sabers, switched off with those arms hidden).
+void SettleActivated(uint8_t* character);
 
 // The player's saber colour (r, g, b, 0-1), its own only: other characters keep theirs, and power-ups
 // no longer change it. Applies at once to a running level's player, and from then on; null goes back

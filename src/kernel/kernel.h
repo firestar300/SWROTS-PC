@@ -42,6 +42,10 @@ void LaunchGame(const std::string& arguments);
 // The launch arguments this start of the game was given (empty when none: a start from the dashboard or
 // Default_Xbox.cfg).
 const std::string& LaunchArguments();
+// A disc file served from elsewhere for this start of the game: `rest` is its path on the disc (e.g.
+// `\audio\xbox\mus_x.hwx`, any case), `host` the file's path on the PC. It comes before mods\ (cleared with an
+// empty `host`; every start begins with none).
+void SetDiscFileOverride(const std::string& rest, const std::wstring& host);
 // Development aid: restarts the game in this process every `seconds` (SWROTS_REBOOT_EVERY), as a level
 // change does, to test what a restart leaves behind.
 void StartRebootTest(unsigned seconds);

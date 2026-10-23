@@ -70,6 +70,8 @@ void LoadSettings(const std::wstring& path)
     s.coopFriendlyFire = ReadInt(L"Coop", L"FriendlyFire", d.coopFriendlyFire, 0, 1) != 0;
     s.coopBoss = ReadInt(L"Coop", L"Boss", d.coopBoss, 0, 1) != 0;
     s.coopPlayer2 = ReadText(L"Coop", L"Player2", d.coopPlayer2);
+    s.hvvOverheadInfo = ReadInt(L"HvV", L"OverheadInfo", d.hvvOverheadInfo, 0, 2);
+    s.hvvOthersSlowMotion = ReadInt(L"HvV", L"OthersSlowMotion", d.hvvOthersSlowMotion, 0, 1) != 0;
     SaveSettings(); // writes defaults for missing keys, normalizes values
     LOG_INFO("Settings: %dx%d%s%s%s, resolution scale %d%s, %s, %dx anisotropic, bloom %s, %d fps", s.width, s.height,
         s.fullscreen ? " fullscreen" : "", s.vsync ? " vsync" : "", s.stretch ? " stretched" : "", s.resolutionScale,
@@ -105,6 +107,8 @@ void SaveSettings()
     WriteInt(L"Coop", L"FriendlyFire", s.coopFriendlyFire);
     WriteInt(L"Coop", L"Boss", s.coopBoss);
     WriteText(L"Coop", L"Player2", s.coopPlayer2);
+    WriteInt(L"HvV", L"OverheadInfo", s.hvvOverheadInfo);
+    WriteInt(L"HvV", L"OthersSlowMotion", s.hvvOthersSlowMotion);
 }
 
 } // namespace swrots

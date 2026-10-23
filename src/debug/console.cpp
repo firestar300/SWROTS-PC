@@ -267,8 +267,9 @@ void Help(uint8_t* console)
     Print(LineKind::Output, "  restart                  restart the mission");
     Print(LineKind::Output, "  devmap [<map>]           the developer map: an empty, lit, flat floor to test anything,");
     Print(LineKind::Output, "                           or a custom map on it (mods/maps; now: %s)", CustomMapList().c_str());
-    Print(LineKind::Output, "  hvv [<8 classes>] [player <0-7>] [lives <n>] [health <n>] [intro on|off] [map <map>]");
-    Print(LineKind::Output, "                           Heroes vs Villains (heroes, then villains); hvv board on|off");
+    Print(LineKind::Output, "  hvv [<classes>] [heroes <n>] [player <n>] [lives <n>] [health <n>] [intro on|off] [map <map>]");
+    Print(LineKind::Output, "                           Heroes vs Villains: 2-16 classes, heroes then villains (half each");
+    Print(LineKind::Output, "                           unless `heroes` says); hvv board on|off");
     Print(LineKind::Output, "  autorestart [on|off]     whether player changes apply at once (live, or by restarting)");
     Print(LineKind::Output, "  variants <class>         a character class's costumes");
     Print(LineKind::Output, "  meshes [text]            the character meshes on the disc (those containing text)");
@@ -1053,7 +1054,8 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
     } else if (command == "coop") {
         Coop(words);
     } else if (command == "hvv") {
-        // hvv [<8 classes: heroes, then villains>] [player <0-7>] [lives <n>] [health <n>] [intro on|off] [map <id>]
+        // hvv [<classes: heroes, then villains>] [heroes <n>] [player <n>] [lives <n>] [health <n>] [intro on|off]
+        //     [map <id>]
         // hvv board on|off: the leaderboard pinned (as Tab held shows it)
         if (words.size() > 1 && words[1] == "board") {
             game::SetHvvBoardPinned(words.size() < 3 || words[2] != "off");
@@ -1061,7 +1063,7 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
         }
         std::vector<std::string> lineup;
         std::string map;
-        int player = 0, lives = 0, health = 0;
+        int heroes = 0, player = 0, lives = 0, health = 0;
         bool intro = true;
         for (size_t i = 1; i < words.size(); ++i) {
             if (words[i] == "player" && i + 1 < words.size())
@@ -1074,13 +1076,15 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
                 intro = words[++i] != "off";
             else if (words[i] == "map" && i + 1 < words.size())
                 map = words[++i];
+            else if (words[i] == "heroes" && i + 1 < words.size())
+                heroes = std::atoi(words[++i].c_str());
             else
                 lineup.push_back(words[i]);
         }
         if (lineup.empty())
             lineup = game::HvvDefaultLineup();
         std::string error;
-        if (game::StartHvv(lineup, player, lives, health, intro, map, error))
+        if (game::StartHvv(lineup, heroes, player, lives, health, intro, map, error))
             Print(LineKind::Output, "  starting Heroes vs Villains...");
         else
             Print(LineKind::Error, "%s", error.c_str());
