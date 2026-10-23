@@ -37,9 +37,18 @@ Title=Jedi Knight
 Base=IAnakin             ; the class whose moves, AI and sounds it has
 Costume=Luke             ; its costume's name
 Mesh=luke\luke           ; its body, under meshes\chars, without .msh
-Code=LKE                 ; three letters (the costume's code)
 Saber=0 255 0            ; its saber's colour, 0-255 each (optional; 0 255 0 is the game's own green)
 Side=Hero                ; Hero or Villain: its side in Heroes vs Villains by default
+Speaker=Luke             ; its name in subtitles (optional; the name's first word)
+Code=                    ; whose lines it says, a dialogue speaker code such as AKN or OBW (optional; the base's)
+
+[Voice]                  ; optional: its own lines for some dialogue events (see "Its voice" below)
+BAT=luk001 luk002        ; battle cries
+TNT=luk003 luk004        ; taunts
+KIL=luk008 luk009        ; after a kill
+
+[Subtitles]              ; optional: the texts of its own lines
+LUK001=For the Rebellion!
 ```
 
 ## The body
@@ -111,8 +120,25 @@ custom face instead. As with the menus, a texture no PAK has decodes to nothing 
 in the place of one the disc has and never shows (cut Commander Cody's, `hud_face_unlock_cody01`): one custom
 character's portrait so far. The served pictures keep the replaced texture's own name inside (offset 0x40).
 
-## Not yet
+## Its voice
 
-- A voice of its own (the base's lines play), and its name in subtitles.
+A character's voice lines are the dialogue engine's (`TDialogueEngine`), not its class's sound set (sabers,
+footsteps): each level loads a dialogue database (its own `Dialogue\<mission>_Dialogue`, else `GEN_Dialogue`) of
+entries per speaker code and event (BAT battle cry, TNT taunt, KIL kill, FSE first sight of an enemy, HIT hit or
+saber lock, DIE death, and grunts), whose lines are in `Dialogue\*.rpx` archives (headerless Xbox ADPCM, mono,
+22050 Hz) with their texts in the string tables. A character's speaker code is its costume record's code (+0xC),
+taken by RegisterSpeaker (0x8D800) in its Init: a custom character's record has the base's code (or `Code=`), so it
+says the base's lines; its name in subtitles (+0xA04, set at 0x15BC56 from `IDS_SPEAKER_<its list's name>`) is
+its own (`Speaker=`).
+
+With a `[Voice]` section it says its own lines for those events: the files `mods\characters\<name>\voice\<line>.xadpcm`
+(headerless Xbox ADPCM, mono, 22050 Hz, as the game's), their texts in `[Subtitles]`. The port serves the generic
+archive (`Dialogue\gen_dialogue.rpx`, mounted in every level) with the lines added (built in `cache\voice\` when
+they change) and, when the dialogue engine starts one of the character's entries for such an event (StartEntry,
+0x90330), gives the entry the character's line for that call: the voice, the subtitle and the line's length follow
+it. Its other sounds (grunts) stay the base's. The lines take turns per event (a turn passes only when the
+engine starts or queues one). Subtitles show with the game's subtitles on (the Settings menu, or `set subtitles true`).
+
+## Not yet
 - More than one custom character on the Versus select screen and with a HUD portrait (a way to load pictures
   that no PAK has).

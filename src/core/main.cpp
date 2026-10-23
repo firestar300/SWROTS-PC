@@ -173,7 +173,7 @@ static void StartGame(const void* launchData)
     debug::InstallConsoleHooks();
     game::InstallDevOptions(g_Boot.debugDisplays);
     game::InstallGameFixes();
-    game::InstallCustomCharacters(g_Boot.paths.mods);
+    game::InstallCustomCharacters(g_Boot.paths.mods, g_Boot.paths.gameData, g_Boot.paths.cache);
     game::InstallVersus();
     game::InstallRoster();
     game::InstallAnimationAliases();

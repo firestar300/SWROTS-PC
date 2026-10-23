@@ -20,7 +20,13 @@ struct CustomCharacter {
     std::string base;        // the class whose moves it has, e.g. "IAnakin"
     std::string costume;     // its costume's name, e.g. "Luke"
     std::string mesh;        // its body under meshes\chars ("folder\file"), e.g. "luke\luke"
-    std::string code;        // three letters, e.g. "LKE"
+    std::string code;        // its dialogue speaker code (three letters: whose lines it says, e.g. "AKN"); empty: the
+                             // base's
+    std::string speaker;     // its name in subtitles, e.g. "Luke"
+    std::string speakerKey;  // the string id suffix the game looks its subtitle name up by (IDS_SPEAKER_<key>)
+    // its own voice ([Voice]): for a dialogue event (BAT battle cry, TNT taunt, KIL kill, FSE first sight, HIT hit or
+    // saber lock, ...), the lines it says instead of the base's (their ids, upper case, e.g. "LUK003")
+    std::vector<std::pair<std::string, std::vector<std::string>>> voice;
     bool hasSaber = false;
     float saber[3] = {};     // its saber's colour (0-1), when it has one of its own
     int side = 0;            // 0 hero, 1 villain (Heroes vs Villains' default side)
@@ -31,7 +37,8 @@ struct CustomCharacter {
 
 // Each start of the game image, before the classes are first looked up: reads mods\characters\*.ini and hooks the
 // class lookup.
-void InstallCustomCharacters(const std::wstring& mods);
+// `gameData` and `cache`: for a custom character's own voice lines (the dialogue archive served with them added).
+void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameData, const std::wstring& cache);
 
 // The custom characters (this start's), and one by class name (case-insensitive), or null.
 const std::vector<CustomCharacter>& CustomCharacters();
