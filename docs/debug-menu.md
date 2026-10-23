@@ -206,6 +206,11 @@ level as its own costume is refused: a body's animation binding is built for the
 stays for the level. Bodies you wear as another class are your own copies, so they never get in the
 way.
 
+**Silent spawns.** A spawned character has no sounds of its own: the game sets up a character class's sounds only
+while the level loads, so a class spawned later plays none. Its saber still hums and swings when it swings, but
+the clashes when it blocks and the hits when it is struck are silent, and so are its voice and footsteps. The
+level's own characters (and you) keep theirs.
+
 **Every move, in every level.** A level normally loads only the moves its own characters use: in a
 level without lightsaber duels, a hero you spawn (and your own Jedi against him) would lack the duel
 moves: blocks against a lightsaber, the clashes that lead to a saber lock, some specials. With the

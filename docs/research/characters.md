@@ -192,6 +192,13 @@ at it, so (a) a manual file (a body's `.ban`) the disc does not have as a file i
 instead of being opened on the disc, and (b) the packer's "put the stream back" after a manual read
 (0x51E40, called by the scene at 0x4B0D5) returns at once when not streaming.
 
+**Sounds.** The game's character sound manager (`[0x6943F0]`) registers a class's sound set only while the level
+loads (it checks at 0x159729; a class created later gets "Spawned character '%s' is initialized after load, and
+will not have valid sounds" and no set, character `+0x444` = 0). The class's script adds its own cues to its set
+at load (Vader's breathing), which a character created later never runs. A spawned character's own sounds are
+therefore skipped: its clashes and hits when it blocks or is struck, its voice, its footsteps. Registering a set
+late is not enough (an attempt gave a half-built set and faults at 0x16F262); it needs the script's sound setup.
+
 **Shared bindings.** A body's animation binding (`<mesh>.ban`) is one resource per mesh, shared by every
 character wearing it; it is rebuilt for a class whose animations it lacks. Two classes in one body in
 the same level therefore fight over it, and the one rebuilt over crashes in its animation (0x663C5).
