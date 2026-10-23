@@ -368,6 +368,24 @@ void ForceRules(uint8_t* inst, uint8_t* classObject, const CustomCharacter& cust
         Offer(false, classObject, 0x11B6 + alt);
 }
 
+// The Jedi Brute's script, starting (its Init 0x3DA3E0), sets its character's Force to none (0x177AE0 (0, 0), cdecl
+// (force, most) on the script's character [[0x6943CC]+0x68], called at 0x3DA43C): a custom character's Force= instead.
+constexpr uint32_t kBruteSetForceCall = 0x003DA43C;
+constexpr uint32_t kSetForce = 0x00177AE0;
+
+void __cdecl BruteSetForceHook(float force, float most)
+{
+    __try {
+        uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(kScriptCharacter));
+        uint8_t* character = scripts ? *reinterpret_cast<uint8_t**>(scripts + 0x68) : nullptr;
+        const CustomCharacter* custom = character ? CustomCharacterOf(character) : nullptr;
+        if (custom && custom->force >= 0)
+            force = most = custom->force;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    reinterpret_cast<void(__cdecl*)(float, float)>(uintptr_t(kSetForce))(force, most);
+}
+
 void __cdecl BruteRulesHook(uint8_t* inst, uint8_t* classObject)
 {
     reinterpret_cast<RulesFn>(uintptr_t(kBruteRules))(inst, classObject);
@@ -410,6 +428,48 @@ __declspec(naked) void SpeakerNameStore()
     }
 }
 
+// The custom characters made this start (to find a saber's owner; a removed one no longer has a custom list).
+std::vector<uint8_t*> g_Made;
+
+// A saber's colour is set through its class's SetColor (vtable +0x604: 0x286180 for the single-bladed classes,
+// 0x2864F0 for the double-bladed one), by the equip, the power-up switch and some moves (the Jedi Brute's specials
+// light its saber in its own green): a custom character's sabers keep its colour.
+constexpr uint32_t kSaberVtables[] = { 0x005B1FF0, 0x005B2620, 0x005B2C90, 0x005B32F8, 0x005B3958 };
+constexpr uint32_t kSaberSetColorSlot = 0x604 / 4;
+constexpr uint32_t kCharacterWeapons = 0x1080; // 4 slots, 0x20 apart
+using SetColorFn = void(__fastcall*)(uint8_t*, void*, const float*);
+SetColorFn g_SetColorOriginals[std::size(kSaberVtables)] = {};
+
+const float* OwnColour(uint8_t* weapon)
+{
+    __try {
+        for (uint8_t* c : g_Made) {
+            const CustomCharacter* custom = CustomCharacterOf(c);
+            if (!custom || !custom->hasSaber)
+                continue;
+            for (int i = 0; i < 4; ++i)
+                if (*reinterpret_cast<uint8_t**>(c + kCharacterWeapons + i * 0x20) == weapon)
+                    return custom->saber;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    return nullptr;
+}
+
+void __fastcall SaberSetColorHook(uint8_t* weapon, void*, const float* rgb)
+{
+    const uint32_t vtable = *reinterpret_cast<uint32_t*>(weapon);
+    SetColorFn original = nullptr;
+    for (size_t i = 0; i < std::size(kSaberVtables); ++i)
+        if (kSaberVtables[i] == vtable)
+            original = g_SetColorOriginals[i];
+    if (!original)
+        return;
+    if (const float* own = OwnColour(weapon))
+        rgb = own;
+    original(weapon, nullptr, rgb);
+}
+
 uint8_t* __fastcall CreateCustom(uint8_t* info, void*)
 {
     Proxy* p = ProxyOf(info);
@@ -426,6 +486,7 @@ uint8_t* __fastcall CreateCustom(uint8_t* info, void*)
     *reinterpret_cast<uint8_t**>(character + kCharacterVariants) = p->list.data();
     if (p->custom->hasSaber)
         *reinterpret_cast<const float**>(character + kCharacterSaberColor) = p->custom->saber;
+    g_Made.push_back(character);
     return character;
 }
 
@@ -784,6 +845,22 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
     }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kSaberSetup)), kSaberSetupBytes, sizeof kSaberSetupBytes) == 0)
         PatchCall(kSaberSetup, reinterpret_cast<const void*>(&SaberSetupHook), sizeof kSaberSetupBytes);
+    g_Made.clear();
+    for (size_t i = 0; i < std::size(kSaberVtables); ++i) {
+        uint32_t* slot = reinterpret_cast<uint32_t*>(uintptr_t(kSaberVtables[i])) + kSaberSetColorSlot;
+        const uint32_t hook = uint32_t(reinterpret_cast<uintptr_t>(&SaberSetColorHook));
+        if (*slot == hook)
+            continue;
+        g_SetColorOriginals[i] = reinterpret_cast<SetColorFn>(uintptr_t(*slot));
+        PatchBytes(uintptr_t(slot), &hook, 4);
+    }
+    {
+        uint8_t call[5] = { 0xE8 };
+        const int32_t rel = int32_t(kSetForce) - int32_t(kBruteSetForceCall + 5);
+        std::memcpy(call + 1, &rel, 4);
+        if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kBruteSetForceCall)), call, 5) == 0)
+            PatchCall(kBruteSetForceCall, reinterpret_cast<const void*>(&BruteSetForceHook), 5);
+    }
     {
         uint8_t call[5] = { 0xE8 };
         const int32_t rel = int32_t(kBruteRules) - int32_t(kBruteRulesCall + 5);

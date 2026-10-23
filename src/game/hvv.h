@@ -26,6 +26,7 @@ bool HvvLineOfSight(const float a[3], const float b[3]);
 struct HvvState {
     bool active = false;
     bool started = false;  // the fighters are there (the intro, the fight or the end)
+    bool intro = false;    // the intro is on
     bool fighting = false; // the fight is on
     int winner = -1;       // 0 the heroes, 1 the villains; -1 none yet
     int player = 0;        // the player's place in the line-up

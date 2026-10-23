@@ -309,7 +309,7 @@ constexpr size_t kScreenItemCount = 0x1D; // in the pause screen: after "pausesc
 
 void PatchPauseScreen(std::vector<uint8_t>& data)
 {
-    if (BootIsVersusDuel()) // a duel's pause screen (fewer rows): co-op is no part of it
+    if (BootIsMatch()) // a duel's or a Heroes vs Villains match's pause screen: co-op is no part of it
         return;
     size_t quit, quitEnd, resume, resumeEnd, settings, settingsEnd, existing, existingEnd;
     if (!MenuRowBlock(data, "quit", quit, quitEnd) || !MenuRowBlock(data, "resume", resume, resumeEnd) ||
@@ -1285,6 +1285,10 @@ void CoopFrame()
     if (now - g_State.levelSeen < kSettleMs) {
         g_State.reason = "the mission is starting";
         return;
+    }
+    if (!g_State.decided && BootIsMatch()) { // a Versus duel or a Heroes vs Villains match: no co-op
+        g_State.decided = true;
+        g_State.nativeTwoPlayers = true;
     }
     if (!g_State.decided) {
         // A mission whose slot 2 is taken: a co-op bonus mission's player 2 left to the AI (Cin Drallig

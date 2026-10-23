@@ -1327,6 +1327,7 @@ HvvState GetHvvState()
         return s;
     const ULONGLONG now = GetTickCount64();
     s.started = g_Woken;
+    s.intro = g_Active && g_Phase == Phase::Intro;
     s.fighting = g_Phase == Phase::Fight;
     s.winner = g_Winner;
     s.player = g_Player;
@@ -1548,6 +1549,8 @@ void HvvFrame()
         return;
     }
     if (g_Phase == Phase::Intro) {
+        if (input::TakeHeldPress()) // skipped (A or Start), as the game's Versus intros
+            g_IntroAt = now - IntroLength();
         const ULONGLONG t = now - g_IntroAt;
         if (t < kShotsLength) {
             const int shot = IntroShotAt(t);
@@ -1607,8 +1610,9 @@ void HvvFrame()
         if (ReplacePlayer(error)) {
             player = PlayerObject();
             Track(me, player);
+            // it waits far from the fight (out of the kill camera's picture and the AI's way) until it comes back
             float m[16];
-            SafePlace(g_Player, m);
+            Transform(kDevMapMiddleX - 9000, kDevMapMiddleZ + 4500, 0, m);
             VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(player, kPlace)(player, nullptr, m);
             FullHealth(player);
             Field<uint8_t>(player, kCharacterInvincible) = 1;

@@ -343,7 +343,7 @@ void DrawHvvHud()
     // the game's own HUD hidden for the end and while the player is down (its `hud` variable, the opacity), given
     // back after
     static bool hudHidden = false;
-    const bool hide = s.active && (s.ending || s.playerDown);
+    const bool hide = s.active && (s.ending || s.playerDown || s.intro);
     if (hide != hudHidden) {
         hudHidden = hide;
         WriteGameVariable("hud", hudHidden ? "0" : "1");
@@ -356,6 +356,10 @@ void DrawHvvHud()
     const float u = std::max(0.5f, vp->Size.y / 720.0f);
     if (s.ending) {
         EndScreen(s, vp, u);
+        return;
+    }
+    if (s.intro) { // the intro: its titles alone
+        Captions(s, vp, u);
         return;
     }
     OverheadInfo(s, vp, u);

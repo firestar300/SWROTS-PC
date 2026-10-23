@@ -25,6 +25,8 @@ const CustomMap* DevMapCustomMap();
 bool BootArgument(const char* name, std::string& value);
 // Whether this start is a Versus duel (one of the game's duel arenas, or the dev map's duel).
 bool BootIsVersusDuel();
+// Whether this start is a match (a Versus duel or Heroes vs Villains): co-op is no part of it.
+bool BootIsMatch();
 
 // What a mode puts on this start's dev map (before the level loads).
 void SetDevMapLayout(const DevMapLayout& layout);

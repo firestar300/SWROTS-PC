@@ -793,10 +793,16 @@ void InstallScreens()
     SetMenuText("IDS_PORT_HVV_START", L"Start");
     // the line-up's defaults, once (kept across the game's restarts, as the rules)
     if (g_Lineup[0].empty()) {
+        // Versus fighters only (the select screen offers no others); a custom villain fourth when there is one
         static const char* const kDefaults[2 * kMaxPerSide] = { "IObiwan", "IYoda", "IMace", "ISerra", "ICinDrallig",
-            "IVader", "IDooku", "IGrievous", "IPalpatine", "IAnakin" };
+            "IVader", "IDooku", "IGrievous", "IAnakin", "IVader" };
         for (int i = 0; i < 2 * kMaxPerSide; ++i)
             g_Lineup[i] = kDefaults[i];
+        for (const CustomCharacter& custom : CustomCharacters())
+            if (custom.side == 1) {
+                g_Lineup[kMaxPerSide + 3] = custom.className;
+                break;
+            }
     }
     UpdateTexts();
     AddShellHandler("HvvValue", &MakeValue);

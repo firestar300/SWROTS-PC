@@ -506,6 +506,13 @@ void HoldPlayerInput(bool hold)
     g_HoldPlayer = hold;
 }
 
+static std::atomic<bool> g_HeldPress = false;
+
+bool TakeHeldPress()
+{
+    return g_HeldPress.exchange(false);
+}
+
 static float Stick(SHORT value)
 {
     constexpr float kDeadZone = 0.2f;
@@ -635,6 +642,18 @@ static DWORD __stdcall XbInputGetState(HANDLE device, XInputState* state)
         return ERROR_DEVICE_NOT_CONNECTED;
     DWORD index = DWORD(port - g_Ports);
     XGamepad g = {};
+    if (index == 0 && g_HoldPlayer) { // held back: only A or Start pressed is noted (TakeHeldPress)
+        XGamepad held = {};
+        if (!RunningInBackground())
+            ReadHostPad(0, held);
+        ReadKeyboard(held);
+        ReadTestButtons(held);
+        static bool wasDown = false;
+        const bool down = held.bAnalogButtons[0] > 0x40 || (held.wButtons & XB_START);
+        if (down && !wasDown)
+            g_HeldPress = true;
+        wasDown = down;
+    }
     if (index != 0 || !g_HoldPlayer) { // the free camera has player 1's input
         if (!RunningInBackground()) { // an unattended test: a pad in someone's hands on this PC is not its input
             ReadHostPad(index, g);

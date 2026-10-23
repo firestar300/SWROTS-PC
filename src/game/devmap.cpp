@@ -355,6 +355,12 @@ bool BootIsVersusDuel()
     return false;
 }
 
+bool BootIsMatch()
+{
+    std::string value;
+    return BootIsVersusDuel() || (g_Active && BootArgument("hvv", value));
+}
+
 void SetDevMapLayout(const DevMapLayout& layout)
 {
     g_Layout = layout;

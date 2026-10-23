@@ -54,6 +54,8 @@ struct FreeCameraControls {
 FreeCameraControls ReadFreeCameraControls();
 // Whether player 1's input is held back from the game (the free camera has it).
 void HoldPlayerInput(bool hold);
+// While it is held back: whether player 1 pressed A or Start since the last call (to skip what holds it, an intro).
+bool TakeHeldPress();
 
 // For SWROTS_TEST_BUTTONS' screen marks (@<screen>): the front end switched screens; `matches` tells whether a mark's
 // screen name is the one switched to.
