@@ -1054,7 +1054,7 @@ void HvvTab()
 
 bool OverlayShown()
 {
-    return g_Ready && (game::HvvActive() || game::GetHvvPickState().active);
+    return g_Ready && (game::HvvActive() || (game::GetHvvPickState().active || game::GetHvvPickState().versus));
 }
 
 void RenderMenu()

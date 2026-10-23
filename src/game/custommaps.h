@@ -33,6 +33,11 @@ struct CustomMap {
     std::wstring musicFile;    // the track's file (<map folder>\<slot>.hwx)
     // its place in the dev map: own coordinates (x, z) -> the dev map's
     float yaw = 0, middle[2] = {};
+    // its collision boxes in the dev map (centre, half size, turn about y), for the sight lines below
+    struct Wall {
+        float centre[3], half[3], yaw;
+    };
+    std::vector<Wall> walls;
 };
 
 // Each start of the game image, before the dev map: reads mods\maps\*\map.ini.
@@ -48,6 +53,10 @@ void CustomMapToWorld(const CustomMap& map, float x, float z, float& worldX, flo
 float CustomMapYaw(const CustomMap& map);
 // Its bounds in the dev map (x0, z0, x1, z1), the dev map's floor when it has none.
 void CustomMapBounds(const CustomMap& map, float (&bounds)[4]);
+
+// Whether the line between two points of the dev map passes none of the map's collision boxes (the cameras and the
+// overhead info keep out of its walls).
+bool CustomMapLineOfSight(const CustomMap& map, const float a[3], const float b[3]);
 
 // Puts the map in a dev map layout: its model, where it stands, its collision boxes.
 void ApplyCustomMap(const CustomMap& map, DevMapLayout& layout);

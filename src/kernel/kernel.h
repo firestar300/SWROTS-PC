@@ -46,6 +46,10 @@ const std::string& LaunchArguments();
 // `\audio\xbox\mus_x.hwx`, any case), `host` the file's path on the PC. It comes before mods\ (cleared with an
 // empty `host`; every start begins with none).
 void SetDiscFileOverride(const std::string& rest, const std::wstring& host);
+// A filter over the launch arguments the game writes for its own level changes (XLaunchNewImage), run just before
+// it restarts: it may change them (e.g. the level).
+using LaunchFilter = void (*)(std::string& arguments);
+void SetLaunchFilter(LaunchFilter filter);
 // Development aid: restarts the game in this process every `seconds` (SWROTS_REBOOT_EVERY), as a level
 // change does, to test what a restart leaves behind.
 void StartRebootTest(unsigned seconds);

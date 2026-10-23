@@ -21,8 +21,12 @@ The port reads `mods\maps\*\map.ini` at every start (the log says `Custom maps: 
 Then:
 
 - **Heroes vs Villains**: on its select screen (Multi Player > Heroes vs Villains) LB / RB (the Xbox pad's White /
-  Black) choose the map; in the console `hvv map cantina`.
-- **Walking in it**: `devmap cantina` in the console (`devmap` alone: the floor).
+  Black) choose the map; in the console `hvv map cantina`; the debug menu's Heroes vs Villains tab.
+- **Versus** (the game's own duels: rounds, its HUD, its duel cameras): on the Versus select screen LB / RB choose
+  the arena (top right: the game's choice or a custom map); the duel then plays on the map, whichever arena the
+  arena screen picks. In the console `versus ILuke IVader map cantina` (you against the computer).
+- **Walking in it**: `devmap cantina` in the console (`devmap` alone: the floor), or its button on the debug menu's
+  Game tab.
 - The launch argument `custommap:<map>` next to `devmap:1` (for example in `mods\Default_Xbox.cfg`).
 
 ## The map file
@@ -111,9 +115,29 @@ vertex, is white: hence `Vertices`).
   wall, the bar or a platform keeps from its target is moved beside it (see [Heroes vs
   Villains](../research/heroes-vs-villains.md#how-it-works)).
 
+## In Versus
+
+A level is a Versus duel by its own file: `ILevelProperties`' "Head to head arena?" (+0xCC; the level start
+0x2AADE0 then runs the duel's setup 0x27DBC0: fighters, HUD faces, cameras), two `IVaderMultiSpawnPoint` objects
+(an `IPointSpawnPlayer` by descent; "Player ID" absent for player 1, 'Player 2' for player 2; each round, 0x27C380
+puts the fighters on them, set down on the floor) and the duel's camera, an `ICameraControl` 'Rail Tracking' (its two
+focus objects the spawn points, re-pointed to the fighters; its rail in its "Cinematics", relative to it) with its
+helpers and trigger bound. The launch arguments name the fighters (`v_c1`, `v_c2`), their controllers (`v_p1`,
+`v_p2`; -1 the computer) and the rounds (`v_roundcount`); the duel returns to the menus by itself.
+
+So a custom map's duel is the game's Versus starting its Utapau arena (`u107_uta_grievous_01`, whose PAK brings the
+duel's fighters, sounds, intro cameras and HUD art), whose level file the port serves as the dev map built for a
+duel: the head-to-head flag, Grievous Survival's player start made player 1's spawn point and player 2's added
+(220 units apart across the middle), and the arena's own camera objects (from the arena's level file as it loads)
+turned and moved from the arena's fighters onto these, their focus on these spawn points. The arena's rail was
+laid out for its own room: on a map with walls a camera adjuster brings the camera nearer the fighters, along its
+line to them, to the last place that sees them (the map's boxes). The select screen's choice rewrites the game's
+launch of the duel (`kernel::SetLaunchFilter`, just before its restart): the arena becomes the Utapau one, with
+`devmap:1 versus:1 custommap:<map>`.
+
 ## Not yet
 
 - Collision other than boxes (a model's own shape: ramps, stairs); fighters stand on the dev map's floor.
 - Paths for the AI (a map's own navigation).
-- Versus on a custom map.
+- A custom map on the game's own arena screen (its choice is on the select screen, LB / RB).
 - The map's own point lights and sky (its light so far: baked, ambient, and the level's lights scaled).

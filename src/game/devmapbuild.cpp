@@ -324,6 +324,37 @@ Property* Find(std::vector<Property>& props, const char* name)
     return nullptr;
 }
 
+// The objects of these classes in a level file, found by their class name as the object section writes it (its
+// length, then the name; the object's size and properties after): for a level whose scene this builder does not
+// read (a Versus arena's).
+std::vector<Object> ObjectsOfClasses(const std::vector<uint8_t>& level, std::initializer_list<const char*> classes)
+{
+    std::vector<Object> out;
+    for (const char* cls : classes) {
+        const uint32_t length = uint32_t(strlen(cls));
+        std::vector<uint8_t> pattern(4 + length);
+        std::memcpy(pattern.data(), &length, 4);
+        std::memcpy(pattern.data() + 4, cls, length);
+        for (auto it = level.begin(); (it = std::search(it, level.end(), pattern.begin(), pattern.end())) != level.end(); ++it) {
+            Reader r{ level };
+            r.p = size_t(it - level.begin());
+            Object o;
+            o.cls = r.String();
+            const size_t start = r.p;
+            const uint32_t size = r.U32();
+            const uint32_t count = r.U32();
+            if (!r.ok || size < 8 || start + size > level.size() || count > 256)
+                continue;
+            ReadProperties(r, count, o.props);
+            if (!r.ok || r.p > start + size)
+                continue;
+            o.tail.assign(level.begin() + r.p, level.begin() + start + size);
+            out.push_back(std::move(o));
+        }
+    }
+    return out;
+}
+
 Object* FindObject(std::vector<Object>& objects, const char* cls)
 {
     for (Object& o : objects)
@@ -870,6 +901,92 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
             keptObjects.push_back(std::move(o));
     }
     say("%zu of %zu objects kept", keptObjects.size(), objects.size());
+    // a duel: "Head to head arena?" (ILevelProperties +0xCC: the game's Versus start, rounds, HUD and cameras), not a
+    // bonus mission, and the two fighters' spawn points (IVaderMultiSpawnPoint, an IPointSpawnPlayer by descent:
+    // "Player ID" absent for player 1, 'Player 2' for player 2), on the floor (the game sets them down on it)
+    if (layout && layout->versus) {
+        Object* properties = FindObject(keptObjects, "ILevelProperties");
+        Object* first = FindObject(keptObjects, "IPointSpawnPlayer");
+        if (!properties || !first)
+            return fail("the duel's objects");
+        Writer one, zero;
+        one.U32(1);
+        zero.U32(0);
+        if (Property* p = Find(properties->props, "Head to head arena?"))
+            p->data = one.out;
+        else
+            properties->props.push_back({ "Head to head arena?", one.out });
+        if (Property* p = Find(properties->props, "Single player Bonus Mission?"))
+            p->data = zero.out;
+        auto place = [&](Object& o, double z, float yaw) {
+            const float c = std::cos(yaw), s = std::sin(yaw);
+            const float m[12] = { c, 0, -s, 0, 1, 0, s, 0, c, float(midX), float(kFloorY + 2.0), float(z) };
+            if (Property* t = Find(o.props, "Transform"); t && t->data.size() >= 48)
+                SetFloats(t, m);
+        };
+        first->cls = "IVaderMultiSpawnPoint";
+        place(*first, midZ - layout->duelGap / 2, 0.0f);
+        const uint32_t firstId = U32Of(Find(first->props, "ID")); // (the list grows below: `first` goes stale)
+        Object second;
+        second.cls = "IVaderMultiSpawnPoint";
+        Writer id, name, transform, player;
+        id.U32(kDevMapDuelId);
+        name.String("Player 2");
+        const float blank[12] = {};
+        transform.Raw(blank, sizeof blank);
+        player.String("Player 2");
+        second.props = { { "ID", id.out }, { "Name", name.out }, { "Transform", transform.out }, { "Player ID", player.out } };
+        second.tail.assign(8, 0);
+        place(second, midZ + layout->duelGap / 2, 3.14159265f);
+        keptObjects.push_back(std::move(second));
+        say(", a duel");
+        // the arena's duel camera: its objects turned and moved from the arena's fighters (their spawn points'
+        // middle, player 1 to player 2 along +z) onto these, their focus on these spawn points
+        std::vector<Object> spawns = ObjectsOfClasses(layout->duelArena, { "IVaderMultiSpawnPoint" });
+        std::vector<Object> camera = ObjectsOfClasses(layout->duelArena,
+            { "ICameraControl", "ICameraControlHelper", "ICameraControlTriggerBound" });
+        if (spawns.size() == 2 && !camera.empty()) {
+            if (Find(spawns[0].props, "Player ID"))
+                std::swap(spawns[0], spawns[1]); // player 1 first
+            const uint32_t arenaIds[2] = { U32Of(Find(spawns[0].props, "ID")), U32Of(Find(spawns[1].props, "ID")) };
+            const uint32_t ids[2] = { firstId, kDevMapDuelId };
+            Property* t1 = Find(spawns[0].props, "Transform");
+            Property* t2 = Find(spawns[1].props, "Transform");
+            if (t1 && t2 && t1->data.size() >= 48 && t2->data.size() >= 48) {
+                const double a[3] = { GetF(t1->data, 36), GetF(t1->data, 40), GetF(t1->data, 44) };
+                const double b[3] = { GetF(t2->data, 36), GetF(t2->data, 40), GetF(t2->data, 44) };
+                const double mid[3] = { (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2 };
+                const double dx = b[0] - a[0], dz = b[2] - a[2], d = std::max(1e-3, std::hypot(dx, dz));
+                const double c = dz / d, s = -dx / d; // turns the arena's axis onto +z
+                auto turn = [&](double x, double z, double& ox, double& oz) {
+                    ox = c * x + s * z;
+                    oz = -s * x + c * z;
+                };
+                for (Object& o : camera) {
+                    if (Property* t = Find(o.props, "Transform"); t && t->data.size() >= 48) {
+                        for (int row = 0; row < 3; ++row) {
+                            double x, z;
+                            turn(GetF(t->data, row * 12), GetF(t->data, row * 12 + 8), x, z);
+                            PutF(t->data, row * 12, x);
+                            PutF(t->data, row * 12 + 8, z);
+                        }
+                        double x, z;
+                        turn(GetF(t->data, 36) - mid[0], GetF(t->data, 44) - mid[2], x, z);
+                        PutF(t->data, 36, midX + x);
+                        PutF(t->data, 40, GetF(t->data, 40) - mid[1] + kFloorY);
+                        PutF(t->data, 44, midZ + z);
+                    }
+                    for (Property& p : o.props) // the focus on the arena's spawn points: on these
+                        for (size_t at = 0; at + 4 <= p.data.size(); ++at)
+                            for (int k = 0; k < 2; ++k)
+                                if (p.name != "ID" && std::memcmp(p.data.data() + at, &arenaIds[k], 4) == 0)
+                                    std::memcpy(p.data.data() + at, &ids[k], 4);
+                    keptObjects.push_back(std::move(o));
+                }
+                say(" with the arena's camera (%zu objects)", camera.size());
+            }
+        }
+    }
     // the layout's characters: an id, a name, a place (rows right, up, forward, position) and the 8 bytes after
     // the properties, as the level's own characters
     if (layout) {

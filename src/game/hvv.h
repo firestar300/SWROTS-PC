@@ -88,6 +88,10 @@ std::string HvvDisplayName(const std::string& className);
 // without a match in its fight.
 bool EndHvvNow();
 
+// The launch arguments that carry the player's profile into the next start (saving it first): the main menu after a
+// match keeps it. Empty without one (a start from Default_Xbox.cfg).
+std::string ProfileSessionArguments();
+
 // Pins the leaderboard (as holding Tab shows it), or unpins it.
 void SetHvvBoardPinned(bool pinned);
 

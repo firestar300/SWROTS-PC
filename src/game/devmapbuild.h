@@ -47,7 +47,16 @@ struct DevMapLayout {
     // Its music: a track of the game's sound table (e.g. "mus_m13_templebattle01_lp"), played from the start (one of
     // the level's music objects kept and pointed at it); empty: none.
     std::string music;
+    // A Versus duel (the game's own mode): the level is a head-to-head arena, the player's start becomes player 1's
+    // spawn point and player 2's is added, `duelGap` apart across the middle (player 1 on -z, facing +z).
+    bool versus = false;
+    float duelGap = 220.0f;
+    // The Versus arena's own level file: its duel camera (ICameraControl 'Rail Tracking', its helpers and trigger
+    // bound) is taken from it, moved from the arena's fighters onto the duel's.
+    std::vector<uint8_t> duelArena;
 };
+// The ids of the objects the dev map adds for a duel.
+constexpr uint32_t kDevMapDuelId = 0x00300100;
 // The ids the dev map's own objects take (the level's run far below).
 constexpr uint32_t kDevMapFirstId = 0x00300001;
 constexpr uint32_t kDevMapFirstBoxId = 0x00380001; // the collision boxes' brush handles

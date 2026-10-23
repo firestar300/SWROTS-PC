@@ -162,12 +162,6 @@ float g_Bounds[4] = { kFloorX0, kFloorZ0, kFloorX1, kFloorZ1 };
 float g_Margin = kFloorMargin;
 std::vector<std::pair<float, float>> g_Spawns; // a map's own places to come back (the dev map's coordinates)
 std::string g_MapName;
-// a map's collision boxes in the dev map (centre, half size, turn about y): what the cameras and the overhead
-// info must not look through
-struct WorldBox {
-    float centre[3], half[3], yaw;
-};
-std::vector<WorldBox> g_Walls;
 int g_KillEye = -1; // the kill camera's place last chosen (kept while it sees)
 
 struct FeedEntry {
@@ -470,7 +464,7 @@ bool LineOfSight(const float a[3], const float b[3]); // below, with the cameras
 void Unstick(int i, ULONGLONG now)
 {
     Fighter& f = g_Fighters[i];
-    if (i == g_Player || !Standing(f) || g_Walls.empty())
+    if (i == g_Player || !Standing(f) || !DevMapCustomMap())
         return;
     const float* p = Position(f.object);
     if (!f.stillSince || std::hypot(p[0] - f.stillAt[0], p[2] - f.stillAt[2]) > kStuckMove) {
@@ -1027,39 +1021,11 @@ void EndCamera(float m[16])
     LookAt(eye, target, m);
 }
 
-// Whether the line from `a` to `b` passes no collision box of the map (always on the floor, which has none): a slab
-// test in each box's own frame (the world turned back by its yaw).
+// Whether the line from `a` to `b` passes no collision box of the map (always on the floor, which has none).
 bool LineOfSight(const float a[3], const float b[3])
 {
-    for (const WorldBox& w : g_Walls) {
-        const float c = std::cos(w.yaw), s = std::sin(w.yaw);
-        float p[3], d[3];
-        const float da[3] = { a[0] - w.centre[0], a[1] - w.centre[1], a[2] - w.centre[2] };
-        const float db[3] = { b[0] - w.centre[0], b[1] - w.centre[1], b[2] - w.centre[2] };
-        p[0] = c * da[0] - s * da[2];
-        p[1] = da[1];
-        p[2] = s * da[0] + c * da[2];
-        d[0] = c * db[0] - s * db[2] - p[0];
-        d[1] = db[1] - p[1];
-        d[2] = s * db[0] + c * db[2] - p[2];
-        float t0 = 0, t1 = 1;
-        bool hit = true;
-        for (int k = 0; k < 3 && hit; ++k) {
-            if (std::fabs(d[k]) < 1e-6f) {
-                hit = std::fabs(p[k]) <= w.half[k];
-                continue;
-            }
-            float ta = (-w.half[k] - p[k]) / d[k], tb = (w.half[k] - p[k]) / d[k];
-            if (ta > tb)
-                std::swap(ta, tb);
-            t0 = std::max(t0, ta);
-            t1 = std::min(t1, tb);
-            hit = t0 <= t1;
-        }
-        if (hit)
-            return false;
-    }
-    return true;
+    const CustomMap* map = DevMapCustomMap();
+    return !map || CustomMapLineOfSight(*map, a, b);
 }
 
 // The kill camera (as Battlefront's): from the side of the player's body the game's camera was on when it fell
@@ -1287,7 +1253,6 @@ void InstallHvv()
     std::copy(std::begin(floorBounds), std::end(floorBounds), g_Bounds);
     g_Margin = kFloorMargin;
     g_Spawns.clear();
-    g_Walls.clear();
     g_MapName.clear();
     if (const CustomMap* map = DevMapCustomMap()) { // its lines (turned to face along z), its spawns and bounds
         g_LineGap = map->lineGap;
@@ -1300,16 +1265,6 @@ void InstallHvv()
             g_Spawns.push_back({ x, z });
         }
         g_MapName = map->name;
-        for (const DevMapBox& b : map->boxes) {
-            WorldBox w;
-            CustomMapToWorld(*map, b.cx, b.cz, w.centre[0], w.centre[2]);
-            w.centre[1] = kDevMapFloorY + b.cy - map->floor;
-            w.half[0] = b.hx;
-            w.half[1] = b.hy;
-            w.half[2] = b.hz;
-            w.yaw = b.yaw + CustomMapYaw(*map);
-            g_Walls.push_back(w);
-        }
     }
 
     DevMapLayout layout;
@@ -1463,6 +1418,11 @@ std::vector<std::string> HvvFighterClasses()
 std::string HvvDisplayName(const std::string& className)
 {
     return DisplayNameOf(className);
+}
+
+std::string ProfileSessionArguments()
+{
+    return SessionArguments();
 }
 
 bool EndHvvNow()

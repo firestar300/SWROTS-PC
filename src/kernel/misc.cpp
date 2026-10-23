@@ -403,8 +403,21 @@ void StartRebootTest(unsigned seconds)
         CloseHandle(thread);
 }
 
+static LaunchFilter g_LaunchFilter = nullptr;
+void SetLaunchFilter(LaunchFilter filter) { g_LaunchFilter = filter; }
+
 void XBAPI HalReturnToFirmware(ULONG Routine)
 {
+    if (Routine == 2 && LaunchDataPage && g_LaunchFilter) {
+        char* text = static_cast<char*>(LaunchDataPage) + 0x400;
+        std::string arguments(text, strnlen(text, 3072));
+        const std::string before = arguments;
+        g_LaunchFilter(arguments);
+        if (arguments != before) {
+            std::memset(text, 0, 3072);
+            std::memcpy(text, arguments.data(), std::min<size_t>(arguments.size(), 3071));
+        }
+    }
     const char* path = LaunchDataPage ? static_cast<const char*>(LaunchDataPage) + 8 : "";
     LOG_INFO("HalReturnToFirmware(%lu), launch path '%s'", Routine, path);
     LogFlush();
@@ -529,11 +542,13 @@ void BootInit(const void* launchData)
         // The port's own arguments for the dev map and Heroes vs Villains (game/devmap.h, game/hvv.h) belong to its
         // level alone: the game's level changes keep every argument but the map (a Quit from a match to the
         // menus would carry them into every later level), so they go unless the map is the dev map's level.
-        static const char* const kLevelOnly[] = { "devmap:", "custommap:", "hvv" };
+        static const char* const kLevelOnly[] = { "devmap:", "custommap:", "hvv", "versus:" };
         std::string lower = " " + g_BootArguments + " ";
         for (char& c : lower)
             c = char(tolower(static_cast<unsigned char>(c)));
-        if (lower.find(" map:u107_uta_grievoussurvival ") == std::string::npos) { // (not previousmap:)
+        const bool devMapLevel = lower.find(" map:u107_uta_grievoussurvival ") != std::string::npos || // (not previousmap:)
+            (lower.find(" map:u107_uta_grievous_01 ") != std::string::npos && lower.find(" versus:1 ") != std::string::npos);
+        if (!devMapLevel) {
             std::string kept, word;
             for (size_t i = 0; i <= g_BootArguments.size(); ++i) {
                 if (i < g_BootArguments.size() && g_BootArguments[i] != ' ') {

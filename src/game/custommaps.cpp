@@ -200,6 +200,16 @@ bool ReadMap(const std::wstring& file, const std::string& id, CustomMap& m)
     m.middle[1] = (m.heroes[1] + m.villains[1]) / 2;
     const float dx = m.villains[0] - m.heroes[0], dz = m.villains[1] - m.heroes[1];
     m.yaw = std::atan2(-dx, dz);
+    for (const DevMapBox& b : m.boxes) {
+        CustomMap::Wall w;
+        CustomMapToWorld(m, b.cx, b.cz, w.centre[0], w.centre[2]);
+        w.centre[1] = kDevMapFloorY + b.cy - m.floor;
+        w.half[0] = b.hx;
+        w.half[1] = b.hy;
+        w.half[2] = b.hz;
+        w.yaw = b.yaw + m.yaw;
+        m.walls.push_back(w);
+    }
     return true;
 }
 
@@ -250,6 +260,35 @@ void CustomMapToWorld(const CustomMap& map, float x, float z, float& worldX, flo
 }
 
 float CustomMapYaw(const CustomMap& map) { return map.yaw; }
+
+bool CustomMapLineOfSight(const CustomMap& map, const float a[3], const float b[3])
+{
+    // a slab test in each box's own frame (the world turned back by its yaw)
+    for (const CustomMap::Wall& w : map.walls) {
+        const float c = std::cos(w.yaw), s = std::sin(w.yaw);
+        const float da[3] = { a[0] - w.centre[0], a[1] - w.centre[1], a[2] - w.centre[2] };
+        const float db[3] = { b[0] - w.centre[0], b[1] - w.centre[1], b[2] - w.centre[2] };
+        const float p[3] = { c * da[0] - s * da[2], da[1], s * da[0] + c * da[2] };
+        const float d[3] = { c * db[0] - s * db[2] - p[0], db[1] - p[1], s * db[0] + c * db[2] - p[2] };
+        float t0 = 0, t1 = 1;
+        bool hit = true;
+        for (int k = 0; k < 3 && hit; ++k) {
+            if (std::fabs(d[k]) < 1e-6f) {
+                hit = std::fabs(p[k]) <= w.half[k];
+                continue;
+            }
+            float ta = (-w.half[k] - p[k]) / d[k], tb = (w.half[k] - p[k]) / d[k];
+            if (ta > tb)
+                std::swap(ta, tb);
+            t0 = std::max(t0, ta);
+            t1 = std::min(t1, tb);
+            hit = t0 <= t1;
+        }
+        if (hit)
+            return false;
+    }
+    return true;
+}
 
 void CustomMapBounds(const CustomMap& map, float (&bounds)[4])
 {

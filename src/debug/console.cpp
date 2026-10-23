@@ -267,6 +267,8 @@ void Help(uint8_t* console)
     Print(LineKind::Output, "  restart                  restart the mission");
     Print(LineKind::Output, "  devmap [<map>]           the developer map: an empty, lit, flat floor to test anything,");
     Print(LineKind::Output, "                           or a custom map on it (mods/maps; now: %s)", CustomMapList().c_str());
+    Print(LineKind::Output, "  versus <class> <class> [map <map>] [rounds <n>]  a Versus duel (you, the computer) on the");
+    Print(LineKind::Output, "                           developer map or a custom map");
     Print(LineKind::Output, "  hvv [<classes>] [heroes <n>] [player <n>] [lives <n>] [health <n>] [intro on|off] [map <map>]");
     Print(LineKind::Output, "                           Heroes vs Villains: 2-16 classes, heroes then villains (half each");
     Print(LineKind::Output, "                           unless `heroes` says); hvv board on|off; hvv end (ends it now)");
@@ -1016,7 +1018,7 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
         command != "infiniteforce" && command != "memory" && command != "team" &&
         command != "findrefs" && command != "despawn" && command != "characters" && command != "scale" &&
         command != "screenshot" && command != "coop" &&
-        command != "devmap" && command != "hvv")
+        command != "devmap" && command != "hvv" && command != "versus")
         return false;
     Print(LineKind::Output, "> %s", line.c_str());
     if (command == "duelist") {
@@ -1093,6 +1095,32 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
             Print(LineKind::Output, "  starting Heroes vs Villains...");
         else
             Print(LineKind::Error, "%s", error.c_str());
+    } else if (command == "versus") {
+        // versus <player 1's class> <the computer's class> [map <map>] [rounds <n>]: the game's Versus duel on the
+        // developer map or a custom map
+        std::string map;
+        int rounds = 0;
+        std::vector<std::string> classes;
+        for (size_t i = 1; i < words.size(); ++i) {
+            if (words[i] == "map" && i + 1 < words.size())
+                map = words[++i];
+            else if (words[i] == "rounds" && i + 1 < words.size())
+                rounds = std::atoi(words[++i].c_str());
+            else
+                classes.push_back(words[i]);
+        }
+        const char* first = classes.size() == 2 ? game::RegisteredClassName(classes[0].c_str()) : nullptr;
+        const char* second = classes.size() == 2 ? game::RegisteredClassName(classes[1].c_str()) : nullptr;
+        if (!first || !second) {
+            Print(LineKind::Error, "versus <your class> <the computer's class> [map <map>] [rounds <n>]");
+            return true;
+        }
+        if (!map.empty() && !game::FindCustomMap(map)) {
+            Print(LineKind::Error, "no map %s (maps: %s)", map.c_str(), CustomMapList().c_str());
+            return true;
+        }
+        Print(LineKind::Output, "  starting a duel...");
+        game::StartDuel(first, second, map, rounds, game::ProfileSessionArguments());
     } else if (command == "devmap") {
         // devmap [<map>]: the floor, or a custom map (mods/maps/<map>/map.ini)
         if (words.size() > 1 && !game::FindCustomMap(words[1])) {
@@ -1195,7 +1223,7 @@ void RunQueuedConsoleCommands()
             // and gone while a level loads).
             const std::vector<std::string> words = Words(line);
             static const char* const kStandalone[] = { "player", "variants", "meshes", "restart", "autorestart",
-                "duelist", "freecam", "saber", "spawn", "peek", "infiniteforce", "memory", "team", "findrefs", "despawn", "characters", "scale", "screenshot", "coop", "devmap", "hvv", "clear", "cls" };
+                "duelist", "freecam", "saber", "spawn", "peek", "infiniteforce", "memory", "team", "findrefs", "despawn", "characters", "scale", "screenshot", "coop", "devmap", "hvv", "versus", "clear", "cls" };
             const bool standalone = !words.empty() && std::any_of(std::begin(kStandalone), std::end(kStandalone),
                 [&](const char* c) { return _stricmp(words[0].c_str(), c) == 0; });
             if (standalone) {

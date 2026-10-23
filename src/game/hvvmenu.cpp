@@ -18,6 +18,8 @@
 #include "core/log.h"
 #include "core/patch.h"
 #include "game/custommaps.h"
+#include "game/devmap.h"
+#include "kernel/kernel.h"
 #include "game/hvv.h"
 #include "game/menus.h"
 #include "game/resources.h"
@@ -169,6 +171,42 @@ int g_LivesChoice = 3, g_HealthChoice = 1;
 bool g_Intro = true;
 int g_PerSide = 4;
 int g_MapChoice = 0; // 0 the dev map's floor, then the custom maps
+// The game's own Versus on a custom map: LB/RB on its select screen choose the arena (0: the game's own choice, then
+// the custom maps); its duel's launch is then made the dev map's duel on that map (see VersusLaunch).
+int g_VersusMap = 0;
+// The Versus arenas (the missionlist's Duel levels): a duel's launch names one of them.
+constexpr const char* kDuelArenas[] = { "u103_sep_throneroom_01", "u103_sep_throneroom_02", "u107_uta_grievous_01",
+    "u107_uta_grievous_02", "u108_cor_palpatine_01", "u108_cor_palpatine_02", "u110_cor_training_00",
+    "u110_cor_training_01", "u110_cor_training_02", "u140_mus_theduel_01", "u140_mus_theduel_02",
+    "u150_mus_theduel_01", "u150_mus_theduel_02", "u170_ep4_deathstar_02" };
+
+const CustomMap* VersusMap()
+{
+    const auto& maps = CustomMaps();
+    return g_VersusMap > 0 && g_VersusMap <= int(maps.size()) ? &maps[size_t(g_VersusMap - 1)] : nullptr;
+}
+
+// The game's launch of a Versus duel (map: one of its arenas) with a custom map chosen: the dev map's duel on it.
+void VersusLaunch(std::string& arguments)
+{
+    const CustomMap* map = VersusMap();
+    if (!map || arguments.find("hvv:") != std::string::npos)
+        return;
+    std::string words = " " + arguments + " ";
+    std::string lower = words;
+    for (char& c : lower)
+        c = char(tolower(static_cast<unsigned char>(c)));
+    for (const char* arena : kDuelArenas) {
+        const std::string token = std::string(" map:") + arena + " ";
+        const size_t at = lower.find(token);
+        if (at == std::string::npos)
+            continue;
+        words.replace(at, token.size(), " map:u107_uta_grievous_01 ");
+        arguments = words.substr(1, words.size() - 2) + " devmap:1 versus:1 custommap:" + map->id;
+        LOG_INFO("Versus: the duel on %s", map->name.c_str());
+        return;
+    }
+}
 
 // The chosen map's id (empty: the dev map's floor).
 std::string MapChoice()
@@ -189,8 +227,14 @@ void Sound(uint8_t* screen, int id)
 bool __fastcall Player1EventHook(uint8_t* screen, void*, int event)
 {
     g_SelectScreen = screen;
-    if (!g_HvvMode)
+    if (!g_HvvMode) {
+        if ((event == kWhite || event == kBlack) && !CustomMaps().empty()) { // the game's Versus: the arena
+            const int n = int(CustomMaps().size()) + 1;
+            g_VersusMap = (g_VersusMap + (event == kBlack ? 1 : n - 1)) % n;
+            return true;
+        }
         return reinterpret_cast<Player1EventFn>(uintptr_t(kPlayer1Event))(screen, nullptr, event);
+    }
     if (event == kChosen) {
         const int slot = *reinterpret_cast<const int*>(screen + 0x2C);
         if (const char* className = SelectSlotClass(slot)) {
@@ -276,12 +320,20 @@ void InstallHvvMenu()
     const uint32_t frame = uint32_t(reinterpret_cast<uintptr_t>(&SelectFrameHook));
     PatchBytes(frameSlot, &frame, 4);
     PatchCall(kPlayer1EventCall, reinterpret_cast<const void*>(&Player1EventHook), 5);
+    kernel::SetLaunchFilter(&VersusLaunch);
 }
 
 HvvPickState GetHvvPickState()
 {
     HvvPickState s;
-    s.active = g_HvvMode && g_SelectScreen && GetTickCount64() - g_SelectSeen < 300;
+    const bool shown = g_SelectScreen && GetTickCount64() - g_SelectSeen < 300;
+    if (shown && !g_HvvMode && !CustomMaps().empty()) { // the game's own Versus: the arena choice
+        s.versus = true;
+        const CustomMap* map = VersusMap();
+        s.arena = map ? map->name : "";
+        return s;
+    }
+    s.active = g_HvvMode && shown;
     if (!s.active)
         return s;
     s.picks = g_Picks;

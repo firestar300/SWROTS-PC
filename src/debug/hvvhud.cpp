@@ -365,6 +365,17 @@ void PickPanel(const game::HvvPickState& p, const ImGuiViewport* vp, float u)
 void DrawHvvHud()
 {
     const game::HvvPickState picks = game::GetHvvPickState();
+    if (picks.versus) { // the game's own Versus: the arena chosen with LB/RB
+        g_Draw = ImGui::GetForegroundDrawList();
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        const float u = std::max(0.5f, vp->Size.y / 720.0f);
+        const std::string text = "ARENA  " + (picks.arena.empty() ? std::string("THE GAME'S CHOICE") : picks.arena);
+        const float w = Width(15 * u, text) + 30 * u, right = vp->Pos.x + vp->Size.x - 30 * u, top = vp->Pos.y + 24 * u;
+        g_Draw->AddRectFilled(ImVec2(right - w, top), ImVec2(right, top + 46 * u), IM_COL32(8, 12, 24, 220), 4 * u);
+        Text(right - w / 2, top + 6 * u, 15 * u, kGold, text, 0.5f);
+        Text(right - w / 2, top + 26 * u, 11 * u, kDim, "LB RB CHANGE", 0.5f);
+        return;
+    }
     if (picks.active) {
         g_Draw = ImGui::GetForegroundDrawList();
         const ImGuiViewport* vp = ImGui::GetMainViewport();

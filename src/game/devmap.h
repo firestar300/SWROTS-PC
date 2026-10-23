@@ -31,4 +31,10 @@ void SetDevMapLayout(const DevMapLayout& layout);
 // it. Any thread; returns at once.
 void StartDevMap(const std::string& more = {});
 
+// Starts a Versus duel (the game's own) on the dev map or a custom map (`map`: its id; empty: the floor): `first`
+// (player 1) against `second` (the computer's), `rounds` to win (0: 3), with more launch arguments (the profile's).
+// The game restarts into it; at its end it goes back to the menus as any duel.
+void StartDuel(const std::string& first, const std::string& second, const std::string& map, int rounds,
+    const std::string& more = {});
+
 } // namespace swrots::game
