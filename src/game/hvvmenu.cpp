@@ -24,6 +24,7 @@
 #include "game/menus.h"
 #include "game/resources.h"
 #include "game/roster.h"
+#include "input/controls.h"
 
 namespace swrots::game {
 
@@ -291,13 +292,71 @@ void __fastcall SelectFrameHook(uint8_t* screen, void*, uint32_t arg)
 {
     g_SelectScreen = screen;
     g_SelectSeen = GetTickCount64();
-    reinterpret_cast<FrameFn>(uintptr_t(kSelectFrame))(screen, nullptr, arg);
+    if (!DrawSelectStrip(screen, arg))
+        reinterpret_cast<FrameFn>(uintptr_t(kSelectFrame))(screen, nullptr, arg);
+}
+
+// --- Screen changes (for scripted menu tests' screen marks) ---------------------------------------------------------
+// The front end changes screens through its transition object (0x2D1B80, thiscall (const TString* name): the name's
+// pooled text is latched) and switches a screen's children (0xD4070, thiscall (const key*): the name's hash).
+constexpr uint32_t kTransition = 0x002D1B80;
+constexpr uint8_t kTransitionBytes[] = { 0x33, 0xC0, 0x56, 0x8B, 0x74, 0x24, 0x08 }; // xor eax, eax; push esi; mov esi, [esp+8]
+constexpr uint32_t kChildSwitch = 0x000D4070;
+constexpr uint8_t kChildSwitchBytes[] = { 0x56, 0x8B, 0xF1, 0x8B, 0x46, 0x2C }; // push esi; mov esi, ecx; mov eax, [esi+0x2C]
+using ScreenFn = uint32_t(__fastcall*)(void*, void*, const uint32_t*);
+ScreenFn g_Transition = nullptr, g_ChildSwitch = nullptr;
+
+// A mark names the screen (its key is the name's hash), or gives the key itself ("0x..."): the transition's names are
+// not always the screens' (the Versus row's select screen is 0x8DC51DC9).
+bool ScreenMatches(const char* name, uint32_t key)
+{
+    if (name[0] == '0' && (name[1] == 'x' || name[1] == 'X'))
+        return std::strtoul(name, nullptr, 16) == key;
+    return MenuKey(name) == key;
+}
+
+uint32_t __fastcall TransitionHook(void* self, void*, const uint32_t* name)
+{
+    if (name) {
+        LOG_DEBUG("Menus: screen 0x%08X", *name);
+        input::NoteMenuScreen(&ScreenMatches, *name);
+    }
+    return g_Transition(self, nullptr, name);
+}
+
+uint32_t __fastcall ChildSwitchHook(void* self, void*, const uint32_t* key)
+{
+    if (key) {
+        LOG_DEBUG("Menus: child screen 0x%08X", *key);
+        input::NoteMenuScreen(&ScreenMatches, *key);
+    }
+    return g_ChildSwitch(self, nullptr, key);
+}
+
+uint8_t* Trampoline(uint32_t address, const uint8_t* bytes, uint32_t length)
+{
+    uint8_t* stub = AllocStub(length + 5);
+    std::memcpy(stub, bytes, length);
+    stub[length] = 0xE9;
+    const int32_t back = int32_t(address + length) - int32_t(uintptr_t(stub) + length + 5);
+    std::memcpy(stub + length + 1, &back, 4);
+    return stub;
 }
 
 } // namespace
 
 void InstallHvvMenu()
 {
+    // once (the port's memory outlives the game's reboots); the jumps into every new image
+    static uint8_t* transition = Trampoline(kTransition, kTransitionBytes, sizeof kTransitionBytes);
+    static uint8_t* childSwitch = Trampoline(kChildSwitch, kChildSwitchBytes, sizeof kChildSwitchBytes);
+    if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kTransition)), kTransitionBytes, sizeof kTransitionBytes) == 0 &&
+        std::memcmp(reinterpret_cast<const void*>(uintptr_t(kChildSwitch)), kChildSwitchBytes, sizeof kChildSwitchBytes) == 0) {
+        g_Transition = reinterpret_cast<ScreenFn>(transition);
+        g_ChildSwitch = reinterpret_cast<ScreenFn>(childSwitch);
+        PatchJump(kTransition, reinterpret_cast<const void*>(&TransitionHook));
+        PatchJump(kChildSwitch, reinterpret_cast<const void*>(&ChildSwitchHook));
+    }
     g_HvvMode = false;
     g_Picks.clear();
     g_SelectSeen = 0;

@@ -15,11 +15,13 @@
 #include <atomic>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "core/log.h"
 #include "core/settings.h"
 #include "core/window.h"
+#include "d3d/recorder.h"
 #include "debug/menu.h"
 #include "input/controls.h"
 #include "input/playstation.h"
@@ -349,14 +351,38 @@ static void ReadTestInput(XGamepad& g)
 
 // For unattended menu tests: SWROTS_TEST_BUTTONS="<seconds>:<button>;..." presses player 1's buttons at those
 // times (seconds after the first input read; each held 0.15 s): A, B, X, Y, Start, Back, Up, Down, Left, Right,
-// Black, White, LT, RT.
+// Black, White, LT, RT. A mark "@<screen>" (a front-end screen's name, e.g. @select_jedi) makes the times after it
+// count from when the front end next switches to that screen (the presses after it wait for it). "<t>:Shot=<name>"
+// takes a screenshot (the screenshots folder, <name>.png) then.
 // The variable clears itself, as SWROTS_TEST_INPUT does.
 struct TestPress {
     double at;
     int analog;   // an analog button's index, or -1
     WORD digital; // or a digital button's bit
+    int mark;     // the screen mark its time counts from, or -1 (the start)
+    std::string shot; // or a screenshot's name
+    bool done = false;
 };
 static std::vector<TestPress> g_TestPresses;
+struct TestMark {
+    std::string screen;
+    double reached = -1; // seconds after the start, or -1
+};
+static std::vector<TestMark> g_TestMarks;
+static ULONGLONG g_TestStart = 0;
+
+void NoteMenuScreen(bool (*matches)(const char* name, uint32_t key), uint32_t key)
+{
+    for (TestMark& mark : g_TestMarks) {
+        if (mark.reached >= 0)
+            continue;
+        if (matches(mark.screen.c_str(), key)) {
+            mark.reached = double(GetTickCount64() - g_TestStart) / 1000.0;
+            LOG_INFO("Input: scripted presses: screen %s reached at %.1f s", mark.screen.c_str(), mark.reached);
+        }
+        return; // marks are reached in order
+    }
+}
 
 static void ReadTestButtons(XGamepad& g)
 {
@@ -373,21 +399,41 @@ static void ReadTestButtons(XGamepad& g)
                 { "Right", -1, 0x8 }, { "Black", 4, 0 }, { "White", 5, 0 }, { "LT", 6, 0 }, { "RT", 7, 0 } };
             char* context = nullptr;
             for (char* item = strtok_s(value, ";", &context); item; item = strtok_s(nullptr, ";", &context)) {
+                if (item[0] == '@') {
+                    g_TestMarks.push_back({ item + 1 });
+                    continue;
+                }
                 const char* colon = std::strchr(item, ':');
                 if (!colon)
                     continue;
+                if (_strnicmp(colon + 1, "Shot=", 5) == 0) {
+                    g_TestPresses.push_back({ atof(item), -1, 0, int(g_TestMarks.size()) - 1, colon + 6 });
+                    continue;
+                }
                 for (const auto& b : kButtons)
                     if (_stricmp(colon + 1, b.name) == 0)
-                        g_TestPresses.push_back({ atof(item), b.analog, b.digital });
+                        g_TestPresses.push_back({ atof(item), b.analog, b.digital, int(g_TestMarks.size()) - 1 });
             }
             LOG_INFO("Input: %zu scripted button presses", g_TestPresses.size());
         }
         start = GetTickCount64();
+        g_TestStart = start;
     }
     if (g_TestPresses.empty())
         return;
-    const double t = double(GetTickCount64() - start) / 1000.0;
-    for (const TestPress& p : g_TestPresses) {
+    const double now = double(GetTickCount64() - start) / 1000.0;
+    for (TestPress& p : g_TestPresses) {
+        const double from = p.mark < 0 ? 0 : g_TestMarks[size_t(p.mark)].reached;
+        if (from < 0)
+            continue;
+        const double t = now - from;
+        if (!p.shot.empty()) {
+            if (t >= p.at && !p.done) {
+                p.done = true;
+                d3d::RequestScreenshot(p.shot);
+            }
+            continue;
+        }
         if (t < p.at || t >= p.at + 0.15)
             continue;
         if (p.analog >= 0)
@@ -537,7 +583,8 @@ static DWORD __stdcall XbInputGetState(HANDLE device, XInputState* state)
     DWORD index = DWORD(port - g_Ports);
     XGamepad g = {};
     if (index != 0 || !g_HoldPlayer) { // the free camera has player 1's input
-        ReadHostPad(index, g);
+        if (!RunningInBackground()) // an unattended test: a pad in someone's hands on this PC is not its input
+            ReadHostPad(index, g);
         if (index == 0) {
             ReadKeyboard(g);
             ReadTestInput(g);

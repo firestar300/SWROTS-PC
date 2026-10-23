@@ -44,6 +44,10 @@ FreeCameraControls ReadFreeCameraControls();
 // Whether player 1's input is held back from the game (the free camera has it).
 void HoldPlayerInput(bool hold);
 
+// For SWROTS_TEST_BUTTONS' screen marks (@<screen>): the front end switched screens; `matches` tells whether a mark's
+// screen name is the one switched to.
+void NoteMenuScreen(bool (*matches)(const char* name, uint32_t key), uint32_t key);
+
 // Co-op is running (game/coop.h): with one controller (or Input=1 in [Coop]) the keyboard alone is player 1
 // and the first controller player 2; with two, as without co-op.
 void SetCoopInput(bool active);

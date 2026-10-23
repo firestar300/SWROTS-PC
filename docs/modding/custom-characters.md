@@ -121,6 +121,9 @@ port serves the custom pictures in the place of a pair the disc has and never sh
 `s_selduel_gbghead` / `gbgbust`): **one custom character on the select screen so far**; others are left off it (the
 log says so) and can still be played, spawned and placed.
 
+The strip of heads shows 11 fighters at a time; with more it scrolls with the cursor (the port draws the strip as the
+game does, 0x2D56F0, from the first fighter in view; a cursor whose fighter is out of view is hidden).
+
 The duel keeps a slot's fighter for the player whose chosen name equals the fighter's class name (0x27B7D0,
 compared at 0x27B8CD and 0x27B983); a custom character's fighter is its base class, so the port compares the chosen
 name with the slot's class instead.

@@ -712,7 +712,92 @@ void BuildExtras()
     std::memset(g_TextIds, 0, sizeof(g_TextIds));
 }
 
+// --- The select screen's strip of heads ----------------------------------------------------------------------------
+// The fighters are one row of heads (0x2D56F0, the screen's slot 3: from the strip item's place ([screen+4] +0x58/+0x5A,
+// its corner +0x5C/+0x5E, in 1/32 pixels), each head 51 pixels on, a locked fighter's the set's last picture; the
+// cursors' items (player 1's [screen+0x58], player 2's [+0x5C], [+0x60], [+0x54]) moved to their slots by their x
+// offsets +0x24). Twelve cells or more run off the screen's right edge: the port draws the strip as the game does,
+// kStripCells at a time, scrolled with the cursor that moved last; the cursor of a fighter out of view is hidden.
+constexpr int kStripCells = 11;
+constexpr float kCellStep = 51.0f;  // the game's (0x5D6960)
+constexpr uint32_t kTextureList = 0x0001F820; // thiscall (list {?, count, data}, set +4)
+constexpr uint32_t kDrawPicture = 0x0025A9C0; // cdecl (context, texture, const float* corner, const float* other)
+constexpr uint32_t kEngineFree = 0x54;
+int g_StripFirst = 0;
+int g_StripCursors[2] = { -1, -1 };
+
+void FreeList(void* data) // the engine's free: its services table ([kEngineServices], functions) +0x54
+{
+    if (data)
+        reinterpret_cast<void(__cdecl*)(void*)>(*reinterpret_cast<void* const*>(
+            *reinterpret_cast<uint8_t* const*>(uintptr_t(kEngineServices)) + kEngineFree))(data);
+}
+
+float* ItemOffset(uint8_t* screen, uint32_t field)
+{
+    uint8_t* item = *reinterpret_cast<uint8_t**>(screen + field);
+    return item ? reinterpret_cast<float*>(item + 0x24) : nullptr;
+}
+
 } // namespace
+
+bool DrawSelectStrip(uint8_t* screen, uint32_t context)
+{
+    uint8_t* strip = *reinterpret_cast<uint8_t**>(screen + 4);
+    uint8_t* menu = *reinterpret_cast<uint8_t**>(screen + 8);
+    uint8_t* set = menu ? *reinterpret_cast<uint8_t**>(menu + 0x2C) : nullptr;
+    if (!strip || !set)
+        return false;
+    struct {
+        uint32_t unknown;
+        int count;
+        void** data;
+    } list = {};
+    reinterpret_cast<void(__fastcall*)(void*, void*, uint8_t*)>(uintptr_t(kTextureList))(&list, nullptr, set + 4);
+    const int cells = list.count - 1; // the last picture: the locked one
+    if (cells <= kStripCells) {
+        FreeList(list.data);
+        return false; // the game's own draw: everything fits
+    }
+    // the view follows the cursor that moved last
+    const int cursors[2] = { *reinterpret_cast<int*>(screen + 0x2C), *reinterpret_cast<int*>(screen + 0x30) };
+    int follow = -1;
+    for (int p = 0; p < 2; ++p) {
+        if (cursors[p] != g_StripCursors[p]) {
+            follow = cursors[p];
+            g_StripCursors[p] = cursors[p];
+        }
+    }
+    if (follow >= 0) {
+        if (follow < g_StripFirst)
+            g_StripFirst = follow;
+        else if (follow >= g_StripFirst + kStripCells)
+            g_StripFirst = follow - kStripCells + 1;
+    }
+    g_StripFirst = std::clamp(g_StripFirst, 0, cells - kStripCells);
+    const float k = 1.0f / 32;
+    const auto words = reinterpret_cast<const int16_t*>(strip + 0x58);
+    float corner[2] = { words[0] * k, words[1] * k }, other[2] = { words[2] * k, words[3] * k };
+    const auto isLocked = reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, int)>(uintptr_t(kIsLocked));
+    for (int i = g_StripFirst; i < g_StripFirst + kStripCells; ++i) {
+        void* texture = list.data[isLocked(screen, nullptr, i) ? list.count - 1 : i];
+        reinterpret_cast<void(__cdecl*)(uint32_t, void*, const float*, const float*)>(uintptr_t(kDrawPicture))(
+            context, texture, corner, other);
+        corner[0] += kCellStep;
+        other[0] += kCellStep;
+    }
+    // the cursors: at their cells, or out of sight
+    const float hidden = -4000.0f;
+    auto place = [&](int slot) { return slot >= g_StripFirst && slot < g_StripFirst + kStripCells ?
+        float(slot - g_StripFirst) * kCellStep : hidden; };
+    if (float* x = ItemOffset(screen, 0x58))
+        *x = place(cursors[0]);
+    for (uint32_t field : { 0x5Cu, 0x60u, 0x54u })
+        if (float* x = ItemOffset(screen, field))
+            *x = place(cursors[1]);
+    FreeList(list.data);
+    return true;
+}
 
 const char* SelectSlotClass(int slot)
 {
