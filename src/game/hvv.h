@@ -38,6 +38,7 @@ struct HvvState {
     float captionFade = 0; // 0 to 1 through the title's time
     int heroes = 0;        // fighters on the heroes' side: the first ones in `fighters`, the villains after
     bool playerDown = false; // the player fell (the kill camera) or is out
+    bool paused = false;     // the game is paused (its pause menu): the match's screen hides
     struct Fighter {
         std::string className, name; // name: as shown ("YOU" for the player)
         int side = 0;

@@ -69,8 +69,10 @@ are its target or are locked in it); settings.ini `[HvV] OthersSlowMotion=1` let
 - your notices: "DEFEATED <NAME>" with your killstreak and the points, "ASSIST <NAME>", "DEFEATED BY <NAME>";
 - the leaderboard while **Tab** is held: defeats, assists, falls and score of everyone;
 - the end: "HEROES WIN" / "VILLAINS WIN", then the top five stand on a podium facing the camera (first in the
-  middle, second and third beside, fourth and fifth outside), playing their intros, with a card under each (FIRST to
-  FIFTH, name, score); the game's own HUD is hidden meanwhile.
+  middle, second and third beside it up front, fourth and fifth further back and outside), playing their intros, with
+  a card under each (FIRST to FIFTH, name, score; the top three's cards bigger); the game's own HUD is hidden
+  meanwhile;
+- while the game is paused, none of the mode's screen is drawn (the Tab leaderboard neither).
 
 **Points**: the damage dealt to enemies (in the mode's health), 100 a defeat, 50 an assist, and 25 more for each
 defeat in a streak (up to 8). A defeat is the last enemy that hit the fighter within 10 s; the others that hit it
@@ -165,7 +167,7 @@ clearest of fighters and nearest the fight), else near the fight within its `Bou
 - **The intro and the end**: everyone is woken at once and holds still (`aiDisabled`, the options byte +0xC4; the player's input
   held back); the camera is the port's (a camera adjuster, as co-op's shared camera, in its place for the match):
   look-at shots computed from the fighters' transforms; each line's intros start as its pan does. A character's
-  intro is its sequence named `*_Intro`, started as a reaction (vfunc +0x410); one placed above the floor falls, and
+  intro is its sequence named `*_Intro`, started as Versus starts it (see below); one placed above the floor falls, and
   the fall stops the sequence, so the end's characters are set down on the floor itself. **The end** moves every
   character of the match out of sight (fighters, the player, the fallen) and spawns the top five afresh on the podium:
   the fighters themselves brought their fight along (lying from a blow, turned their own way, mid-move). The
@@ -191,9 +193,12 @@ played.
   duel's own teams (teams 0), so it does not join a side by itself.
 - **Every Versus fighter class has an intro sequence**: `Anakin_Intro`, `Obi_Intro`, `Mace_Intro`, `Dooku_Intro`,
   `Vader_Intro`, `Grievous_Intro`, `Serra_Intro`, `Cin_Intro`, `OldObiwan_Intro` (Yoda has none in Versus; his bonus
-  mission has a cane-drop intro). A character's sequence is found by name in its list (`[[body(+0x438)+0x70]+4]`:
-  +8 count, +0xC items, each with its name at +0xC) and started from outside its script with character vfunc
-  +0x410 (hit zone or null, sequence), as `Reaction_Handle` starts a reaction: all of them played at once.
+  mission has a cane-drop intro). Versus starts one at 0x27B550: `<name>_Intro` (or `_Outro`) found by name in the
+  character's script's list (0x150D60: `[[char+0x434]+4]`: +8 count, +0xC items, each with its name at +0xC) and
+  played with ICharacter's 0x150E30 (thiscall: sequence, 0, 0, 0, speed 1.0; the Jedi's vfunc +0x314; it refuses
+  while +0x1C1 is set). The port does the same. (Vfunc +0x410, tried first, is a reaction handler on the Jedi
+  classes: the intro never showed.) The pause: the time manager `[[0x68D944]+0x5C]` has +0x14 set and entries at
+  +0x38 only while the pause menu is up.
 
 ## Open
 

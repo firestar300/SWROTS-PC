@@ -63,7 +63,7 @@ constexpr float kRespawnClear = 380.0f;  // from every fighter, at least (when i
 constexpr int kRespawnTries = 32;
 // The intro (ms): for each side a frontal shot of its line playing its Versus intros, then a close shot along the
 // line; the camera back behind the player; "FIGHT!" shows a while after.
-constexpr ULONGLONG kFrontShot = 2600, kCloseShot = 1600, kToPlayer = 900, kFightBanner = 1500;
+constexpr ULONGLONG kFrontShot = 2800, kCloseShot = 2200, kToPlayer = 900, kFightBanner = 1500;
 constexpr ULONGLONG kSideShots = kFrontShot + kCloseShot;
 constexpr ULONGLONG kShotsLength = 2 * kSideShots;
 // Defeats, assists and points.
@@ -83,7 +83,7 @@ constexpr const char* kDefaultLineup[] = { "IObiwan", "IYoda", "IMace", "ISerra"
 // The game's character fields and calls the match uses.
 constexpr uint32_t kActivate = 0xB4;           // object vfunc, thiscall (): a placed character joins the level
 constexpr uint32_t kPlace = 0x1F4;             // object vfunc, thiscall (const float m[16])
-constexpr uint32_t kPlaySequence = 0x410;      // character vfunc, thiscall (hit zone or null, sequence)
+constexpr uintptr_t kPlaySequence = 0x150E30;  // ICharacter, thiscall (sequence, 0, 0, 0, speed): what Versus' intro calls
 constexpr uint32_t kObjectById = 0x000A31F0;   // cdecl (instance id) -> object or null
 constexpr uint32_t kChangeHealth = 0x00151500; // character, thiscall (float change, a, attacker): co-op hooks it
 constexpr uint32_t kCharacterHealth = 0x130;
@@ -892,13 +892,13 @@ void HoldEveryone(bool hold)
     input::HoldPlayerInput(hold);
 }
 
-// A character plays its Versus intro: its sequence named <...>_Intro, found in its list ([[body +0x438] +0x70] +4:
-// +8 count, +0xC items, each named at +0xC) and started as a reaction is (vfunc +0x410 (hit zone or null,
-// sequence)). Yoda has none: one of his "flavour" idles instead.
+// A character plays its Versus intro the way the duel starts one (0x27B550): its sequence named <...>_Intro, found
+// in its script's list ([char +0x434] +4: +8 count, +0xC items, each named at +0xC; the duel's lookup 0x150D60),
+// started with ICharacter's play (0x150E30, the Jedi's vfunc +0x314; its +0x410 is a reaction handler that
+// ignored the intro). Yoda has none: one of his "flavour" idles instead.
 void PlayIntro(uint8_t* character)
 {
-    uint8_t* body = Field<uint8_t*>(character, 0x438);
-    uint8_t* script = body ? Field<uint8_t*>(body, 0x70) : nullptr;
+    uint8_t* script = Field<uint8_t*>(character, kCharacterScript);
     uint8_t* list = script ? Field<uint8_t*>(script, 4) : nullptr;
     if (!list)
         return;
@@ -916,8 +916,8 @@ void PlayIntro(uint8_t* character)
             flavour = items[i];
     }
     if (flavour)
-        VirtualOf<bool(__fastcall*)(uint8_t*, void*, void*, uint8_t*)>(character, kPlaySequence)(
-            character, nullptr, nullptr, flavour);
+        reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint8_t*, float, int, int, float)>(kPlaySequence)(
+            character, nullptr, flavour, 0.0f, 0, 0, 1.0f);
 }
 
 // A camera placement (rows right, up, forward, position) at `eye` looking at `target`, up +Y.
@@ -997,8 +997,9 @@ void Blend(const float from[16], const float to[16], float a, float out[16])
     LookAt(eye, target, out);
 }
 
-// The end: the top five lined up facing the camera, first in the middle (as Battlefront's end screen).
-constexpr float kPodium[5][2] = { { 0, 0 }, { -85, 35 }, { 85, 35 }, { -170, 70 }, { 170, 70 } }; // x, back
+// The end: the top five lined up facing the camera, first in the middle (as Battlefront's end screen); the top three
+// up front, fourth and fifth well behind them and to the sides (smaller in the picture).
+constexpr float kPodium[5][2] = { { 0, 0 }, { -95, 30 }, { 95, 30 }, { -170, 110 }, { 170, 110 } }; // x, back
 constexpr float kPodiumZ = 0; // relative to the floor's middle
 
 // The podium stands just in front of where the heroes' line stood, its back row on the line (open floor on any map:
@@ -1014,7 +1015,7 @@ void PodiumPlace(int rank, float (&m)[16])
 
 void EndCamera(float m[16])
 {
-    const float back = std::min(330.0f, g_LinesApart - kPodium[4][1] - 30); // short of the villains' line
+    const float back = std::min(290.0f, g_LinesApart - kPodium[4][1] - 30); // short of the villains' line
     const float a = Smooth(float(GetTickCount64() - g_EndAt) / 4000.0f);
     const float eye[3] = { kDevMapMiddleX, kDevMapFloorY + 75 - 10 * a, PodiumZ() + back - 40 * a };
     const float target[3] = { kDevMapMiddleX, kDevMapFloorY + 55, PodiumZ() - 30 };
@@ -1303,6 +1304,19 @@ void InstallHvv()
 
 bool HvvActive() { return g_Active; }
 
+// The game's pause: the time manager (TManager_Time, [[0x68D944] +0x5C]) has a frozen state on its stack (+0x14 set,
+// +0x38 its entries: only the pause pushes one, 0xA7A30; see fixes.cpp).
+bool GamePaused()
+{
+    __try {
+        uint8_t* services = *reinterpret_cast<uint8_t**>(uintptr_t(0x0068D944));
+        uint8_t* time = services ? *reinterpret_cast<uint8_t**>(services + 0x5C) : nullptr;
+        return time && time[0x14] && *reinterpret_cast<uint32_t*>(time + 0x38) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool HvvLineOfSight(const float a[3], const float b[3]) { return !g_Active || LineOfSight(a, b); }
 
 HvvState GetHvvState()
@@ -1318,6 +1332,7 @@ HvvState GetHvvState()
     s.player = g_Player;
     s.startLives = g_StartLives;
     s.heroes = g_Heroes;
+    s.paused = GamePaused();
     s.playerDown = g_PlayerFell || (g_Player < g_Count && g_Fighters[g_Player].out);
     s.board = g_BoardPinned;
     s.fighters.resize(size_t(g_Count));

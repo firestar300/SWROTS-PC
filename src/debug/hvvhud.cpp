@@ -287,9 +287,13 @@ void EndScreen(const game::HvvState& s, const ImGuiViewport* vp, float u)
     static const char* kRanks[] = { "FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH" };
     static const float kAt[5][2] = { { 0.5f, 0.68f }, { 0.30f, 0.62f }, { 0.70f, 0.62f }, { 0.11f, 0.70f },
         { 0.89f, 0.70f } };
+    ImVec4 cards[5] = {}; // each card's left, top, right, bottom
     for (size_t r = 0; r < s.top.size() && r < 5; ++r) {
         const auto& f = s.fighters[s.top[r]];
-        const float w = (r == 0 ? 190 : 160) * u, h = (r == 0 ? 92 : 78) * u;
+        // the top three's cards stand out; fourth and fifth (further back) get smaller ones
+        static const float kSize[5][3] = { { 200, 96, 26 }, { 175, 84, 21 }, { 175, 84, 21 }, { 132, 64, 15 },
+            { 132, 64, 15 } }; // width, height, rank text
+        const float w = kSize[r][0] * u, h = kSize[r][1] * u;
         // under the fighter's feet where it stands on the podium (else a place of its rank)
         float cx = vp->Pos.x + vp->Size.x * kAt[r][0], y = vp->Pos.y + vp->Size.y * kAt[r][1];
         ImVec2 at;
@@ -297,20 +301,28 @@ void EndScreen(const game::HvvState& s, const ImGuiViewport* vp, float u)
             cx = std::clamp(at.x, vp->Pos.x + w / 2 + 4 * u, vp->Pos.x + vp->Size.x - w / 2 - 4 * u);
             y = std::min(at.y + 8 * u, vp->Pos.y + vp->Size.y - h - 8 * u);
         }
+        if (r >= 3) { // fourth and fifth (the back row) stand behind second and third: their cards go outside of those
+            const ImVec4& n = cards[r - 2];
+            const float lo = vp->Pos.x + w / 2 + 4 * u, hi = vp->Pos.x + vp->Size.x - w / 2 - 4 * u;
+            cx = std::clamp(r == 3 ? std::min(cx, n.x - 6 * u - w / 2) : std::max(cx, n.z + 6 * u + w / 2), lo, hi);
+            if (cx - w / 2 < n.z && cx + w / 2 > n.x && y < n.w && y + h > n.y) // no room beside it: above it
+                y = n.y - h - 6 * u;
+        }
+        cards[r] = ImVec4(cx - w / 2, y, cx + w / 2, y + h);
         const float a = std::clamp((s.endingAge - 0.4f - 0.25f * float(r)) / 0.5f, 0.0f, 1.0f);
         g_Draw->AddRectFilled(ImVec2(cx - w / 2, y), ImVec2(cx + w / 2, y + h), Faded(kPanel, a * 1.3f), 4 * u);
         g_Draw->AddRect(ImVec2(cx - w / 2, y), ImVec2(cx + w / 2, y + h), Faded(kEdge, a), 4 * u, 0, 1.5f * u);
-        const float big = (r == 0 ? 26 : 19) * u;
+        const float big = kSize[r][2] * u;
         Text(cx, y + 6 * u, big, Faded(kGold, a), kRanks[r], 0.5f);
         g_Draw->AddRectFilled(ImVec2(cx - w / 2 + 6 * u, y + 10 * u + big), ImVec2(cx + w / 2 - 6 * u, y + 30 * u + big),
             Faded(IM_COL32(255, 255, 255, 18), a));
-        Text(cx, y + 12 * u + big, 15 * u, Faded(SideColour(f.side), a),
+        Text(cx, y + 12 * u + big, (r < 3 ? 15 : 13) * u, Faded(SideColour(f.side), a),
             game::HvvDisplayName(f.className), 0.5f);
         if (f.isPlayer)
             Text(cx, y - 18 * u, 13 * u, Faded(kWhite, a), "YOU", 0.5f);
         char score[32];
         snprintf(score, sizeof score, "%d SCORE", f.score);
-        Text(cx, y + h - 22 * u, 16 * u, Faded(kGold, a), score, 0.5f);
+        Text(cx, y + h - (r < 3 ? 22 : 19) * u, (r < 3 ? 16 : 13) * u, Faded(kGold, a), score, 0.5f);
     }
 }
 
@@ -391,7 +403,7 @@ void DrawHvvHud()
         hudHidden = hide;
         WriteGameVariable("hud", hudHidden ? "0" : "1");
     }
-    if (!s.active)
+    if (!s.active || s.paused) // the game's pause menu: the match's screen hides (and Tab shows nothing)
         return;
     g_Draw = ImGui::GetForegroundDrawList();
     const ImGuiViewport* vp = ImGui::GetMainViewport();
