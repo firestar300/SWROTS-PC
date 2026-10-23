@@ -6,8 +6,8 @@ debug console fight anywhere. Worked out on the bonus mission *Grievous Survival
 small cave on Utapau) and checked against `M08` (Palpatine's office) and `M09A` (the Jedi Temple), with the game's
 own level reader traced read by read and in-game A/B tests. Addresses are for the supported retail XBE.
 
-The developer map is research so far: it is built by test tools and served with a test switch, not part of the
-port yet.
+The developer map is research so far: it is built by the tools in [`tools/levels/`](../../tools/levels/README.md)
+from the user's own files and served with a test switch, not part of the port yet.
 
 ## Where a level file lives
 
@@ -81,11 +81,39 @@ Built from Grievous Survival by the test tools (with the PAK's copy of its level
 | Objects | 17 of the 131 kept: the managers, the lights, the sky, the sector's settings, the level's properties and the player's start; the cave's props, the breakables, every character, the waves, triggers, cutscenes, tips, sounds, effects and pickups removed |
 | Light | the 11 point lights moved over the floor (so characters are lit), the ambient raised |
 | Start | the player in the middle of the floor |
-| Paths | none |
+| Paths | kept (the 6 nodes of the old cave); with none, the AI chases and fights just the same |
 
 The result loads without a fault: an open floor under the sky in every direction, nothing else, the player at the
 middle. Characters spawned with the debug console (`spawn IObiwan enemy`, `spawn IVader ally`) fight the player and
 each other, and chase the player across the floor, as far as its corners.
+
+## Building it
+
+`python tools/levels/makedevmap.py <GameData folder> <out.slp>` copies the level file out of
+`res_u107_uta_grievoussurvival.pak` and edits it (`devmap.py`). The test switch `SWROTS_DEVMAP_SLP=<out.slp>`, with a
+`mods\Default_Xbox.cfg` booting `map:u107_uta_grievoussurvival`, makes the port serve that file in place of the
+level's own and its flat floor in place of the cave's model.
+
+## Modes and missions from the game's own objects
+
+A level holds no code of its own: its behaviour comes from the game's classes placed in it, with their
+properties. With the objects readable and writable, a map can be given the game's own systems. Proven so far: the
+player's start (`IPointSpawnPlayer`), the lights, the sky, the managers, and characters fighting on a floor of the
+port's own (spawned with the debug console). Seen in Grievous Survival, not tried yet:
+
+- **Characters placed in the level**, which load with it. Characters spawned later have no sound set (their clashes
+  and hits are silent, [characters](characters.md)); placed ones should have theirs.
+- **Waves:** `ICharacterManager` (templates, spawn engines, spawn locations), how the survival mission sends its
+  clones.
+- **Scripting:** trigger volumes (`ITriggerMulti`), scripted sequences (`ITriggerSequence`, sequencers,
+  directors): "when this happens, do that", as the missions' objectives and events use them.
+- **Cameras and cutscenes:** `ICameraControl` with its helper objects (fixed camera angles in an area) and
+  `ICutscene`. A level without them, as the developer map, keeps the game's following camera everywhere.
+- Sounds and music (`IAudio`), effects (`IParticleSynthEffect`), pickups (`ISmallBactaTank`), breakables, tips,
+  screen shakes.
+
+The game's scripts themselves (the classes' behaviour) are compiled into the game and cannot be written anew; what
+the objects cannot do, the port's own code can.
 
 ## Open
 
