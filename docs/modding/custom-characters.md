@@ -38,6 +38,7 @@ Base=IAnakin             ; the class whose moves, AI and sounds it has
 Costume=Luke             ; its costume's name
 Mesh=luke\luke           ; its body, under meshes\chars, without .msh
 Saber=0 255 0            ; its saber's colour, 0-255 each (optional; 0 255 0 is the game's own green)
+Blades=single            ; its saber: single, double (double-bladed) or dual (two sabers) (optional; the base's)
 Side=Hero                ; Hero or Villain: its side in Heroes vs Villains by default
 Speaker=Luke             ; its name in subtitles (optional; the name's first word)
 Code=                    ; whose lines it says, a dialogue speaker code such as AKN or OBW (optional; the base's)
@@ -66,6 +67,22 @@ per-pixel lighting or bump maps), so colours that another engine warms or deepen
 II's Luke's hair is an olive grey there, golden in its own lighting); grade them for this game. Where a texture's
 alpha cuts a shape out (hair), fill the transparent texels' colour with the nearby opaque colour: the game filters
 the texture, and black behind a cut-out shows as a dark fringe.
+
+## Its saber
+
+`Saber=` sets the colour, `Blades=` the kind; both keep the base's when left out, and they work on any Jedi or Sith
+base:
+
+- `single`: one blade (a base with a double-bladed saber gets the Jedi Knights' hilt);
+- `double`: the Jedi Brute's double-bladed saber (Darth Maul: `Base=IJDBrute`, whose moves are made for it, needs
+  no `Blades=` at all);
+- `dual`: two sabers, the second like the first. Only a base whose moves use the off hand (Serra Keto, `ISerra`)
+  wields it; with the others the second saber hangs at the side.
+
+The Jedi classes' Init fills up to four weapon records (character +0x1064, 0x20 bytes each: +0 the double-bladed
+flag, +4 the hilt mesh, +8 its colour) before their weapon setup (0x2814C0) makes a saber of each record that has a
+mesh (0x280480; a flagged one becomes the double-bladed saber class). The port changes a custom character's records
+just before that (at 0x2814D2).
 
 ## How it works
 

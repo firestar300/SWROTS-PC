@@ -35,6 +35,18 @@ constexpr size_t kInfoCopy = 0x200;     // bytes of the base's class info copied
 constexpr size_t kVtableCopy = 96;      // slots of its vtable copied
 constexpr uint32_t kCharacterSaberColor = 0xF20;
 
+// A Jedi's sabers: the class's Init fills up to 4 weapon records (+0x1064, 0x20 bytes each: +0 double-bladed flag, +4
+// the hilt mesh (a TString), +8 its colour) before the Jedi's weapon setup (0x2814C0) makes a saber of each record
+// with a mesh (0x280480: the double-bladed class for a flagged one). The Jedi Brute's is double-bladed (Lsaberjdbrute,
+// flag 1); Serra Keto's two records make her two sabers. At 0x2814D2 (lea ebx, [esi + 0x1068]; 6 bytes, replaced by a
+// call) a custom character's Blades= changes the records first.
+constexpr uint32_t kSaberSetup = 0x002814D2;
+constexpr uint8_t kSaberSetupBytes[] = { 0x8D, 0x9E, 0x68, 0x10, 0x00, 0x00 };
+constexpr uint32_t kWeaponRecords = 0x1064, kWeaponRecordSize = 0x20;
+constexpr uint32_t kAssignString = 0x00225A10; // TString, thiscall (const char*)
+constexpr char kSingleHilt[] = "Meshes\\Weapons\\LsaberKnight\\LsaberKnight";
+constexpr char kDoubleHilt[] = "Meshes\\Weapons\\Lsaberjdbrute\\Lsaberjdbrute";
+
 std::vector<CustomCharacter> g_Customs;
 std::wstring g_Mods;
 
@@ -205,6 +217,52 @@ uint32_t __cdecl SpeakerNameFor(uint8_t* character, uint32_t text)
     return own ? own : text;
 }
 
+void AssignString(uint8_t* string, const char* text)
+{
+    reinterpret_cast<void(__fastcall*)(uint8_t*, void*, const char*)>(uintptr_t(kAssignString))(string, nullptr, text);
+}
+
+void __cdecl ApplyBlades(uint8_t* character)
+{
+    const CustomCharacter* custom = CustomCharacterOf(character);
+    if (!custom || !custom->blades)
+        return;
+    uint8_t* first = character + kWeaponRecords;
+    uint8_t* second = first + kWeaponRecordSize;
+    const char* hilt = *reinterpret_cast<const char**>(first + 4);
+    const bool hadDouble = first[0] != 0;
+    if (custom->blades == 2) {
+        first[0] = 1;
+        if (!hadDouble)
+            AssignString(first + 4, kDoubleHilt);
+        AssignString(second + 4, "");
+        return;
+    }
+    first[0] = 0;
+    if (hadDouble || !hilt || !*hilt)
+        AssignString(first + 4, kSingleHilt);
+    if (custom->blades == 1) {
+        AssignString(second + 4, "");
+        return;
+    }
+    second[0] = 0; // dual: a second saber like the first, in the other hand
+    AssignString(second + 4, *reinterpret_cast<const char**>(first + 4));
+    std::memcpy(second + 8, first + 8, 12);
+}
+
+__declspec(naked) void SaberSetupHook()
+{
+    __asm {
+        pushad
+        push esi
+        call ApplyBlades
+        add esp, 4
+        popad
+        lea ebx, [esi + 0x1068]
+        ret
+    }
+}
+
 // At 0x15BC56 (6 bytes, replaced by a call): esi the character, edx its name's text.
 __declspec(naked) void SpeakerNameStore()
 {
@@ -368,6 +426,11 @@ void ReadCharacters(const std::wstring& mods)
             c.saber[2] = b / 255.0f;
         }
         c.side = _stricmp(Profile(file, L"Side", L"Hero").c_str(), "villain") == 0 ? 1 : 0;
+        const std::string blades = Profile(file, L"Blades");
+        c.blades = _stricmp(blades.c_str(), "single") == 0 ? 1 : _stricmp(blades.c_str(), "double") == 0 ? 2
+            : _stricmp(blades.c_str(), "dual") == 0 ? 3 : 0;
+        if (!blades.empty() && !c.blades)
+            LOG_WARN("Custom characters: %ls: Blades=%s is none of single, double, dual", found.cFileName, blades.c_str());
         std::string costume = c.costume;
         for (char& ch : costume)
             ch = char(tolower(static_cast<unsigned char>(ch)));
@@ -595,6 +658,8 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         g_StartEntry = reinterpret_cast<StartEntryFn>(startEntryStub);
         PatchJump(kStartEntry, reinterpret_cast<const void*>(&StartEntryHook));
     }
+    if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kSaberSetup)), kSaberSetupBytes, sizeof kSaberSetupBytes) == 0)
+        PatchCall(kSaberSetup, reinterpret_cast<const void*>(&SaberSetupHook), sizeof kSaberSetupBytes);
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kSpeakerNameStore)), kSpeakerNameStoreBytes,
             sizeof kSpeakerNameStoreBytes) == 0)
         PatchCall(kSpeakerNameStore, reinterpret_cast<const void*>(&SpeakerNameStore), sizeof kSpeakerNameStoreBytes);

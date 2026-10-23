@@ -29,6 +29,7 @@ struct CustomCharacter {
     std::vector<std::pair<std::string, std::vector<std::string>>> voice;
     bool hasSaber = false;
     float saber[3] = {};     // its saber's colour (0-1), when it has one of its own
+    int blades = 0;          // its saber (Blades=): 0 the base's, 1 single, 2 double-bladed, 3 dual (two sabers)
     int side = 0;            // 0 hero, 1 villain (Heroes vs Villains' default side)
     std::string hudFace;     // the HUD portrait shown for it (a donor's path, its picture served: see customchars.cpp)
     std::string face;        // its HUD portrait's path (interfc\hud_b\hud_face_<costume>01), when the mod has one
