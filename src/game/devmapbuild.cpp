@@ -1,0 +1,876 @@
+// The developer test map, made from Grievous Survival's level file (see devmapbuild.h and docs/research/levels.md).
+//
+// The level file is walked as the game reads it (TMeshWorld, 0x5D810), recording where the parts the dev map
+// changes lie; most edits are values changed in place, the rest are spliced in (the floor's baked light, the new
+// portals, the object section rewritten). A string is a u32 length and its characters, an array an i32 capacity,
+// an i32 count and the elements, a bool 4 bytes.
+
+#include "game/devmapbuild.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+
+namespace swrots::game {
+
+namespace {
+
+// --- What the dev map is ----------------------------------------------------------------------------------------
+// The cave's sector box, and the space it becomes (22,500 x 10,800 units): every coordinate equal to a limit of
+// the old box moves to the new one's.
+struct Range {
+    double lo, hi;
+};
+constexpr Range kOldBox[3] = { { 3840.0, 8040.0 }, { -3115.924, 120.0 }, { 3881.164, 7560.0 } };
+constexpr Range kSpace[3] = { { 1500.0, 24000.0 }, { -3115.924, 1100.0 }, { 2700.0, 13500.0 } };
+// The floor brush covers the whole box (x, z); its top stays at the cave floor's height.
+constexpr double kFloorY = -2557.5;
+constexpr double kCaveCentreX = 6296.0, kCaveCentreZ = 6282.0;
+constexpr double kLift = 100000.0; // the wall brushes are moved this far up, out of the way
+// The objects a level needs (the managers, the lights, the sky, the sector's settings, the level's properties and
+// the player's start), plus the sky's statics; the cave's props, its characters and its mission go.
+constexpr const char* kKeep[] = { "IStaticManager", "ILightManager", "IBrushManager",
+    "ITrivialCharacterPhysicsManager", "ILensFlareSlayerManager", "ISectorSkybox", "ISectorInfo", "ILevelProperties",
+    "IMapIndexer", "IPointSpawnPlayer", "ILightStatic", "IInvisibleBrush" };
+// The static manager's entries kept: the cave (its model becomes the floor) and the sky dome.
+constexpr uint32_t kCaveMesh = 6, kSkyMesh = 7;
+constexpr float kFloorAmbient = 0.8f;
+constexpr float kCharacterAmbient = 0.55f;
+constexpr uint32_t kLightRange = 12000;
+constexpr uint32_t kLevelVersion = 0xA0042;
+
+// The floor model: a grid of these cells, lit by its baked light (white, one entry per vertex).
+constexpr int kCellsX = 44, kCellsZ = 21;
+constexpr uint32_t kFloorVertices = (kCellsX + 1) * (kCellsZ + 1);
+
+// --- Reading ------------------------------------------------------------------------------------------------------
+struct Reader {
+    const std::vector<uint8_t>& d;
+    size_t p = 0;
+    bool ok = true;
+
+    bool Take(size_t n)
+    {
+        if (!ok || n > d.size() - p) {
+            ok = false;
+            return false;
+        }
+        p += n;
+        return true;
+    }
+    uint32_t U32()
+    {
+        uint32_t v = 0;
+        if (Take(4))
+            std::memcpy(&v, d.data() + p - 4, 4);
+        return v;
+    }
+    uint16_t U16()
+    {
+        uint16_t v = 0;
+        if (Take(2))
+            std::memcpy(&v, d.data() + p - 2, 2);
+        return v;
+    }
+    uint8_t U8() { return Take(1) ? d[p - 1] : 0; }
+    std::string String()
+    {
+        const uint32_t n = U32();
+        const size_t at = p;
+        return Take(n) ? std::string(reinterpret_cast<const char*>(d.data() + at), n) : std::string();
+    }
+    // An array's count (its capacity skipped), refused when beyond what the file could hold.
+    uint32_t Count(size_t elementSize = 1)
+    {
+        U32();
+        const uint32_t n = U32();
+        if (ok && uint64_t(n) * elementSize > d.size() - p)
+            ok = false;
+        return ok ? n : 0;
+    }
+    void Skip(uint64_t n) { Take(n > d.size() ? d.size() + 1 : size_t(n)); }
+};
+
+float GetF(const std::vector<uint8_t>& d, size_t at)
+{
+    float v;
+    std::memcpy(&v, d.data() + at, 4);
+    return v;
+}
+void PutF(std::vector<uint8_t>& d, size_t at, double v)
+{
+    const float f = float(v);
+    std::memcpy(d.data() + at, &f, 4);
+}
+void PutU32(std::vector<uint8_t>& d, size_t at, uint32_t v) { std::memcpy(d.data() + at, &v, 4); }
+
+// A BSP tree (0x57840): convex volumes ("hedrons": u8 faces, u8 vertices, u8 edges, u8 planes, then the vertices,
+// 3 x f32 each), nodes, planes (normal and d), an extra block and more blocks.
+struct Tree {
+    std::vector<size_t> hedrons; // where each hedron's data starts
+    size_t planes = 0;
+    uint32_t planeCount = 0;
+};
+
+void Blob(Reader& r, std::vector<size_t>* at)
+{
+    const uint32_t size = r.U32();
+    if (size < 4) {
+        r.ok = false;
+        return;
+    }
+    if (at)
+        at->push_back(r.p);
+    r.Skip(size - 4);
+}
+
+bool ReadTree(Reader& r, Tree* tree)
+{
+    if (!r.U8())
+        return false;
+    Tree t;
+    for (uint32_t i = 0, n = r.Count(4); i < n && r.ok; ++i)
+        Blob(r, &t.hedrons);
+    r.Skip(uint64_t(r.U32()) * 8); // nodes
+    t.planeCount = r.Count(16);
+    t.planes = r.p;
+    r.Skip(uint64_t(t.planeCount) * 16);
+    if (r.U32()) { // 0x56CF0
+        const uint32_t a = r.U32(), b = r.U32();
+        r.Skip(uint64_t(a) * 10 + uint64_t(b) * 4);
+        r.Skip(uint64_t(r.U32()) * 0x20);
+    }
+    for (uint32_t i = 0, n = r.Count(4); i < n && r.ok; ++i)
+        Blob(r, nullptr);
+    if (tree)
+        *tree = std::move(t);
+    return true;
+}
+
+// A static instance (0x5AC80): its light handle, mesh, and, unless it refers elsewhere, its baked light.
+struct Instance {
+    uint32_t id = 0;
+    bool lit = false;
+    size_t count1 = 0;     // the vertex count
+    size_t lightCount = 0; // the baked light's count, then the light (4 bytes per vertex)
+    size_t lightEnd = 0;
+};
+
+void ReadInstance(Reader& r, Instance& s)
+{
+    s.id = r.U32();
+    r.String();
+    if (r.U16() != 0xFFFF)
+        return;
+    s.lit = true;
+    r.Skip(12); // u32, bool, colour
+    s.count1 = r.p;
+    r.U32();
+    s.lightCount = r.p;
+    r.Skip(uint64_t(r.U32()) * 4);
+    s.lightEnd = r.p;
+    r.U32();
+    r.Skip(uint64_t(r.U32()) * 2);
+    r.Skip(8);
+}
+
+// A model (the mesh format, tools/meshes/charmsh.py): the parts of a sector's mesh the dev map changes.
+struct Mesh {
+    size_t centre = 0, radius = 0, bmin = 0, bmax = 0;
+    struct Vertices {
+        size_t at;
+        uint32_t count, stride;
+    };
+    std::vector<Vertices> vertices;
+};
+
+void StringTable(Reader& r)
+{
+    r.U32();
+    r.U32();
+    const uint32_t used = r.U32();
+    r.Skip(uint64_t(r.Count(4)) * 4);
+    r.Skip(used);
+}
+
+void ReadMesh(Reader& r, Mesh& m)
+{
+    r.Skip(32); // name
+    m.centre = r.p;
+    r.Skip(12);
+    m.radius = r.p;
+    r.Skip(4 + 4 * 4 + 4 + 4 + 4); // radius, 4 bools, colour, triangle total, bool
+    // the body
+    if (!r.U32() || r.Count() != 0) { // the new format, no appearances
+        r.ok = false;
+        return;
+    }
+    for (uint32_t g = 0, groups = r.Count(); g < groups && r.ok; ++g) {
+        r.Skip(16 + 1 + 4 + 4 * 13); // flags, colour, 2 floats, u8; material: shader, 4 layers
+        if (!r.U32())
+            continue;
+        const size_t format = r.p;
+        r.Skip(35);
+        if (!r.ok)
+            return;
+        const uint32_t stride = uint32_t(int8_t(r.d[format + 0x22]));
+        const uint32_t count = r.U32();
+        m.vertices.push_back({ r.p, count, stride });
+        if (stride < 12)
+            r.ok = false;
+        r.Skip(uint64_t(count) * stride);
+        for (uint32_t i = 0, prims = r.Count(); i < prims && r.ok; ++i) {
+            r.Skip(uint64_t(r.Count(2)) * 2); // bone palette
+            r.Skip(uint64_t(r.Count(2)) * 2); // indices
+            r.Skip(4 + 4 + 2 + 2 + 4);
+        }
+    }
+    StringTable(r); // textures
+    StringTable(r); // materials
+    if (r.Count() != 0) { // embedded images
+        r.ok = false;
+        return;
+    }
+    r.Skip(uint64_t(r.Count(56)) * 56); // attachments
+    m.bmin = r.p;
+    m.bmax = r.p + 12;
+    r.Skip(24);
+    if (r.U32()) {
+        r.Skip(uint64_t(r.Count(8)) * 8);
+        r.Skip(24);
+    }
+    r.Skip(8);
+}
+
+// A portal: its points (an array of 3 x f32), u16, u16, a plane (normal, d), u32, u32.
+struct Portal {
+    size_t start = 0, points = 0, d = 0, end = 0;
+    uint32_t pointCount = 0;
+};
+
+void ReadPortal(Reader& r, Portal& p)
+{
+    p.start = r.p;
+    p.pointCount = r.Count(12);
+    p.points = r.p;
+    r.Skip(uint64_t(p.pointCount) * 12 + 4 + 12);
+    p.d = r.p;
+    r.Skip(12);
+    p.end = r.p;
+}
+
+// The object section: a version, a u32, the object count, then each object: its class, its size (counting
+// itself: to the object's end), its property count, its properties (a name, a size counting itself, the data) and
+// what follows them (8 bytes).
+struct Property {
+    std::string name;
+    std::vector<uint8_t> data;
+};
+struct Object {
+    std::string cls;
+    std::vector<Property> props;
+    std::vector<uint8_t> tail;
+};
+
+bool ReadProperties(Reader& r, uint32_t n, std::vector<Property>& out)
+{
+    for (uint32_t i = 0; i < n && r.ok; ++i) {
+        Property p;
+        p.name = r.String();
+        const uint32_t size = r.U32();
+        const size_t at = r.p;
+        if (size < 4 || !r.Take(size - 4))
+            return r.ok = false;
+        p.data.assign(r.d.begin() + at, r.d.begin() + at + size - 4);
+        out.push_back(std::move(p));
+    }
+    return r.ok;
+}
+
+struct Writer {
+    std::vector<uint8_t> out;
+    void Raw(const void* p, size_t n)
+    {
+        out.insert(out.end(), static_cast<const uint8_t*>(p), static_cast<const uint8_t*>(p) + n);
+    }
+    void U32(uint32_t v) { Raw(&v, 4); }
+    void F32(float v) { Raw(&v, 4); }
+    void String(const std::string& s)
+    {
+        U32(uint32_t(s.size()));
+        Raw(s.data(), s.size());
+    }
+    void Properties(const std::vector<Property>& props)
+    {
+        U32(uint32_t(props.size()));
+        for (const Property& p : props) {
+            String(p.name);
+            U32(uint32_t(p.data.size() + 4));
+            Raw(p.data.data(), p.data.size());
+        }
+    }
+};
+
+Property* Find(std::vector<Property>& props, const char* name)
+{
+    for (Property& p : props)
+        if (p.name == name)
+            return &p;
+    return nullptr;
+}
+
+Object* FindObject(std::vector<Object>& objects, const char* cls)
+{
+    for (Object& o : objects)
+        if (o.cls == cls)
+            return &o;
+    return nullptr;
+}
+
+// A property holding an array of property groups (u32 count; each: u32 count, properties).
+using Groups = std::vector<std::vector<Property>>;
+
+bool ReadGroups(const std::vector<uint8_t>& data, Groups& groups)
+{
+    Reader r{ data };
+    const uint32_t n = r.U32();
+    for (uint32_t i = 0; i < n && r.ok; ++i) {
+        groups.emplace_back();
+        ReadProperties(r, r.U32(), groups.back());
+    }
+    return r.ok && r.p == data.size();
+}
+
+std::vector<uint8_t> WriteGroups(const Groups& groups)
+{
+    Writer w;
+    w.U32(uint32_t(groups.size()));
+    for (const auto& g : groups)
+        w.Properties(g);
+    return w.out;
+}
+
+uint32_t U32Of(const Property* p)
+{
+    uint32_t v = 0;
+    if (p && p->data.size() >= 4)
+        std::memcpy(&v, p->data.data(), 4);
+    return v;
+}
+
+template <size_t N>
+void SetFloats(Property* p, const float (&v)[N], size_t at = 0)
+{
+    if (p && p->data.size() >= at + sizeof v)
+        std::memcpy(p->data.data() + at, v, sizeof v);
+}
+
+double Remap(double v, int axis)
+{
+    if (std::fabs(v - kOldBox[axis].lo) < 0.01)
+        return kSpace[axis].lo;
+    if (std::fabs(v - kOldBox[axis].hi) < 0.01)
+        return kSpace[axis].hi;
+    return v;
+}
+
+void RemapPoint(std::vector<uint8_t>& d, size_t at)
+{
+    for (int k = 0; k < 3; ++k)
+        PutF(d, at + 4 * k, Remap(GetF(d, at + 4 * k), k));
+}
+
+// A plane on an axis (normal +-1 there) moves with the box: n . p = d.
+void RemapPlane(std::vector<uint8_t>& d, size_t normal, size_t dAt)
+{
+    double dist = GetF(d, dAt);
+    for (int k = 0; k < 3; ++k) {
+        const double n = GetF(d, normal + 4 * k);
+        if (std::fabs(std::fabs(n) - 1.0) < 1e-4) {
+            const double s = n > 0 ? 1.0 : -1.0;
+            dist = s * Remap(s * dist, k);
+        }
+    }
+    PutF(d, dAt, dist);
+}
+
+uint8_t HedronVertices(const std::vector<uint8_t>& d, size_t hedron) { return d[hedron + 1]; }
+
+} // namespace
+
+bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report)
+{
+    const std::vector<uint8_t>& in = level;
+    Reader r{ in };
+    auto fail = [&](const char* why) {
+        char text[160];
+        std::snprintf(text, sizeof text, "%s (at 0x%zX)", why, r.p);
+        report = text;
+        return false;
+    };
+    // the header: tag, version, the source path, two u32
+    if (r.String() != "3DF!" || r.U32() != kLevelVersion)
+        return fail("not a level file of the expected version");
+    const std::string source = r.String();
+    constexpr const char kSourceName[] = "U107_UTA_GrievousSurvival.SLS";
+    constexpr size_t kSourceLength = sizeof kSourceName - 1;
+    if (source.size() < kSourceLength || _stricmp(source.c_str() + source.size() - kSourceLength, kSourceName) != 0)
+        return fail("not Grievous Survival's level file");
+    r.Skip(8);
+    if (r.U32() != 0 || r.U32() == 0) // no BSP mesh world; a scene
+        return fail("unexpected level layout");
+
+    // the scene (0x5C7E0)
+    for (uint32_t i = 0, n = r.Count(); i < n && r.ok; ++i) // the sectors' volumes
+        ReadTree(r, nullptr);
+    r.Skip(uint64_t(r.Count(4)) * 4);
+    std::vector<Tree> brushes; // the collision
+    for (uint32_t i = 0, n = r.Count(); i < n && r.ok; ++i) {
+        Tree t;
+        if (ReadTree(r, &t))
+            brushes.push_back(std::move(t));
+    }
+    std::vector<Instance> instances;
+    for (uint32_t i = 0, n = r.Count(); i < n && r.ok; ++i) {
+        instances.emplace_back();
+        ReadInstance(r, instances.back());
+    }
+    Tree world;
+    if (!ReadTree(r, &world) || !r.ok)
+        return fail("the scene's world BSP");
+    // the sectors: the first is the cave's
+    Mesh mesh;
+    std::vector<Portal> portals;
+    size_t portalsCap = 0, portalsEnd = 0;
+    for (uint32_t s = 0, n = r.Count(); s < n && r.ok; ++s) {
+        r.Skip(20);
+        r.String();
+        Mesh m;
+        ReadMesh(r, m);
+        const size_t cap = r.p;
+        std::vector<Portal> list(r.Count());
+        for (Portal& p : list)
+            ReadPortal(r, p);
+        if (s == 0) {
+            mesh = std::move(m);
+            portals = std::move(list);
+            portalsCap = cap;
+            portalsEnd = r.p;
+        }
+        for (uint32_t i = 0, more = r.Count(); i < more && r.ok; ++i) {
+            Portal p;
+            ReadPortal(r, p);
+        }
+        r.Skip(4);
+    }
+    const size_t portalsCount = portalsCap + 4;
+    if (!r.ok || portals.empty())
+        return fail("the sectors");
+    for (uint32_t i = 0, n = r.Count(); i < n && r.ok; ++i) { // groups
+        r.Skip(20);
+        r.String();
+    }
+    size_t bounds = 0;
+    if (r.U32()) {
+        bounds = r.p;
+        r.Skip(36);
+    }
+    size_t octree = 0;
+    for (uint32_t i = 0, n = r.U32(); i < n && r.ok; ++i) {
+        const size_t head = r.p;
+        r.Skip(28);
+        if (!r.ok)
+            break;
+        uint32_t size;
+        std::memcpy(&size, in.data() + head + 8, 4);
+        if (i == 0)
+            octree = r.p;
+        r.Skip(size);
+    }
+    for (uint32_t i = 0, n = r.U32(); i < n && r.ok; ++i) { // index lists
+        if (int16_t(r.U16()) >= 0)
+            r.Skip(uint64_t(r.U32()) * 2);
+    }
+    r.Skip(12);
+    if (!r.ok || !bounds || !octree)
+        return fail("the scene's tail");
+
+    // the objects
+    const size_t objectsAt = r.p;
+    if (r.U32() != kLevelVersion)
+        return fail("the object section");
+    const uint32_t nextId = r.U32();
+    std::vector<Object> objects(r.U32());
+    for (Object& o : objects) {
+        o.cls = r.String();
+        const size_t start = r.p;
+        const uint32_t size = r.U32();
+        ReadProperties(r, r.U32(), o.props);
+        if (!r.ok || start + size < r.p || start + size > in.size())
+            return fail("an object");
+        o.tail.assign(in.begin() + r.p, in.begin() + start + size);
+        r.p = start + size;
+    }
+    const size_t objectsEnd = r.p;
+    if (!r.ok)
+        return fail("the objects");
+
+    std::vector<uint8_t> d = in;
+    char text[512];
+    int at = 0;
+    auto say = [&](const char* format, auto... args) {
+        if (at < int(sizeof text))
+            at += std::snprintf(text + at, sizeof text - at, format, args...);
+    };
+
+    // statics: the static manager keeps the cave's entry (its model the floor, at the floor's height, lit by
+    // ambient light) and the sky's; the floor's baked light (the static instance with its light handle) is white
+    Object* manager = FindObject(objects, "IStaticManager");
+    Property* list = manager ? Find(manager->props, "MGR_StrippedStaticsList") : nullptr;
+    Groups statics, kept;
+    if (!list || !ReadGroups(list->data, statics))
+        return fail("the static manager");
+    uint32_t floorHandle = 0;
+    bool haveFloor = false;
+    for (auto& g : statics) {
+        const uint32_t model = U32Of(Find(g, "MGR_ManagedMeshID"));
+        if (model == kCaveMesh) {
+            const float position[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, float(kFloorY), 0 };
+            const float ambient[3] = { kFloorAmbient, kFloorAmbient, kFloorAmbient };
+            SetFloats(Find(g, "MGR_WorldPosition"), position);
+            SetFloats(Find(g, "MGR_AmbientLight"), ambient);
+            if (Property* p = Find(g, "MGR_Ambientlightingonly"); p && p->data.size() >= 4) {
+                const uint32_t one = 1;
+                std::memcpy(p->data.data(), &one, 4);
+            }
+            floorHandle = U32Of(Find(g, "MGR___lighthandle"));
+            haveFloor = true;
+            kept.push_back(g);
+        } else if (model == kSkyMesh) {
+            kept.push_back(g);
+        }
+    }
+    const Instance* floorLight = nullptr;
+    for (const Instance& s : instances)
+        if (haveFloor && s.lit && s.id == floorHandle)
+            floorLight = &s;
+    if (!floorLight)
+        return fail("the cave's static entry");
+    say("statics: %zu of %zu kept; ", kept.size(), statics.size());
+    list->data = WriteGroups(kept);
+    PutU32(d, floorLight->count1, kFloorVertices);
+
+    // spawn: the player's start in the middle of the floor, the sector's reference point (for the sky) too
+    const double midX = (kSpace[0].lo + kSpace[0].hi) / 2, midZ = (kSpace[2].lo + kSpace[2].hi) / 2;
+    Object* start = FindObject(objects, "IPointSpawnPlayer");
+    Object* sectorInfo = FindObject(objects, "ISectorInfo");
+    Property* startAt = start ? Find(start->props, "Transform") : nullptr;
+    Property* sectorAt = sectorInfo ? Find(sectorInfo->props, "Transform") : nullptr;
+    if (!startAt || startAt->data.size() < 48 || !sectorAt || sectorAt->data.size() < 48)
+        return fail("the player's start");
+    const float startPosition[3] = { float(midX), float(kFloorY + 60.0), float(midZ) };
+    SetFloats(startAt, startPosition, 36);
+    const float sectorX[1] = { float(midX) }, sectorZ[1] = { float(midZ) };
+    SetFloats(sectorAt, sectorX, 36);
+    SetFloats(sectorAt, sectorZ, 44);
+
+    // lighting: the characters' ambient raised; the point lights that light them moved from the cave to the
+    // middle of the floor, their range made to reach all of it
+    Object* properties = FindObject(objects, "ILevelProperties");
+    Object* lights = FindObject(objects, "ILightManager");
+    Property* lightList = lights ? Find(lights->props, "__lights") : nullptr;
+    Groups lightGroups;
+    if (!properties || !lightList || !ReadGroups(lightList->data, lightGroups))
+        return fail("the lights");
+    const float characterAmbient[3] = { kCharacterAmbient, kCharacterAmbient, kCharacterAmbient };
+    SetFloats(Find(properties->props, "Character ambient color"), characterAmbient);
+    SetFloats(Find(properties->props, "Dynamic-mesh ambient color"), characterAmbient);
+    const double dx = midX - kCaveCentreX, dz = midZ - kCaveCentreZ;
+    for (auto& g : lightGroups) {
+        for (Property& p : g) {
+            if (p.data.size() < 4)
+                continue;
+            float v;
+            std::memcpy(&v, p.data.data(), 4);
+            if (p.name == "__x")
+                v = float(double(v) + dx);
+            else if (p.name == "__z")
+                v = float(double(v) + dz);
+            else if (p.name == "__rng")
+                std::memcpy(&v, &kLightRange, 4);
+            std::memcpy(p.data.data(), &v, 4);
+        }
+    }
+    lightList->data = WriteGroups(lightGroups);
+    say("%zu lights moved; ", lightGroups.size());
+
+    // space: the sector's box stretched (the world BSP, the sector's mesh and bounds, its portals, the scene's
+    // bounds and the octree), with portals on every side (the sky is drawn only through them)
+    for (size_t h : world.hedrons)
+        for (uint8_t i = 0; i < HedronVertices(d, h); ++i)
+            RemapPoint(d, h + 4 + 12 * i);
+    for (uint32_t i = 0; i < world.planeCount; ++i)
+        RemapPlane(d, world.planes + 16 * i, world.planes + 16 * i + 12);
+    RemapPoint(d, mesh.bmin);
+    RemapPoint(d, mesh.bmax);
+    double lo[3], hi[3], centre[3], radius2 = 0, extent = 0;
+    for (int k = 0; k < 3; ++k) {
+        lo[k] = GetF(d, mesh.bmin + 4 * k);
+        hi[k] = GetF(d, mesh.bmax + 4 * k);
+        centre[k] = (lo[k] + hi[k]) / 2;
+        radius2 += ((hi[k] - lo[k]) / 2) * ((hi[k] - lo[k]) / 2);
+        extent = std::max(extent, hi[k] - lo[k]);
+    }
+    const double radius = std::sqrt(radius2);
+    for (int k = 0; k < 3; ++k)
+        PutF(d, mesh.centre + 4 * k, centre[k]);
+    PutF(d, mesh.radius, radius);
+    // the sector's own faces made empty (every vertex at one corner): the open sky shows on every side
+    for (const Mesh::Vertices& v : mesh.vertices)
+        for (uint32_t i = 0; i < v.count; ++i)
+            for (int k = 0; k < 3; ++k)
+                PutF(d, v.at + size_t(i) * v.stride + 4 * k, lo[k]);
+    for (const Portal& p : portals) {
+        for (uint32_t i = 0; i < p.pointCount; ++i)
+            RemapPoint(d, p.points + 12 * i);
+        RemapPlane(d, p.d - 12, p.d);
+    }
+    // the cave had portals on its open sides (west, south, top): the other sides get theirs, made like the first
+    Writer added;
+    {
+        const Portal& proto = portals[0];
+        const size_t ab = proto.points + 12 * proto.pointCount, tail = proto.d + 4;
+        auto add = [&](const double (&points)[3][3], int axis, double sign) {
+            added.U32(3);
+            added.U32(3);
+            for (const auto& q : points)
+                for (double c : q)
+                    added.F32(float(c));
+            added.Raw(d.data() + ab, 4);
+            const float normal[3] = { axis == 0 ? float(sign) : 0.0f, 0.0f, axis == 2 ? float(sign) : 0.0f };
+            added.Raw(normal, sizeof normal);
+            added.F32(float(sign * (axis == 0 ? hi[0] : hi[2])));
+            added.Raw(d.data() + tail, 8);
+        };
+        const double x0 = lo[0], y0 = lo[1], z0 = lo[2], x1 = hi[0], y1 = hi[1], z1 = hi[2];
+        add({ { x1, y1, z0 }, { x1, y1, z1 }, { x1, y0, z1 } }, 0, -1.0);
+        add({ { x1, y0, z0 }, { x1, y1, z0 }, { x1, y0, z1 } }, 0, -1.0);
+        add({ { x0, y1, z1 }, { x0, y0, z1 }, { x1, y0, z1 } }, 2, -1.0);
+        add({ { x1, y1, z1 }, { x0, y1, z1 }, { x1, y0, z1 } }, 2, -1.0);
+    }
+    const uint32_t portalTotal = uint32_t(portals.size() + 4);
+    uint32_t cap;
+    std::memcpy(&cap, d.data() + portalsCap, 4);
+    PutU32(d, portalsCap, std::max(cap, portalTotal));
+    PutU32(d, portalsCount, portalTotal);
+    RemapPoint(d, bounds + 12);
+    RemapPoint(d, bounds + 24);
+    RemapPoint(d, octree + 52);
+    RemapPoint(d, octree + 64);
+    for (int k = 0; k < 3; ++k)
+        PutF(d, octree + 76 + 4 * k, centre[k]);
+    PutF(d, octree + 88, radius);
+    PutF(d, octree + 4, extent);
+    say("space x %.0f..%.0f z %.0f..%.0f; ", lo[0], hi[0], lo[2], hi[2]);
+
+    // floor: the floor brush (the one lowest at its top) covers the box; the wall brushes go far up
+    if (brushes.empty())
+        return fail("no brushes");
+    auto top = [&](const Tree& t) {
+        double y = -1e30;
+        for (size_t h : t.hedrons)
+            for (uint8_t i = 0; i < HedronVertices(d, h); ++i)
+                y = std::max(y, double(GetF(d, h + 4 + 12 * i + 4)));
+        return y;
+    };
+    const Tree* floor = &brushes[0];
+    for (const Tree& t : brushes)
+        if (top(t) < top(*floor))
+            floor = &t;
+    for (const Tree& t : brushes) {
+        for (size_t h : t.hedrons) {
+            for (uint8_t i = 0; i < HedronVertices(d, h); ++i) {
+                const size_t v = h + 4 + 12 * i;
+                if (&t == floor) {
+                    PutF(d, v, GetF(d, v) > kCaveCentreX ? kSpace[0].hi : kSpace[0].lo);
+                    PutF(d, v + 8, GetF(d, v + 8) > kCaveCentreZ ? kSpace[2].hi : kSpace[2].lo);
+                } else {
+                    PutF(d, v + 4, GetF(d, v + 4) + kLift);
+                }
+            }
+        }
+        for (uint32_t i = 0; i < t.planeCount; ++i) {
+            const size_t p = t.planes + 16 * i;
+            const double nx = GetF(d, p), ny = GetF(d, p + 4), nz = GetF(d, p + 8);
+            if (&t != floor)
+                PutF(d, p + 12, GetF(d, p + 12) + ny * kLift);
+            else if (std::fabs(nx) > 0.5)
+                PutF(d, p + 12, nx * (nx > 0 ? kSpace[0].hi : kSpace[0].lo));
+            else if (std::fabs(nz) > 0.5)
+                PutF(d, p + 12, nz * (nz > 0 ? kSpace[2].hi : kSpace[2].lo));
+        }
+    }
+
+    // objects: only what a level needs
+    std::vector<Object> keptObjects;
+    for (Object& o : objects) {
+        const bool keep = std::any_of(std::begin(kKeep), std::end(kKeep), [&](const char* c) { return o.cls == c; }) ||
+            (o.cls == "IStatic" && Find(o.props, "Skybox Render Priority"));
+        if (keep)
+            keptObjects.push_back(std::move(o));
+    }
+    say("%zu of %zu objects kept", keptObjects.size(), objects.size());
+    Writer section;
+    section.U32(kLevelVersion);
+    section.U32(nextId);
+    section.U32(uint32_t(keptObjects.size()));
+    for (const Object& o : keptObjects) {
+        section.String(o.cls);
+        Writer body;
+        body.Properties(o.props);
+        body.Raw(o.tail.data(), o.tail.size());
+        section.U32(uint32_t(body.out.size() + 4));
+        section.Raw(body.out.data(), body.out.size());
+    }
+
+    // the result: the edited bytes with the floor's light, the new portals and the new object section in place
+    std::vector<uint8_t> out;
+    out.reserve(d.size() + added.out.size());
+    out.insert(out.end(), d.begin(), d.begin() + floorLight->lightCount);
+    const uint32_t vertices = kFloorVertices;
+    out.insert(out.end(), reinterpret_cast<const uint8_t*>(&vertices), reinterpret_cast<const uint8_t*>(&vertices) + 4);
+    out.insert(out.end(), size_t(kFloorVertices) * 4, 0xFF);
+    out.insert(out.end(), d.begin() + floorLight->lightEnd, d.begin() + portalsEnd);
+    out.insert(out.end(), added.out.begin(), added.out.end());
+    out.insert(out.end(), d.begin() + portalsEnd, d.begin() + objectsAt);
+    out.insert(out.end(), section.out.begin(), section.out.end());
+    out.insert(out.end(), d.begin() + objectsEnd, d.end());
+    report = text;
+    level = std::move(out);
+    return true;
+}
+
+// --- The floor model: written from scratch (the mesh format: tools/meshes/charmsh.py) ------------------------------
+// A flat grid at local y 0 (the level places it at the floor's height), one triangle strip, textured with the
+// level's cave floor texture tiled every 512 units.
+namespace {
+
+constexpr float kFloorX0 = 1500.0f, kFloorX1 = 24000.0f, kFloorZ0 = 2700.0f, kFloorZ1 = 13500.0f;
+constexpr float kTile = 512.0f;
+constexpr const char* kFloorTexture = "M07_CaveFloorTile512_02";
+// Vertex format: position at 0, normal (4 x u8) at 12, uv (2 x f32) at 16, colour (4 x u8) at 24; stride 28.
+constexpr uint8_t kFormat[35] = { 0x00, 0x01, 0x03, 0x02, 0xcf, 0x02, 0x00, 0x00, 0xce, 0x02, 0x00, 0x02, 0x04,
+    0x01, 0x04, 0x00, 0xcc, 0x02, 0x00, 0x00, 0xcb, 0x02, 0x00, 0x0c, 0x18, 0x10, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0x04, 0x1c };
+
+struct MeshWriter : Writer {
+    void U8(uint8_t v) { out.push_back(v); }
+    void U16(uint16_t v) { Raw(&v, 2); }
+    void Zero(size_t n) { out.insert(out.end(), n, 0); }
+    void Name32(const char* s)
+    {
+        char b[32] = {};
+        strncpy_s(b, s, 31);
+        Raw(b, 32);
+    }
+    void Identity()
+    {
+        const float m[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
+        Raw(m, sizeof m);
+    }
+    // a string table: u32 total, u32 0, u32 used, TArray<u32> offsets, the text
+    void Table(const char* name)
+    {
+        const uint32_t n = uint32_t(strlen(name)) + 1;
+        U32(n);
+        U32(0);
+        U32(n);
+        U32(4);
+        U32(1);
+        U32(0);
+        Raw(name, n);
+    }
+};
+
+} // namespace
+
+std::vector<uint8_t> DevMapFloorModel()
+{
+    const int vx = kCellsX + 1, vz = kCellsZ + 1, count = vx * vz, tris = 2 * kCellsX * kCellsZ;
+    std::vector<uint16_t> strip;
+    for (int j = 0; j < kCellsZ; ++j) {
+        std::vector<uint16_t> row;
+        for (int i = 0; i < vx; ++i) {
+            row.push_back(uint16_t((j + 1) * vx + i));
+            row.push_back(uint16_t(j * vx + i));
+        }
+        if (!strip.empty()) { // degenerate triangles join the rows, keeping the winding
+            const uint16_t last = strip.back();
+            strip.push_back(last);
+            strip.push_back(row[0]);
+            if (strip.size() % 2)
+                strip.push_back(row[0]);
+        }
+        strip.insert(strip.end(), row.begin(), row.end());
+    }
+    MeshWriter w;
+    w.U32(0xF8C203A1); // magic
+    w.U32(kLevelVersion);
+    w.U32(1); w.U32(1); w.String("Base"); w.U32(1); w.U32(1); w.String("Base"); // header: "Base" {"Base"}
+    w.U32(1); w.U32(1);                  // models
+    w.String("Base"); w.U32(1);          // model name, bool
+    w.U32(1); w.U32(1);                  // meshes
+    w.Name32("Base");
+    w.F32((kFloorX0 + kFloorX1) / 2); w.F32(0.0f); w.F32((kFloorZ0 + kFloorZ1) / 2); // centre
+    const float hx = (kFloorX1 - kFloorX0) / 2, hz = (kFloorZ1 - kFloorZ0) / 2;
+    w.F32(float(std::sqrt(double(hx) * hx + double(hz) * hz))); // radius
+    w.U32(0); w.U32(0); w.U32(0); w.U32(1); // bools
+    w.U32(0xFF000000); w.U32(uint32_t(tris)); w.U32(1); // colour, triangle total, bool
+    // body
+    w.U32(1);           // new format
+    w.U32(0); w.U32(0); // appearances
+    w.U32(1); w.U32(1); // groups
+    w.U32(0); w.U32(0xFF000000); w.F32(1.0f); w.F32(0.01f); w.U8(0); // flags, colour, 2 floats, u8
+    w.U32(0);           // shader
+    for (int l = 0; l < 4; ++l) { // layers: u8, 4 x s16 uv, u32 texture (1-based; 0 none)
+        w.U8(l == 0 ? 255 : 0);
+        w.Zero(8);
+        w.U32(l == 0 ? 1 : 0);
+    }
+    w.U32(1);           // render data present
+    w.Raw(kFormat, sizeof kFormat);
+    w.U32(uint32_t(count));
+    for (int j = 0; j < vz; ++j) {
+        for (int i = 0; i < vx; ++i) {
+            const float x = float(kFloorX0 + double(kFloorX1 - kFloorX0) * i / kCellsX);
+            const float z = float(kFloorZ0 + double(kFloorZ1 - kFloorZ0) * j / kCellsZ);
+            w.F32(x); w.F32(0.0f); w.F32(z);
+            w.U8(128); w.U8(255); w.U8(128); w.U8(0); // normal: up
+            w.F32(x / kTile); w.F32(z / kTile);
+            w.U32(0xFFFFFFFF);                        // colour
+        }
+    }
+    w.U32(1); w.U32(1); // prims
+    w.U32(0); w.U32(0); // bone palette
+    w.U32(uint32_t(strip.size())); w.U32(uint32_t(strip.size()));
+    for (uint16_t i : strip)
+        w.U16(i);
+    w.U32(1); w.U32(0); w.U16(uint16_t(count)); w.U16(uint16_t(tris)); w.U32(uint32_t(tris * 3));
+    w.Table(kFloorTexture);
+    w.Table("DevFloorSG");
+    w.U32(0); w.U32(0); // embedded images
+    // attachments: one record (type 0, 1, 48 zero bytes); without it the static crashes the level's load (0x2078FD)
+    w.U32(4); w.U32(1); w.U32(0); w.U32(1); w.Zero(48);
+    w.F32(kFloorX0); w.F32(0.0f); w.F32(kFloorZ0); // bound box
+    w.F32(kFloorX1); w.F32(0.0f); w.F32(kFloorZ1);
+    w.U32(0); w.U32(0); w.U32(1); // bools
+    // bones: the root
+    w.U32(1); w.U32(1); w.Name32("root"); w.Identity(); w.U16(0xFFFF);
+    w.Identity(); w.Identity(); // matrices
+    w.U32(0); w.U32(0);         // flags
+    w.U32(1);                   // mesh flags
+    return w.out;
+}
+
+} // namespace swrots::game

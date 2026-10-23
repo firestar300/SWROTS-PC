@@ -6,8 +6,9 @@ debug console fight anywhere. Worked out on the bonus mission *Grievous Survival
 small cave on Utapau) and checked against `M08` (Palpatine's office) and `M09A` (the Jedi Temple), with the game's
 own level reader traced read by read and in-game A/B tests. Addresses are for the supported retail XBE.
 
-The developer map is research so far: it is built by the tools in [`tools/levels/`](../../tools/levels/README.md)
-from the user's own files and served with a test switch, not part of the port yet.
+The developer map is part of the port (`devmap` in the debug console, or the debug menu's Game tab): the port
+builds it from the level's own file as the level loads (`src/game/devmapbuild.cpp`). The tools in
+[`tools/levels/`](../../tools/levels/README.md) read, show and edit level files for research, and make the same map.
 
 ## Where a level file lives
 
@@ -89,10 +90,32 @@ each other, and chase the player across the floor, as far as its corners.
 
 ## Building it
 
-`python tools/levels/makedevmap.py <GameData folder> <out.slp>` copies the level file out of
-`res_u107_uta_grievoussurvival.pak` and edits it (`devmap.py`). The test switch `SWROTS_DEVMAP_SLP=<out.slp>`, with a
-`mods\Default_Xbox.cfg` booting `map:u107_uta_grievoussurvival`, makes the port serve that file in place of the
-level's own and its flat floor in place of the cave's model.
+**In the port** (`src/game/devmap.cpp`, `devmapbuild.cpp`): the launch argument `devmap:1` asks for the developer
+map. The `devmap` command (and the debug menu's button) restarts the game with the launch data
+`map:u107_uta_grievoussurvival devmap:1`, as the game's own level changes do (see [Starting a
+level](#starting-a-level)); `restart` keeps it, since a restart reuses the launch data. The same two lines in
+`mods\Default_Xbox.cfg` start the game in it. With the argument, two resource patches change what the level reads from
+its PAK:
+
+- `levels\u107_uta_grievoussurvival.slp`: walked as the game reads it, with the edits above made in place or spliced
+  in (the floor's baked light, the new portals, the object section written again). Its result is byte for byte
+  that of `tools/levels/makedevmap.py` (91,059 bytes from 202,692). A level file that is not the one expected (another
+  version, another layout) is left as it is, with a warning in the log.
+- `meshes\props\m07\cave\m07_cave.msh`: the flat floor, written from scratch.
+
+Without the argument Grievous Survival is the game's own.
+
+**With the tools:** `python tools/levels/makedevmap.py <GameData folder> <out.slp>` copies the level file out of
+`res_u107_uta_grievoussurvival.pak` and edits it (`devmap.py`): the same map, as a file, for research.
+
+## Starting a level
+
+A level change is a reboot of the game into itself with **launch data** (`XLaunchNewImage`, 0x4A1789): a 4 KB page
+holding its type (0, the title's own), the title's id (checked by `XGetLaunchInfo`, 0x4A186A), the image's path at +8
+(`d:\default.xbe`) and, at +0x400, the title's data. This game's data is a line of launch arguments in
+`Default_Xbox.cfg`'s form: at startup (0x6FA31) it is split at spaces and added to the arguments, so `map:<level>`
+there starts that level. The game's own level changes write `map:`, `nextmap:`, `previousmap:` and more
+(0x136080). The port starts a level the same way (`kernel::LaunchGame`, any arguments).
 
 ## Modes and missions from the game's own objects
 
@@ -117,7 +140,6 @@ the objects cannot do, the port's own code can.
 
 ## Open
 
-- Building the map in the port itself (from the level's PAK copy, at load), so no tool is needed.
 - The roles of the scene's first BSP trees, of some lists and of the objects' last 8 bytes; the path system's full
   layout.
 - The older sector mesh form of M08 and M09A.

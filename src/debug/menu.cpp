@@ -16,6 +16,7 @@
 #include "debug/console.h"
 #include "game/characters.h"
 #include "game/coop.h"
+#include "game/devmap.h"
 #include "game/freecam.h"
 #include "game/game.h"
 #include "imgui.h"
@@ -582,6 +583,13 @@ void SaberRow()
 void GameTab()
 {
     UpdateLog();
+    // Levels: the port's own.
+    ImGui::SeparatorText("Levels");
+    if (ImGui::Button(game::DevMapActive() ? "Developer map (again)" : "Developer map"))
+        Submit("devmap");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("An empty, lit, flat floor under the sky, nothing on it but you: spawn characters to\n"
+                          "test anything (devmap). The game restarts into it.");
     // Player: what it is and where, and its numbers.
     ImGui::SeparatorText("Player");
     const game::PlayerInfo player = game::CurrentPlayer();

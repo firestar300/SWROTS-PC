@@ -41,6 +41,7 @@ Up/Down recall earlier commands.
 | `characters` | every character in the level: side, AI controller, health, distance, target |
 | `despawn` | removes the characters you spawned in this level (the Characters tab's Remove spawned) |
 | `restart` | restarts the running mission (as the pause menu's Restart Mission does) |
+| `devmap` | the game restarts into the developer map: an empty, lit, flat floor under the sky with nothing on it but you, to test anything (see the [Game tab](#game-tab)) |
 | `autorestart [on\|off]` | whether a `player` change applies at once during a mission: live, or by restarting it (on by default) |
 | `variants <class>` | lists a character class's costumes and texture sets |
 | `meshes [text]` | lists the character bodies on the disc and under `mods\` (those containing the text) |
@@ -303,6 +304,11 @@ characters you spawned in this level; their count is shown beside it.
 Your character's live data and quick helpers, the game's own variables (the ones `set` changes) and
 switches, in one place.
 
+- **Levels**: **Developer map** (`devmap`): the game restarts into an empty, lit, flat floor under the sky
+  (22,500 × 10,800 units), with nothing on it but you (General Grievous; `player` picks another character). Spawn
+  characters there (`spawn`) to test anything without a mission's scripts, enemies or walls in the way. The port
+  builds it as the level loads, from the bonus mission *Grievous Survival*'s own files; `restart` keeps it. How it
+  is made: [levels](research/levels.md#the-developer-map).
 - **Player**: your class and costume, position and facing, health and maximum health, and Force
   and maximum Force (Jedi-like characters), read from your character as you play (outside a mission: none; `player`
   in the console prints the same). **God mode**, **Infinite Force** (`infiniteforce`: your Force stays full; the game

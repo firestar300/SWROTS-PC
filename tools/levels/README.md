@@ -11,9 +11,9 @@ nothing of it back to the game's folders. Python 3; `slpscene.py`, `devfloor.py`
 | `slp.py map <file.slp>` | prints what the reader parsed, with offsets (header, brushes, static instances, objects) |
 | `slp.py selftest <file.slp>...` | reads and writes back each file, checking the bytes are the same (Grievous Survival, M08 and M09A pass) |
 | `slpobj.py <file.slp> <class or name part>` | prints the matching objects' properties as a tree (e.g. `IPointSpawnPlayer`, `ILightManager`) |
-| `devmap.py <in.slp> <out.slp> [steps]` | turns the Grievous Survival level into the developer test map (steps in its notes) |
+| `devmap.py <in.slp> <out.slp> [steps]` | turns the Grievous Survival level into the developer test map (steps in its notes); the port builds the same map itself as the level loads (`devmap` in the debug console), these tools are for research |
 | `makedevmap.py <GameData folder> <out.slp>` | both at once: the level file out of its PAK, then `devmap.py` |
-| `devfloor.py <out.msh>` | writes the developer map's flat floor model from scratch (the port makes the same floor itself) |
+| `devfloor.py <out.msh>` | writes the developer map's flat floor model from scratch |
 
 As a library, `slp.load(path)` returns the parsed file and `slp.save(file)` its bytes; `slp.get`, `slp.set_prop`,
 `slp.tree` and `slp.tree_bytes` read and change an object's properties.

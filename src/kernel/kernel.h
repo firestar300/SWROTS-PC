@@ -36,6 +36,12 @@ void SetBeforeRelaunch(void (*callback)());
 // Starts the game again with its current launch data, as the game's own restarts do: the running
 // mission from its start. Any thread; returns at once.
 void RestartMission();
+// Starts the game again with `arguments` as its launch data, a line of launch arguments as in Default_Xbox.cfg
+// (e.g. "map:u112_mus_lava"), as the game's own level changes do. Any thread; returns at once.
+void LaunchGame(const std::string& arguments);
+// The launch arguments this start of the game was given (empty when none: a start from the dashboard or
+// Default_Xbox.cfg).
+const std::string& LaunchArguments();
 // Development aid: restarts the game in this process every `seconds` (SWROTS_REBOOT_EVERY), as a level
 // change does, to test what a restart leaves behind.
 void StartRebootTest(unsigned seconds);

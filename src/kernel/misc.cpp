@@ -3,6 +3,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -342,20 +343,48 @@ void RelaunchProcess(const void* launchData)
     ExitProcess(0);
 }
 
-void RestartMission()
+// Reboots with `launchData` (null: the current page) from a thread of its own: the reboot stops every game
+// thread, the caller's too.
+static void RebootWith(const void* launchData)
 {
     LogFlush();
-    // From a thread of its own: the reboot stops every game thread, the caller's too. Without a reboot
-    // so far (a level booted from Default_Xbox.cfg), the current page starts the same level again.
-    HANDLE worker = CreateThread(nullptr, 0, [](void*) -> DWORD {
-        const void* launchData = g_MissionLaunchData.empty() ? LaunchDataPage : g_MissionLaunchData.data();
+    HANDLE worker = CreateThread(nullptr, 0, [](void* data) -> DWORD {
+        const void* launchData = data ? data : LaunchDataPage;
         if (g_InProcessReboot)
             RebootInProcess(launchData); // ends this thread; the reboot worker takes over
         RelaunchProcess(launchData);
-    }, nullptr, 0, nullptr);
+    }, const_cast<void*>(launchData), 0, nullptr);
     if (worker)
         CloseHandle(worker);
 }
+
+void RestartMission()
+{
+    // Without a reboot so far (a level booted from Default_Xbox.cfg), the current page starts the same level again.
+    RebootWith(g_MissionLaunchData.empty() ? nullptr : g_MissionLaunchData.data());
+}
+
+// The launch data page (XLaunchNewImage, 0x4A1789): its type (0, a title's own), the title's id (checked by
+// XGetLaunchInfo, 0x4A186A), the image's path at +8 and the title's data at +0x400 (3 KB). The game's data is
+// a line of launch arguments in Default_Xbox.cfg's form (0x6FA31 splits it at spaces), as its level changes
+// write it (0x136080: map:, nextmap:, ...).
+static std::vector<uint8_t> g_LaunchRequest;
+static std::string g_BootArguments;
+
+void LaunchGame(const std::string& arguments)
+{
+    g_LaunchRequest.assign(4096, 0);
+    const uint32_t certificate = *reinterpret_cast<const uint32_t*>(uintptr_t(0x10118));
+    const uint32_t title = *reinterpret_cast<const uint32_t*>(uintptr_t(certificate + 8));
+    std::memcpy(g_LaunchRequest.data() + 4, &title, 4);
+    const char path[] = "d:\\default.xbe";
+    std::memcpy(g_LaunchRequest.data() + 8, path, sizeof path);
+    std::memcpy(g_LaunchRequest.data() + 0x400, arguments.data(), std::min<size_t>(arguments.size(), 3071));
+    LOG_INFO("Starting the game again with '%s'", arguments.c_str());
+    RebootWith(g_LaunchRequest.data());
+}
+
+const std::string& LaunchArguments() { return g_BootArguments; }
 
 void StartRebootTest(unsigned seconds)
 {
@@ -486,6 +515,7 @@ void BootInit(const void* launchData)
     if (!launchData && !g_PendingLaunchData.empty())
         launchData = g_PendingLaunchData.data();
     LaunchDataPage = nullptr;
+    g_BootArguments.clear();
     if (launchData) {
         if (launchData != g_MissionLaunchData.data()) {
             const auto* data = static_cast<const uint8_t*>(launchData);
@@ -494,7 +524,15 @@ void BootInit(const void* launchData)
         void* page = MmAllocateContiguousMemoryEx(4096, 0, 0xFFFFFFFF, 0, PAGE_READWRITE);
         std::memcpy(page, launchData, 4096);
         LaunchDataPage = page;
-        LOG_INFO("Launch data handed over (type %lu)", *static_cast<DWORD*>(page));
+        const char* text = static_cast<const char*>(page) + 0x400;
+        g_BootArguments.assign(text, strnlen(text, 3072));
+        // only the level from the arguments: they can hold the player's profile name, and logs get shared
+        std::string map;
+        const size_t at = g_BootArguments.find("map:");
+        if (at != std::string::npos && (at == 0 || g_BootArguments[at - 1] == ' '))
+            map = g_BootArguments.substr(at, g_BootArguments.find(' ', at) - at);
+        LOG_INFO("Launch data handed over (type %lu)%s%s", *static_cast<DWORD*>(page), map.empty() ? "" : ": ",
+            map.c_str());
     }
     g_PendingLaunchData.clear();
 }
