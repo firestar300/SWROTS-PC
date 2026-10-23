@@ -851,6 +851,35 @@ constexpr uint32_t kTextureList = 0x0001F820; // thiscall (list {?, count, data}
 constexpr uint32_t kDrawPicture = 0x0025A9C0; // cdecl (context, picture record, const float* corner, const float* other)
 constexpr uint32_t kEngineFree = 0x54;
 int g_StripFirst = 0;
+// The arrows at the strip's ends while fighters are out of view that way: the arena screen's rounds arrow
+// (interfc\front_end\s_rounds_arrow, a glowing blue triangle pointing left; the shared PAK's), drawn with a borrowed
+// picture record (the locked picture's: its texture swapped while drawn), mirrored for the right.
+void* g_StripArrow = nullptr;
+bool g_StripArrowTried = false;
+
+void DrawStripArrow(uint32_t context, uint8_t* record, float x, float y, float size, bool right)
+{
+    if (!g_StripArrowTried) {
+        g_StripArrowTried = true;
+        g_StripArrow = LoadPicture("interfc\\front_end\\s_rounds_arrow");
+    }
+    if (!g_StripArrow || !record)
+        return;
+    void*& texture = *reinterpret_cast<void**>(record + 0xC);
+    float* uv = reinterpret_cast<float*>(record + 0x20); // four corners' u, v
+    void* const kept = texture;
+    float keptUv[8];
+    std::memcpy(keptUv, uv, sizeof keptUv);
+    texture = g_StripArrow;
+    if (right) // mirrored: the corners' u swapped left for right
+        for (int i = 0; i < 4; ++i)
+            uv[i * 2] = 1.0f - keptUv[i * 2];
+    const float corner[2] = { x, y }, other[2] = { x + size, y + size };
+    reinterpret_cast<void(__cdecl*)(uint32_t, void*, const float*, const float*)>(uintptr_t(0x0025A9C0))(
+        context, record, corner, other);
+    texture = kept;
+    std::memcpy(uv, keptUv, sizeof keptUv);
+}
 int g_StripCursors[2] = { -1, -1 };
 
 void FreeList(void* data) // the engine's free: its services table ([kEngineServices], functions) +0x54
@@ -926,6 +955,16 @@ bool DrawSelectStrip(uint8_t* screen, uint32_t context)
         corner[0] += kCellStep;
         other[0] += kCellStep;
     }
+    // the arrows: fighters out of view to the left, to the right
+    {
+        const float firstX = words[0] * k, cellW = words[2] * k - firstX, top = words[1] * k;
+        const float cellH = words[3] * k - top, size = std::min(24.0f, cellH * 0.55f), y = top + (cellH - size) / 2;
+        uint8_t* record = static_cast<uint8_t*>(list.data[list.count - 1]);
+        if (g_StripFirst > 0)
+            DrawStripArrow(context, record, firstX - size - 3, y, size, false);
+        if (g_StripFirst + kStripCells < cells)
+            DrawStripArrow(context, record, firstX + (kStripCells - 1) * kCellStep + cellW + 3, y, size, true);
+    }
     // the cursors: at their cells, or out of sight
     const float hidden = -4000.0f;
     auto place = [&](int slot) { return slot >= g_StripFirst && slot < g_StripFirst + kStripCells ?
@@ -984,6 +1023,8 @@ void InstallRoster()
     BuildExtras();
     std::memset(g_Pictures, 0, sizeof g_Pictures); // the textures of the last start are gone with it
     g_RecordPictures.clear();
+    g_StripArrow = nullptr;
+    g_StripArrowTried = false;
     std::memset(g_PicturesTried, 0, sizeof g_PicturesTried);
     const uint32_t drawSlot = kTextureItemVtable + 3 * 4;
     if (*reinterpret_cast<const uint32_t*>(uintptr_t(drawSlot)) == kTextureItemDraw) {

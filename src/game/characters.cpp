@@ -2055,6 +2055,15 @@ const char* PlayerClass()
     return g_PlayerClass;
 }
 
+void* LoadPicture(const char* path)
+{
+    __try {
+        return LoadInterfaceTexture(path, false);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
 void* LoadPictureFile(const char* path)
 {
     __try {

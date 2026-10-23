@@ -130,8 +130,10 @@ their files (the texture loader's direct path, as the concept art screen loads i
 place: a menu picture item (draw 0x2C7790) holds the custom texture only while it is drawn, and the port draws the
 strip of heads.
 
-The strip of heads shows 11 fighters at a time; with more it scrolls with the cursor (the port draws the strip as the
-game does, 0x2D56F0, from the first fighter in view; a cursor whose fighter is out of view is hidden).
+The strip of heads shows 11 fighters at a time; with more it scrolls with the cursor, with the arena screen's blue
+arrows at its ends where fighters are out of view (the port draws the strip as the game does, 0x2D56F0, from the
+first fighter in view; a cursor whose fighter is out of view is hidden; after player 1's pick the opponent's cursor
+stays in view).
 
 In the duel a fighter needs intro and outro cameras (`cinematics\introcamera\<name>_Intro_Cam.cin`, outro the
 same): a custom character uses its base's, and a base that was never a duelist (the Jedi Brute) Vader's (without
