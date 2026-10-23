@@ -282,6 +282,105 @@ bool __fastcall JediSetupHook(uint8_t* character, void*)
     return result;
 }
 
+// Force controls for a base without them. Every Jedi script class has the Force sequences (the shared Jedi set-up:
+// their handles at the same places in every class object, e.g. Force push's at +0x119E), but a class's player rules
+// decide what the buttons do: each class's StateManager calls its own (cdecl (script instance, class object)); the
+// Jedi Brute's (0x3D9D50, called at 0x3D9D38) has no Force rules. The port's run after it, as Vader's (0x48E5B0:
+// inputs 0x48E5C1, gate 0x48EA70, which powers 0x48EB6E, rules 0x48ECB4-0x48F50D): a branch is offered with
+// 0x175D60 (cdecl (condition, sequence, 3, 3, 1, 1.0f); the sequence from its handle by 0x1F53E0 (handle, file,
+// line)); the second stance (state 0x32, 0x1741A0) has its own set (each handle +2).
+constexpr uint32_t kBruteRulesCall = 0x003D9D38;
+constexpr uint32_t kBruteRules = 0x003D9D50;
+constexpr uint32_t kScriptCharacter = 0x006943CC; // [..] +0x68: the character whose script runs
+using RulesFn = void(__cdecl*)(uint8_t*, uint8_t*);
+
+bool Pressed(uint32_t button) // the button id's global; 0x178070 (id, 5, 0, 2)
+{
+    return reinterpret_cast<bool(__cdecl*)(uint32_t, int, int, int)>(uintptr_t(0x00178070))(
+        *reinterpret_cast<const uint32_t*>(uintptr_t(button)), 5, 0, 2);
+}
+
+bool Direction(uint32_t test, uint8_t* inst) // 0x1F5440 back, 0x1F5480 left, 0x1F54C0 right on [inst+0xFC]
+{
+    return reinterpret_cast<bool(__cdecl*)(uint32_t)>(uintptr_t(test))(*reinterpret_cast<uint32_t*>(inst + 0xFC));
+}
+
+void Offer(bool condition, uint8_t* classObject, uint32_t handleAt)
+{
+    const uint16_t handle = *reinterpret_cast<uint16_t*>(classObject + handleAt);
+    void* sequence = reinterpret_cast<void*(__cdecl*)(uint32_t, const char*, int)>(uintptr_t(0x001F53E0))(handle,
+        "customchars.cpp", __LINE__);
+    reinterpret_cast<void(__cdecl*)(bool, void*, int, int, int, float)>(uintptr_t(0x00175D60))(condition, sequence,
+        3, 3, 1, 1.0f);
+}
+
+void ForceRules(uint8_t* inst, uint8_t* classObject, const CustomCharacter& custom)
+{
+    const auto call = [](uint32_t f) { return reinterpret_cast<bool(__cdecl*)()>(uintptr_t(f))(); };
+    // what the Jedi set-up 0x400EE0 does and the Jedi Brute's Init leaves out: the powers' costs (lightning, throw,
+    // push, grip), once; which powers (the Jedi constructor's defaults, or the character's)
+    float* costs = reinterpret_cast<float*>(inst + 0x330);
+    if (costs[0] == 0 && costs[3] == 0) {
+        costs[0] = costs[1] = 100;
+        costs[2] = 150;
+        costs[3] = 250;
+        costs[4] = 100;
+        if (custom.forcePowers >= 0) {
+            inst[0x2DC] = custom.forcePowers & 1 ? 1 : 0;
+            inst[0x2DB] = custom.forcePowers & 2 ? 1 : 0;
+            inst[0x2DF] = custom.forcePowers & 4 ? 1 : 0;
+            inst[0x2DD] = custom.forcePowers & 8 ? 1 : 0;
+            inst[0x2D9] = custom.forcePowers & 16 ? 1 : 0;
+        }
+    }
+    if (call(0x00176E30)) // the computer's character: its Force is the AI's
+        return;
+    // the gate (nothing else chosen, ...), as Vader's
+    if (inst[0x1DA] || call(0x002BD150) || !call(0x002BC160) || inst[0x2F2])
+        return;
+    const int taps = reinterpret_cast<int(__cdecl*)(uint32_t, int, int, int, int, int)>(uintptr_t(0x001780F0))(
+        *reinterpret_cast<const uint32_t*>(uintptr_t(0x006964E8)), 0, 0, 10, 1, 0);
+    const bool push = taps >= 1, lightning = Pressed(0x006964F4), saberThrow = Pressed(0x00696500);
+    const bool heal = Pressed(0x00696514) && Pressed(0x00696518);
+    const bool canPush = inst[0x2DC] != 0, canGrip = inst[0x2DB] != 0, canLightning = inst[0x2DD] != 0;
+    const bool canThrow = inst[0x2DF] && !inst[0x2F9], canHeal = inst[0x2D9] != 0;
+    if (canGrip) // the grip's target (jedi_functions: 0x426190 (inst, class object, 0x1E0, 24, 350))
+        reinterpret_cast<void(__cdecl*)(uint8_t*, uint8_t*, int, float, float)>(uintptr_t(0x00426190))(inst,
+            classObject, 0x1E0, 24.0f, 350.0f);
+    const uint32_t alt = reinterpret_cast<bool(__cdecl*)(int)>(uintptr_t(0x001741A0))(0x32) ? 2 : 0;
+    const bool back = Direction(0x001F5440, inst), left = Direction(0x001F5480, inst), right = Direction(0x001F54C0, inst);
+    // each power: back, left, right, then any way
+    const auto power = [&](bool trigger, uint32_t backAt, uint32_t leftAt, uint32_t rightAt, uint32_t plainAt) {
+        Offer(trigger && back, classObject, backAt + alt);
+        Offer(trigger && left, classObject, leftAt + alt);
+        Offer(trigger && right, classObject, rightAt + alt);
+        Offer(trigger, classObject, plainAt + alt);
+    };
+    if (canPush)
+        power(push, 0x11AA, 0x11A2, 0x11A6, 0x119E);
+    if (canHeal)
+        Offer(heal, classObject, 0x1248 + alt);
+    if (canLightning)
+        power(lightning, 0x11FC, 0x11F4, 0x11F8, 0x11F0);
+    if (canThrow)
+        power(saberThrow, 0x122A, 0x1222, 0x1226, 0x121E);
+    if (canGrip) // offered only: the grip comes from holding the push (the push sequence's own logic)
+        Offer(false, classObject, 0x11B6 + alt);
+}
+
+void __cdecl BruteRulesHook(uint8_t* inst, uint8_t* classObject)
+{
+    reinterpret_cast<RulesFn>(uintptr_t(kBruteRules))(inst, classObject);
+    __try {
+        uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(kScriptCharacter));
+        uint8_t* character = scripts ? *reinterpret_cast<uint8_t**>(scripts + 0x68) : nullptr;
+        const CustomCharacter* custom = character ? CustomCharacterOf(character) : nullptr;
+        if (custom && custom->forceControls && inst && classObject)
+            ForceRules(inst, classObject, *custom);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
 __declspec(naked) void SaberSetupHook()
 {
     __asm {
@@ -446,6 +545,18 @@ void ReadCharacters(const std::wstring& mods)
         c.scale = std::clamp(float(atof(Profile(file, L"Scale", L"1").c_str())), 0.5f, 2.0f);
         const std::string force = Profile(file, L"Force");
         c.force = force.empty() ? -1.0f : std::clamp(float(atof(force.c_str())), 0.0f, 10000.0f);
+        c.forceControls = !Profile(file, L"ForceFrom").empty();
+        {
+            const std::string powers = Upper(Profile(file, L"ForcePowers"));
+            if (!powers.empty()) {
+                c.forcePowers = 0;
+                static const struct { const char* name; int bit; } kPowers[] = { { "PUSH", 1 }, { "GRIP", 2 },
+                    { "GRASP", 2 }, { "SABERTHROW", 4 }, { "LIGHTNING", 8 }, { "HEAL", 16 } };
+                for (const auto& p : kPowers)
+                    if (powers.find(p.name) != std::string::npos)
+                        c.forcePowers |= p.bit;
+            }
+        }
         const std::string blades = Profile(file, L"Blades");
         c.blades = _stricmp(blades.c_str(), "single") == 0 ? 1 : _stricmp(blades.c_str(), "double") == 0 ? 2
             : _stricmp(blades.c_str(), "dual") == 0 ? 3 : 0;
@@ -673,6 +784,13 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
     }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kSaberSetup)), kSaberSetupBytes, sizeof kSaberSetupBytes) == 0)
         PatchCall(kSaberSetup, reinterpret_cast<const void*>(&SaberSetupHook), sizeof kSaberSetupBytes);
+    {
+        uint8_t call[5] = { 0xE8 };
+        const int32_t rel = int32_t(kBruteRules) - int32_t(kBruteRulesCall + 5);
+        std::memcpy(call + 1, &rel, 4);
+        if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kBruteRulesCall)), call, 5) == 0)
+            PatchCall(kBruteRulesCall, reinterpret_cast<const void*>(&BruteRulesHook), 5);
+    }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kJediSetup)), kJediSetupBytes, sizeof kJediSetupBytes) == 0) {
         static uint8_t* jediStub = [] { // once: the port's memory outlives the game's restarts
             uint8_t* s = AllocStub(13);

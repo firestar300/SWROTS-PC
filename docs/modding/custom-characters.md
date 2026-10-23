@@ -41,6 +41,9 @@ Saber=0 255 0            ; its saber's colour, 0-255 each (optional; 0 255 0 is 
 Blades=single            ; its saber: single, double (double-bladed) or dual (two sabers) (optional; the base's)
 Scale=1                  ; its size (optional; 0.86 makes a Jedi Brute body about as tall as Vader)
 Force=1000               ; the Force it holds (optional; the base's: the Jedi Brute has none, Anakin 1000)
+ForceFrom=IVader         ; Force controls on a base without them (optional; the Jedi Brute so far: push, grip by
+                         ; holding the push, saber throw, heal, as Vader's)
+ForcePowers=Push Grip SaberThrow Heal ; which (optional; Lightning too if listed)
 Side=Hero                ; Hero or Villain: its side in Heroes vs Villains by default
 Speaker=Luke             ; its name in subtitles (optional; the name's first word)
 Code=                    ; whose lines it says, a dialogue speaker code such as AKN or OBW (optional; the base's)
@@ -85,6 +88,19 @@ The Jedi classes' Init fills up to four weapon records (character +0x1064, 0x20 
 flag, +4 the hilt mesh, +8 its colour) before their weapon setup (0x2814C0) makes a saber of each record that has a
 mesh (0x280480; a flagged one becomes the double-bladed saber class). The port changes a custom character's records
 just before that (at 0x2814D2).
+
+## Its Force
+
+Every Jedi script class has the Force moves (the shared Jedi set-up puts each move's handle at the same place in every
+class: Force push's at +0x119E of the class object), but each class's own player rules decide what the buttons do
+(the class's StateManager calls them: Vader's 0x48E5B0, the Jedi Brute's 0x3D9D50), and the Jedi Brute's have no
+Force rules: its buttons did nothing. With `ForceFrom=`, the port runs Force rules after the base's (at 0x3D9D38),
+as Vader's: the Force button tapped pushes (back, left or right with the stick for its variants; held, it grips),
+the saber-throw button throws, both stick clicks heal, and lightning when listed in `ForcePowers=` (the script
+instance's enable bytes +0x2DC push, +0x2DB grip, +0x2DF throw, +0x2DD lightning, +0x2D9 heal; their costs +0x330..
+as the Jedi set-up 0x400EE0 sets them, which the Jedi Brute's Init leaves out). The second stance has its own set.
+Its Force sounds are the base's (the Jedi Brute has none: the moves are silent so far). The computer's Maul does not
+use them yet (its moves come from the a_ table, which has no Force rows for the Jedi Brute).
 
 ## How it works
 

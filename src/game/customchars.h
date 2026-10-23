@@ -32,6 +32,10 @@ struct CustomCharacter {
     int blades = 0;          // its saber (Blades=): 0 the base's, 1 single, 2 double-bladed, 3 dual (two sabers)
     float scale = 1.0f;      // its size (Scale=), 1 the base's
     float force = -1.0f;     // its Force (Force=, the most it holds; Anakin's is 1000), negative: the base's
+    // Force powers on a base whose controls have none (ForceFrom=IVader: the Jedi's Force controls, as Vader's; the
+    // Jedi Brute's): which ones (ForcePowers=, the Jedi's defaults when empty: push, grip, saber throw, heal)
+    bool forceControls = false;
+    int forcePowers = -1;    // bits: 1 push, 2 grip, 4 saber throw, 8 lightning, 16 heal; -1 the defaults
     int side = 0;            // 0 hero, 1 villain (Heroes vs Villains' default side)
     std::string hudFace;     // the HUD portrait shown for it (a donor's path, its picture served: see customchars.cpp)
     std::string face;        // its HUD portrait's path (interfc\hud_b\hud_face_<costume>01), when the mod has one
