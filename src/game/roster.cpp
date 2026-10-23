@@ -544,10 +544,21 @@ constexpr uint32_t kCompareNames = 0x002233F0; // cdecl (a, b) -> 0 when equal
 int __cdecl CompareChosen(const char* a, const char* b, int slot)
 {
     const auto compare = reinterpret_cast<int(__cdecl*)(const char*, const char*)>(uintptr_t(kCompareNames));
-    const bool customA = FindCustomCharacter(a) != nullptr, customB = FindCustomCharacter(b) != nullptr;
-    if ((!customA && !customB) || slot < 0 || slot >= kDuelSlotCount || !g_DuelClasses[slot])
+    if (slot < 0 || slot >= kDuelSlotCount || !g_DuelClasses[slot])
         return compare(a, b);
-    return compare(customA ? a : b, g_DuelClasses[slot]); // the chosen custom name against the slot's class
+    // which one is the chosen name (the launch settings' own string): it against the slot's class, so a custom
+    // character's fighter (an object of its base class: Luke's an IAnakin) is not also taken for its base chosen by
+    // the other player (Luke against Anakin was Luke against Luke)
+    auto* launch = *reinterpret_cast<uint8_t**>(uintptr_t(kLaunchSettings));
+    for (int player = 0; launch && player < 2; ++player) {
+        const char* chosen = *reinterpret_cast<const char**>(launch + 4 + player * 4);
+        if (chosen && (chosen == a || chosen == b))
+            return compare(chosen, g_DuelClasses[slot]);
+    }
+    const bool customA = FindCustomCharacter(a) != nullptr, customB = FindCustomCharacter(b) != nullptr;
+    if (!customA && !customB)
+        return compare(a, b);
+    return compare(customA ? a : b, g_DuelClasses[slot]);
 }
 
 __declspec(naked) void CompareChosenStub()
