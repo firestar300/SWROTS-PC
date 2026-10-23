@@ -27,6 +27,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 namespace swrots::debug {
 
+void HvvTab(); // below, with the scoreboard
+
 namespace {
 
 UINT g_ToggleKey = VK_OEM_3; // the ~ / ` key on US layouts
@@ -800,6 +802,10 @@ void BuildMenu()
                 GameTab();
                 ImGui::EndTabItem();
             }
+            if (ImGui::BeginTabItem("Heroes vs Villains")) {
+                HvvTab();
+                ImGui::EndTabItem();
+            }
             ImGui::EndTabBar();
         }
     }
@@ -920,6 +926,88 @@ void MenuDeviceReleasing()
     g_Ready = false;
 }
 
+// The Heroes vs Villains tab: a match's line-up and rules (one `hvv` command), and the running match.
+void HvvTab()
+{
+    struct Picks {
+        bool loaded = false;
+        std::vector<std::string> lineup;
+        int player = 0, lives = 35, health = 500;
+        bool intro = true;
+    };
+    static Picks picks;
+    static std::vector<std::string> classes;
+    if (!picks.loaded) {
+        picks.lineup = game::HvvDefaultLineup();
+        picks.loaded = true;
+    }
+    if (classes.empty())
+        classes = game::HvvFighterClasses(); // empty until the game has registered its classes
+    ImGui::TextWrapped("Four heroes against four villains on the developer map. Each side has its lives: a fighter "
+                       "that falls comes back near the fight while its side has lives left. The game restarts into "
+                       "the match.");
+    if (ImGui::BeginTable("lineup", 2, ImGuiTableFlags_SizingStretchSame)) {
+        ImGui::TableSetupColumn("Heroes");
+        ImGui::TableSetupColumn("Villains");
+        ImGui::TableHeadersRow();
+        for (int row = 0; row < 4; ++row) {
+            for (int side = 0; side < 2; ++side) {
+                ImGui::TableNextColumn();
+                const int slot = side * 4 + row;
+                ImGui::PushID(slot);
+                ImGui::RadioButton("##you", &picks.player, slot);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("You play this one.");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                if (ImGui::BeginCombo("##class", picks.lineup[slot].c_str())) {
+                    for (const std::string& c : classes)
+                        if (ImGui::Selectable(c.c_str(), c == picks.lineup[slot]))
+                            picks.lineup[slot] = c;
+                    ImGui::EndCombo();
+                }
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndTable();
+    }
+    ImGui::SetNextItemWidth(200.0f * float(g_Scale));
+    ImGui::SliderInt("Lives a side", &picks.lives, 1, 99);
+    ImGui::SetNextItemWidth(200.0f * float(g_Scale));
+    ImGui::SliderInt("Health", &picks.health, 100, 2000);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Every fighter's (a Jedi has 1000 of its own; less makes for quicker falls).");
+    ImGui::Checkbox("Intro", &picks.intro);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The two lines face each other and every fighter is shown, playing its Versus intro.");
+    ImGui::SameLine();
+    if (ImGui::Button("Start")) {
+        std::string command = "hvv";
+        for (const std::string& c : picks.lineup)
+            command += " " + c;
+        command += " player " + std::to_string(picks.player) + " lives " + std::to_string(picks.lives) +
+            " health " + std::to_string(picks.health) + (picks.intro ? "" : " intro off");
+        Submit(command);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Defaults")) {
+        picks = Picks();
+    }
+
+    const game::HvvState s = game::GetHvvState();
+    ImGui::SeparatorText("This match");
+    if (!s.active) {
+        ImGui::TextDisabled("No match is running.");
+        return;
+    }
+    ImGui::Text("Heroes: %d lives, %d standing   Villains: %d lives, %d standing", s.lives[0], s.standing[0],
+        s.lives[1], s.standing[1]);
+    if (s.winner >= 0)
+        ImGui::Text("The %s win.", s.winner == 0 ? "heroes" : "villains");
+    if (ImGui::Button("Play it again"))
+        Submit("restart");
+}
+
 // Heroes vs Villains' scoreboard, over the game's picture: each side's lives left and its fighters standing, and the
 // winner at the end.
 void DrawHvvScoreboard()
@@ -957,6 +1045,19 @@ void DrawHvvScoreboard()
         }
     }
     text(middle, top, size, IM_COL32(230, 230, 230, 255), "|", 0.5f);
+    // the intro's titles and names, then "FIGHT!": faded in and out
+    if (!s.caption.empty()) {
+        const float fade = std::min({ 1.0f, s.captionFade / 0.15f, (1.0f - s.captionFade) / 0.15f });
+        const int alpha = int(255 * std::clamp(fade, 0.0f, 1.0f));
+        const ImU32 colour = s.captionSide == 0 ? heroes : s.captionSide == 1 ? villains : IM_COL32(240, 220, 160, 255);
+        const ImU32 faded = (colour & 0x00FFFFFF) | (ImU32(alpha) << 24);
+        const bool fight = s.caption == "FIGHT!";
+        const float y = viewport->Pos.y + viewport->Size.y * (fight ? 0.32f : 0.8f);
+        if (s.captionSide >= 0)
+            text(middle, y - size * 0.9f, size * 0.6f, (IM_COL32(230, 230, 230, 0)) | (ImU32(alpha) << 24),
+                s.captionSide == 0 ? "HERO" : "VILLAIN", 0.5f);
+        text(middle, y, size * (fight ? 2.5f : 1.5f), faded, s.caption.c_str(), 0.5f);
+    }
     if (s.winner >= 0)
         text(middle, viewport->Pos.y + viewport->Size.y * 0.3f, size * 2, s.winner == 0 ? heroes : villains,
             s.winner == 0 ? "HEROES WIN" : "VILLAINS WIN", 0.5f);

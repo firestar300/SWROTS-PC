@@ -10,7 +10,8 @@ namespace swrots::game {
 // the player is one of them. Each side has a number of lives: a fighter that falls comes back after its death has
 // played out, somewhere safe near the fight, while its side has lives left; a side with none left and no one
 // standing loses. Asked for by the launch arguments `hvv:<8 classes>` (heroes, then villains), `hvvplayer:<0-7>`
-// (the player's place in the line-up, 0 by default), `hvvlives:<n>` and `hvvhealth:<n>`, next to the dev map's.
+// (the player's place in the line-up, 0 by default), `hvvlives:<n>`, `hvvhealth:<n>` and `hvvintro:0` (no intro),
+// next to the dev map's.
 
 // Each start of the game image, after InstallDevMap: lays out the dev map for a match when this start asks for one.
 void InstallHvv();
@@ -23,6 +24,9 @@ struct HvvState {
     bool active = false;
     bool started = false; // the fight is on
     int winner = -1;      // 0 the heroes, 1 the villains; -1 none yet
+    std::string caption;  // the intro's title and fighters' names, then "FIGHT!"
+    int captionSide = -1; // the side a fighter's name is of
+    float captionFade = 0; // 0 to 1 through the caption's time
     int player = 0;       // the player's place in the line-up
     int startLives = 0;
     int lives[2] = {};    // left, heroes and villains
@@ -39,9 +43,13 @@ HvvState GetHvvState();
 std::vector<std::string> HvvDefaultLineup();
 
 // Starts a match (the game restarts into it). `lineup`: 8 classes, heroes then villains; `player`: the player's
-// place in it; `lives`: each side's; `health`: every fighter's (0: the defaults, 35 and 500). False with `error` set
-// for a line-up the game cannot play.
-bool StartHvv(const std::vector<std::string>& lineup, int player, int lives, int health, std::string& error);
+// place in it; `lives`: each side's; `health`: every fighter's (0: the defaults, 35 and 500); `intro`: the fighters
+// shown one by one first. False with `error` set for a line-up the game cannot play.
+bool StartHvv(const std::vector<std::string>& lineup, int player, int lives, int health, bool intro,
+    std::string& error);
+
+// Fighters for the match panel: the Versus fighters and the other saber duelists (registered classes only).
+std::vector<std::string> HvvFighterClasses();
 
 // Once a frame on the game thread: the match's progress.
 void HvvFrame();

@@ -1040,9 +1040,10 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
     } else if (command == "coop") {
         Coop(words);
     } else if (command == "hvv") {
-        // hvv [<8 classes: heroes, then villains>] [player <0-7>] [lives <n>] [health <n>]
+        // hvv [<8 classes: heroes, then villains>] [player <0-7>] [lives <n>] [health <n>] [intro on|off]
         std::vector<std::string> lineup;
         int player = 0, lives = 0, health = 0;
+        bool intro = true;
         for (size_t i = 1; i < words.size(); ++i) {
             if (words[i] == "player" && i + 1 < words.size())
                 player = std::atoi(words[++i].c_str());
@@ -1050,13 +1051,15 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
                 lives = std::atoi(words[++i].c_str());
             else if (words[i] == "health" && i + 1 < words.size())
                 health = std::atoi(words[++i].c_str());
+            else if (words[i] == "intro" && i + 1 < words.size())
+                intro = words[++i] != "off";
             else
                 lineup.push_back(words[i]);
         }
         if (lineup.empty())
             lineup = game::HvvDefaultLineup();
         std::string error;
-        if (game::StartHvv(lineup, player, lives, health, error))
+        if (game::StartHvv(lineup, player, lives, health, intro, error))
             Print(LineKind::Output, "  starting Heroes vs Villains...");
         else
             Print(LineKind::Error, "%s", error.c_str());
