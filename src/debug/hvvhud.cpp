@@ -403,7 +403,8 @@ void DrawHvvHud()
         hudHidden = hide;
         WriteGameVariable("hud", hudHidden ? "0" : "1");
     }
-    if (!s.active || s.paused) // the game's pause menu: the match's screen hides (and Tab shows nothing)
+    // before the fighters are there (the loading screen) and in the game's pause menu: nothing (Tab neither)
+    if (!s.active || !s.started || s.paused)
         return;
     g_Draw = ImGui::GetForegroundDrawList();
     const ImGuiViewport* vp = ImGui::GetMainViewport();
