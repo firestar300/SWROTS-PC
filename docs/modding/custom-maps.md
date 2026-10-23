@@ -25,8 +25,8 @@ Then:
 
 ## The map file
 
-`mods\maps\<map>\map.ini`, in the map's own coordinates (the model's: y up, the game's units, about 1 unit to the
-centimetre):
+`mods\maps\<map>\map.ini`, in the map's own coordinates (the model's: y up, the game's units, about 37 to the metre:
+the human characters are 73-75 units tall):
 
 ```ini
 [Map]
