@@ -86,3 +86,12 @@ the generated files: those keep the original files' headers and strings. Post th
   mesh's tail are not understood and are copied from the template.
 - `stx.py` handles DXT1 only (format `0x40`, unswizzled blocks, as on `vosasaber.stx`).
 - Hilts in the pre-rendered movies are part of the video.
+- Size, as found by modders so far (the exact causes are not confirmed yet):
+  - keep a hilt close to the size of Anakin's original (3,614 vertices): hilts of 3,611 and 3,872 vertices
+    work, while larger first versions crashed the level load (one of 14,236 vertices);
+  - a mesh with more than **32,767 indices** crashed the mission on load.
+- A loose texture for `lsaberknight` (Serra's and Grievous's saber) crashes the texture loader
+  (`C0000005 at 0x21097B`, right after loading `lsaberknight.stx`), so hilts for it reuse the original texture
+  for now.
+- Some characters share a saber: Vader loads Anakin's (`lsaberanakin`), and Serra and Grievous share
+  `lsaberknight`, so a replacement changes all of them.

@@ -14,8 +14,18 @@ No PAK rebuilding or disc image editing is needed.
   giving a level its own track, and `tools/audio/hwx.py`
 - [Adding versus fighters](adding-versus-fighters.md): giving a character its own versus select-screen slot
 - [How loading works](how-loading-works.md): level PAKs, load order and what the port does to allow overrides
-- [File formats](file-formats.md): what is known about the PAK, STX, MSH formats and the character table
+- [File formats](file-formats.md): what is known about the PAK, STX and MSH formats (weapon and character
+  models; `tools/meshes/charmsh.py` reads and writes character models) and the character table
 
-Never redistribute the game's own files. Share mods as the changed files, or better as a
-script or tool that produces them from the user's own copy of the game. Post them, and guides you
-write, in [Discussions](https://github.com/jedijosh920/SWROTS-PC/discussions) (*Show and tell*).
+## Sharing mods
+
+- **Share your own work as ready-made files** that players drop into their `mods\` folder: new models,
+  hilts, textures and music you made yourself. That is the easiest way for players.
+- **Never include the game's own files.** A mod that changes one of the
+  game's files is best shared as a script or tool that makes the result from the player's own copy of the
+  game (as `tools/weapons/` does for hilts).
+- **Where:** a mod site such as the game's [ModDB page](https://www.moddb.com/games/star-wars-episode-iii-revenge-of-the-sith/mods)
+  (say that the mod needs SWROTS-PC: the mods there now are for the PS2 version). Post a link, and any guides
+  you write, in [Discussions](https://github.com/jedijosh920/SWROTS-PC/discussions) (*Show and tell*).
+- Tools and guides are welcome in this repository as pull requests (see [CONTRIBUTING](../../CONTRIBUTING.md)),
+  with credit to their authors.
