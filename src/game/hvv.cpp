@@ -16,6 +16,7 @@
 #include "core/log.h"
 #include "game/characters.h"
 #include "game/coop.h"
+#include "game/customchars.h"
 #include "game/devmap.h"
 #include "game/freecam.h"
 #include "game/game.h"
@@ -142,6 +143,8 @@ constexpr DisplayName kNames[] = { { "IAnakin", "ANAKIN SKYWALKER" }, { "IObiwan
 
 std::string DisplayNameOf(const std::string& className)
 {
+    if (const CustomCharacter* custom = FindCustomCharacter(className.c_str()))
+        return custom->name;
     for (const DisplayName& n : kNames)
         if (_stricmp(n.className, className.c_str()) == 0)
             return n.name;
@@ -850,6 +853,8 @@ std::vector<std::string> HvvFighterClasses()
     for (const DisplayName& n : kNames)
         if (const char* name = RegisteredClassName(n.className); name && ClassHasBody(name))
             out.push_back(name);
+    for (const CustomCharacter& custom : CustomCharacters())
+        out.push_back(custom.className);
     return out;
 }
 

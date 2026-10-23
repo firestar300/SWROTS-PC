@@ -928,6 +928,28 @@ bool IsCharacterContent(const std::string& path)
     return false;
 }
 
+// The loose textures (.stx) of a folder under mods\ (e.g. "meshes\chars\luke\"), declared to the level when it has
+// not: a mod's new character's.
+constexpr int kTextureType = 0;
+
+void DeclareLooseTextures(uint8_t* scene, const std::string& folder)
+{
+    for (const std::string& texture : LooseResourceNames(folder)) {
+        if (texture.size() < 4 || texture.compare(texture.size() - 4, 4, ".stx") != 0)
+            continue;
+        alignas(4) uint8_t path[0x100] = {};
+        PathFromText(path, nullptr, texture.c_str(), 1);
+        auto* enginePath = reinterpret_cast<const EnginePath*>(path);
+        if (SceneIsDeclared(scene, nullptr, enginePath, kTextureType))
+            continue;
+        const std::string full = "d:\\" + texture;
+        WIN32_FILE_ATTRIBUTE_DATA loose{};
+        if (GetFileAttributesExW(LooseHostPath(full.c_str()).c_str(), GetFileExInfoStandard, &loose) &&
+            Declare(scene, enginePath, kTextureType, loose.nFileSizeLow))
+            LOG_INFO("Declare: %s (type 0), loose, with its mesh", full.c_str());
+    }
+}
+
 // Declares an undeclared resource that another PAK has. True when it did.
 bool DeclareFromDisc(uint8_t* scene, const EnginePath* path, int typeId, const PakIndex** declaredFrom = nullptr,
     const PakIndex::Entry** declared = nullptr)
@@ -980,6 +1002,10 @@ bool DeclareFromDisc(uint8_t* scene, const EnginePath* path, int typeId, const P
         if (HasLooseCopy(full) && GetFileAttributesExW(LooseHostPath(full).c_str(), GetFileExInfoStandard, &loose) &&
             Declare(scene, path, typeId, loose.nFileSizeLow)) {
             LOG_INFO("Declare: %s (type %d), loose", full, typeId);
+            // Its textures: the mesh loader asks only for the textures the level declared (the mesh names them
+            // by file name in its own folder), so a new character's are declared with its mesh.
+            if (typeId == kMeshType)
+                DeclareLooseTextures(scene, name.substr(0, name.rfind('\\') + 1));
             return true;
         }
         const std::vector<uint8_t>* generated = Generated(name);

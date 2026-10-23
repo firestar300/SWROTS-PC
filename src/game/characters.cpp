@@ -20,6 +20,7 @@
 #include "core/log.h"
 #include "core/patch.h"
 #include "game/coop.h"
+#include "game/customchars.h"
 #include "game/game.h"
 #include "game/resources.h"
 #include "kernel/kernel.h"
@@ -47,7 +48,10 @@ std::string Lower(std::string text)
 
 bool MeshOnDisc(const char* mesh)
 {
-    return mesh && DiscHasResource(Lower(std::string("meshes\\chars\\") + mesh + ".msh"));
+    if (!mesh)
+        return false;
+    const std::string file = Lower(std::string("meshes\\chars\\") + mesh + ".msh");
+    return DiscHasResource(file) || HasLooseResource(file); // a mod's own body counts too
 }
 
 // A costume list's records, up to the first null name.
@@ -502,7 +506,9 @@ int __stdcall PlayerVariant(void* player, int variant)
         g_LevelCostume = variant; // the level's costume for its own class
     g_LevelPlayerObject = g_Player;
     g_LevelPlayerIsOwn = !g_PlayerClass;
-    const int chosen = g_PlayerClass ? VariantOnDisc(player, variant) : variant;
+    // A custom class (customchars.h) wears its own costume (the first of its list) unless one is chosen.
+    const int chosen = g_PlayerClass && FindCustomCharacter(g_PlayerClass) ? 0
+        : g_PlayerClass ? VariantOnDisc(player, variant) : variant;
     return Dress(g_Player, chosen, g_PlayerVariant, g_PlayerSkin, g_PlayerMesh, g_PlayerList, "the player");
 }
 
@@ -609,10 +615,7 @@ int VariantOnDisc(const void* character, int preferred)
             break;
         if (!mesh)
             continue;
-        std::string path = std::string("meshes\\chars\\") + mesh + ".msh";
-        for (char& c : path)
-            c = char(tolower(static_cast<unsigned char>(c)));
-        if (!DiscHasResource(path))
+        if (!MeshOnDisc(mesh)) // on the disc or a mod's own
             continue;
         if (i == preferred)
             return i;
@@ -631,6 +634,8 @@ int VariantOnDisc(const void* character, int preferred)
 
 bool ClassHasBody(const char* className)
 {
+    if (FindCustomCharacter(className))
+        return true; // its body is the mod's
     const uint8_t* list = FindVariantList(className);
     if (!list)
         return true; // no costume list: nothing known against it
@@ -644,6 +649,8 @@ bool ClassHasBody(const char* className)
 
 const char* RegisteredClassName(const char* name)
 {
+    if (const CustomCharacter* custom = FindCustomCharacter(name))
+        return custom->className.c_str();
     auto* registry = *reinterpret_cast<uint8_t**>(uintptr_t(kClassRegistry));
     if (!registry || !name)
         return nullptr;
@@ -910,6 +917,8 @@ std::vector<std::string> CharacterClasses(bool all)
                 out.push_back(className);
         }
     }
+    for (const CustomCharacter& custom : CustomCharacters())
+        out.push_back(custom.className);
     std::sort(out.begin(), out.end(), [](const std::string& x, const std::string& y) { return _stricmp(x.c_str(), y.c_str()) < 0; });
     return out;
 }

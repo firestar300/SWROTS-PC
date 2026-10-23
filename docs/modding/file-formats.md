@@ -35,14 +35,17 @@ source name (`human.cap`, `bonegroups.xml`).
 | 0x00 | 4 | magic `STX\0` |
 | 0x0C / 0x10 | 4 + 4 | width, height |
 | 0x34 | 4 | BIR block size (file size = 0x104 + this) |
-| 0x3C | 1 | format: 0x40 DXT1, 0x52 DXT3 (Morton-swizzled blocks), 0x56 BGRA |
+| 0x3C | 1 | format: 0x40 DXT1, 0x52 DXT5, 0x56 BGRA |
 | 0x40 | 32 | texture name, zero-padded; **the engine looks textures up by this name** |
 | 0x104 | | `BIR\0` block; pixel data starts 0x80 into it |
 
 The port's own texture code (`src/d3d/textures.cpp`) handles the Xbox formats at render time.
 
 On `meshes\weapons\lsaberanakin\vosasaber.stx` (128x128, format 0x40) the DXT1 blocks are stored in
-row order, not swizzled; `tools/weapons/stx.py` reads and writes this case.
+row order, not swizzled; `tools/weapons/stx.py` reads and writes this case. Format 0x52 is DXT5 in row order too
+(checked on the HUD font `interfc\fonts\font_large_white.stx`, its glyphs in the alpha, and on character
+textures, whose alpha is a gloss mask or, for hair, a cut-out); an earlier version of this table called it DXT3,
+swizzled.
 
 ## MSH mesh
 

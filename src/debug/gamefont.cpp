@@ -1,7 +1,7 @@
 // The game's HUD font for the port's overlays (see gamefont.h).
 //
-// interfc\fonts\font_large_white.stx: an STX texture (header: "STX", ..., width at +0xC, height at +0x10, format 3 at
-// +0x30; the pixels last), 512 x 512 DXT5 whose alpha holds the glyphs (white). font_large_white.txt: the sheet's
+// interfc\fonts\font_large_white.stx: an STX texture (header: "STX", ..., width at +0xC, height at +0x10, format 0x52
+// at +0x3C; the pixels last), 512 x 512 DXT5 whose alpha holds the glyphs (white). font_large_white.txt: the sheet's
 // size, then "<cell width> <line height>", "<space> <kerning>", then a line a character: the character and its box
 // (x0 y0 x1 y1) in the sheet.
 
@@ -50,12 +50,12 @@ bool Load()
         LOG_WARN("Game font: %s not found; overlays use the menu's font", kSheet);
         return false;
     }
-    uint32_t w = 0, h = 0, format = 0;
+    uint32_t w = 0, h = 0;
     std::memcpy(&w, sheet.data() + 0xC, 4);
     std::memcpy(&h, sheet.data() + 0x10, 4);
-    std::memcpy(&format, sheet.data() + 0x30, 4);
+    const uint8_t format = sheet[0x3C]; // 0x52: DXT5 (docs/modding/file-formats.md)
     const size_t bytes = size_t(w) * h; // DXT5: 16 bytes a 4 x 4 block
-    if (format != 3 || w == 0 || h == 0 || w % 4 || h % 4 || bytes > sheet.size()) {
+    if (format != 0x52 || w == 0 || h == 0 || w % 4 || h % 4 || bytes > sheet.size()) {
         LOG_WARN("Game font: unexpected sheet (%ux%u, format %u)", w, h, format);
         return false;
     }

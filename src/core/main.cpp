@@ -24,6 +24,7 @@
 #include "game/aliases.h"
 #include "game/characters.h"
 #include "game/coop.h"
+#include "game/customchars.h"
 #include "game/devmap.h"
 #include "game/devoptions.h"
 #include "game/fixes.h"
@@ -174,6 +175,7 @@ static void StartGame(const void* launchData)
     game::InstallVersus();
     game::InstallRoster();
     game::InstallAnimationAliases();
+    game::InstallCustomCharacters(g_Boot.paths.mods);
     game::InstallCharacters();
     game::InstallMenus();
     game::InstallCoop();
