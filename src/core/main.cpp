@@ -172,10 +172,10 @@ static void StartGame(const void* launchData)
     debug::InstallConsoleHooks();
     game::InstallDevOptions(g_Boot.debugDisplays);
     game::InstallGameFixes();
+    game::InstallCustomCharacters(g_Boot.paths.mods);
     game::InstallVersus();
     game::InstallRoster();
     game::InstallAnimationAliases();
-    game::InstallCustomCharacters(g_Boot.paths.mods);
     game::InstallCharacters();
     game::InstallMenus();
     game::InstallCoop();

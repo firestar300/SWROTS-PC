@@ -16,12 +16,15 @@
 
 #include <algorithm>
 #include <cstring>
+#include <deque>
 #include <string>
 #include <vector>
 
 #include "core/log.h"
 #include "core/patch.h"
+#include "game/customchars.h"
 #include "game/game.h"
+#include "game/menus.h"
 #include "game/resources.h"
 
 namespace swrots::game {
@@ -44,19 +47,23 @@ struct ExtraFighter {
 
 // Yoda: a planned fighter (the disc has his select head, bust and HUD portrait, and his name in
 // every language).
-constexpr ExtraFighter kExtraFighters[] = {
-    { "IYoda", "s_selduel_yodahead", "s_selduel_yodabust", "IDS_SHELL_YODA", "IDS_SHELL_JEDI_MASTER", "Anakin",
-        { { 0.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f } }, "meshes\\chars\\yoda\\" },
-};
-constexpr int kExtraCount = int(sizeof(kExtraFighters) / sizeof(kExtraFighters[0]));
+constexpr ExtraFighter kYoda = { "IYoda", "s_selduel_yodahead", "s_selduel_yodabust", "IDS_SHELL_YODA",
+    "IDS_SHELL_JEDI_MASTER", "Anakin", { { 0.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f } }, "meshes\\chars\\yoda\\" };
 constexpr int kFighterCount = 9;
 constexpr int kRandomSlot = 9;
 constexpr int kFirstExtraSlot = 10;
-constexpr int kSlotCount = kFirstExtraSlot + kExtraCount; // cells on the grid
+// Custom characters (customchars.h) with their select pictures join the extras, up to this many in all.
+constexpr int kMaxExtras = 8;
+
+// This start's extras: Yoda, then the custom characters; their texts (owned here: the strings live for the session).
+std::vector<ExtraFighter> g_Extras;
+std::deque<std::string> g_ExtraStrings;
+int g_ExtraCount = 0;
+int g_SlotCount = kFirstExtraSlot; // cells on the grid
 
 const ExtraFighter* Extra(int slot)
 {
-    return slot >= kFirstExtraSlot && slot < kSlotCount ? &kExtraFighters[slot - kFirstExtraSlot] : nullptr;
+    return slot >= kFirstExtraSlot && slot < g_SlotCount ? &g_Extras[size_t(slot - kFirstExtraSlot)] : nullptr;
 }
 
 // --- The menu's picture sets --------------------------------------------------------------------
@@ -162,7 +169,7 @@ Picture Sized(Picture picture, float width, float height)
 //   BustsTextSet    fighters 0-8, [unused 9, extras], evil Anakin, Random, Locked (the last three
 //                   are taken from the end: player 2's Anakin against Anakin, Random, locked)
 //   FullBodyTextSet player 1's 0-8, player 2's 0-8 (the same fighter as player 1 takes its +9
-//                   picture), Random (the last); with extras, two blocks of kSlotCount + 1 and the
+//                   picture), Random (the last); with extras, two blocks of g_SlotCount + 1 and the
 //                   player 2 offset patched to match (kBodyOffsetSite).
 // `standIns`: the extras' busts in their full-body pictures' place, at the busts' own size (in the
 // full-body pictures' 128x256 the engine repeats their edges); otherwise the Random picture (not
@@ -175,9 +182,9 @@ std::vector<Picture> WithExtraBodies(const std::vector<Picture>& bodies, bool st
         for (int slot = 0; slot < kFighterCount; ++slot)
             newBodies.push_back(bodies[size_t(block * kFighterCount + slot)]);
         // Random's slot (its picture is taken from the end), the extras' and one more: blocks of
-        // kSlotCount + 1, a round 12 with one extra.
+        // g_SlotCount + 1, a round 12 with one extra.
         newBodies.push_back(random);
-        for (const ExtraFighter& extra : kExtraFighters)
+        for (const ExtraFighter& extra : g_Extras)
             newBodies.push_back(standIns ? Sized(Like(random, extra.bust), 256.0f, 128.0f) : random);
         newBodies.push_back(random);
     }
@@ -201,19 +208,19 @@ void PatchSelectScreen(std::vector<uint8_t>& data)
 
     std::vector<Picture> newBusts(busts.begin(), busts.begin() + kFighterCount);
     newBusts.push_back(busts[kFighterCount + 1]); // unused (Random's comes from the end)
-    for (int i = 0; i < kExtraCount; ++i)
-        newBusts.push_back(Like(busts[0], kExtraFighters[i].bust));
+    for (int i = 0; i < g_ExtraCount; ++i)
+        newBusts.push_back(Like(busts[0], g_Extras[size_t(i)].bust));
     newBusts.insert(newBusts.end(), busts.end() - 3, busts.end());
 
     std::vector<Picture> newHeads(heads.begin(), heads.end() - 1);
-    for (int i = 0; i < kExtraCount; ++i)
-        newHeads.push_back(Like(heads[0], kExtraFighters[i].head));
+    for (int i = 0; i < g_ExtraCount; ++i)
+        newHeads.push_back(Like(heads[0], g_Extras[size_t(i)].head));
     newHeads.push_back(heads.back());
 
     WriteSet(data, bodiesAt, bodiesEnd, newBodies);
     WriteSet(data, bustsAt, bustsEnd, newBusts);
     WriteSet(data, headsAt, headsEnd, newHeads);
-    LOG_INFO("Roster: select screen with %d extra fighter(s)", kExtraCount);
+    LOG_INFO("Roster: select screen with %d extra fighter(s)", g_ExtraCount);
 }
 
 // The arena select screen (select_arena.xbl_xml) shows the chosen fighters' full-body pictures from
@@ -329,7 +336,7 @@ bool DarkLookGenerator(const std::string& lowerName, std::vector<uint8_t>& data)
         return false;
     const std::string base = lowerName.substr(0, lowerName.size() - tail.size()) + ".stx";
     bool ours = false;
-    for (const ExtraFighter& extra : kExtraFighters) {
+    for (const ExtraFighter& extra : g_Extras) {
         ours = ours || (extra.meshes && base.rfind(extra.meshes, 0) == 0);
     }
     return ours && ReadDiscResource(base, data) && DarkenStx(data);
@@ -350,7 +357,7 @@ void DeclareDarkLook(const ExtraFighter& extra)
 // --- The select screen's code -------------------------------------------------------------------
 
 // Player 2's full-body picture for the fighter player 1 also chose: mov eax, [edx + eax*4 + 0x24]
-// (9 pictures on); the blocks are kSlotCount + 1 long with extras.
+// (9 pictures on); the blocks are g_SlotCount + 1 long with extras.
 constexpr uint32_t kBodyOffsetSite = 0x002D4ECE;
 constexpr uint8_t kBodyOffsetBytes[] = { 0x8B, 0x44, 0x82, 0x24 };
 
@@ -402,13 +409,13 @@ int __cdecl RandomFighter(int)
 {
     auto* profile = reinterpret_cast<uint8_t*(__fastcall*)(void*, void*)>(uintptr_t(kProfile))(
         *reinterpret_cast<void**>(uintptr_t(kProfileSource)), nullptr);
-    int slots[kSlotCount];
+    int slots[kFirstExtraSlot + kMaxExtras];
     int count = 0;
     for (int slot = 0; slot < kFighterCount; ++slot) {
         if (slot <= 1 || (profile && profile[0x2A8 + slot])) // as IsLocked (0x2D4920)
             slots[count++] = slot;
     }
-    for (int i = 0; i < kExtraCount; ++i)
+    for (int i = 0; i < g_ExtraCount; ++i)
         slots[count++] = kFirstExtraSlot + i;
     return slots[reinterpret_cast<int(__cdecl*)(int)>(uintptr_t(kRandomBelow))(count)];
 }
@@ -430,8 +437,8 @@ constexpr uint8_t kArenaBodyOffsetBytes[] = { 0x8B, 0x74, 0xB5, 0x24 }; // mov e
 //                  extra fighter is loaded only for a duel it is in
 // Saber colours (0x650C98: per duel slot and player three floats, all 0 for none; the fighter
 // keeps a pointer to them) have a longer copy too, with none for the extras.
-const char* g_Classes[kSlotCount + 1] = {};
-constexpr int kDuelSlotCount = kFighterCount + kExtraCount;
+const char* g_Classes[kFirstExtraSlot + kMaxExtras + 1] = {};
+constexpr int kDuelSlotCount = kFighterCount + kMaxExtras;
 const char* g_DuelClasses[kDuelSlotCount + 1] = {};
 float g_SaberColours[kDuelSlotCount * 2 * 3] = {};
 
@@ -476,7 +483,7 @@ void BuildDuelClasses()
     std::memcpy(g_DuelClasses, reinterpret_cast<const void*>(uintptr_t(kDuelistClasses)), kFighterCount * sizeof(g_DuelClasses[0]));
     int count = kFighterCount;
     auto* launch = *reinterpret_cast<uint8_t**>(uintptr_t(kLaunchSettings));
-    for (const ExtraFighter& extra : kExtraFighters) {
+    for (const ExtraFighter& extra : g_Extras) {
         bool inTable = false; // put in a slot of the nine with the duelist command
         for (int slot = 0; slot < kFighterCount; ++slot)
             inTable = inTable || (g_DuelClasses[slot] && _stricmp(g_DuelClasses[slot], extra.className) == 0);
@@ -496,11 +503,38 @@ void BuildDuelClasses()
     g_DuelClasses[count] = nullptr;
 }
 
+// The fighter a player chose: the fighter creation (0x27B7D0, ebx the duel slot) keeps a slot's fighter for the
+// player whose chosen name equals the fighter's class name (vfunc +0x40), compared at 0x27B8CD and 0x27B983. A
+// custom character's fighter is its base class (customchars.h), so the slot's own class name stands in for it.
+constexpr uint32_t kChosenCompareSites[] = { 0x0027B8CD, 0x0027B983 };
+constexpr uint32_t kCompareNames = 0x002233F0; // cdecl (a, b) -> 0 when equal
+
+int __cdecl CompareChosen(const char* a, const char* b, int slot)
+{
+    const auto compare = reinterpret_cast<int(__cdecl*)(const char*, const char*)>(uintptr_t(kCompareNames));
+    const bool customA = FindCustomCharacter(a) != nullptr, customB = FindCustomCharacter(b) != nullptr;
+    if ((!customA && !customB) || slot < 0 || slot >= kDuelSlotCount || !g_DuelClasses[slot])
+        return compare(a, b);
+    return compare(customA ? a : b, g_DuelClasses[slot]); // the chosen custom name against the slot's class
+}
+
+__declspec(naked) void CompareChosenStub()
+{
+    __asm {
+        push ebx                  // the duel slot
+        push dword ptr [esp + 0xC]
+        push dword ptr [esp + 0xC]
+        call CompareChosen
+        add esp, 0xC
+        ret
+    }
+}
+
 void __fastcall DuelSetupHook(void* manager, void* edx)
 {
     BuildDuelClasses();
     for (int slot = 0; g_DuelClasses[slot]; ++slot) { // also in a slot of the nine (duelist)
-        for (const ExtraFighter& extra : kExtraFighters) {
+        for (const ExtraFighter& extra : g_Extras) {
             if (_stricmp(extra.className, g_DuelClasses[slot]) == 0 && Mirror(extra))
                 DeclareDarkLook(extra);
         }
@@ -532,10 +566,11 @@ void* SlotText(void* out, const void* textId)
     return out;
 }
 
+void* g_TextIds[kMaxExtras][2] = {}; // the extras' text ids (game strings: made anew at every start)
+
 const void* ExtraTextId(int slot, bool title)
 {
-    static void* ids[kExtraCount][2] = {};
-    void*& id = ids[slot - kFirstExtraSlot][title ? 1 : 0];
+    void*& id = g_TextIds[slot - kFirstExtraSlot][title ? 1 : 0];
     if (!id) {
         const ExtraFighter* extra = Extra(slot);
         reinterpret_cast<void(__cdecl*)(void**, const char*)>(uintptr_t(kTStringFromText))(
@@ -578,6 +613,104 @@ void PatchDisplacement(const TableSite& site, const void* table)
     PatchBytes(site.address + site.displacementAt, &value, 4);
 }
 
+// This start's extras: Yoda, then each custom character (customchars.h) whose select pictures are there
+// (interfc\front_end\s_selduel_<costume>head.stx and ...bust.stx, on the disc or under mods\): its name and title
+// are texts of the port's own, its intro and win cameras its base's, its saber colour its own for both players.
+const char* Keep(const std::string& text)
+{
+    g_ExtraStrings.push_back(text);
+    return g_ExtraStrings.back().c_str();
+}
+
+std::wstring Wide(const std::string& text)
+{
+    return std::wstring(text.begin(), text.end());
+}
+
+// A custom character's select pictures are served in the place of pictures the disc has and never shows (a cut
+// character's), read with the shared PAK as the menu asks for them: a picture under mods\ that no PAK has is refused
+// by the menus (0x210B6B: the pre-cache path finds no image). One pair so far: the Grievous bodyguard's.
+struct DonorPictures {
+    const char* head;
+    const char* bust;
+};
+constexpr DonorPictures kDonors[] = { { "s_selduel_gbghead", "s_selduel_gbgbust" } };
+std::vector<uint8_t> g_DonorData[std::size(kDonors)][2];
+
+// The custom picture with the donor's name inside (0x40, what the menus look textures up by).
+void ServeDonor(std::vector<uint8_t>& data, const std::vector<uint8_t>& custom, const char* name)
+{
+    if (custom.size() < 0x40 + 0x28)
+        return;
+    data = custom;
+    std::memset(data.data() + 0x40, 0, 0x28);
+    std::memcpy(data.data() + 0x40, name, std::min<size_t>(std::strlen(name), 0x27));
+}
+
+void ServeDonor0Head(std::vector<uint8_t>& data) { ServeDonor(data, g_DonorData[0][0], kDonors[0].head); }
+void ServeDonor0Bust(std::vector<uint8_t>& data) { ServeDonor(data, g_DonorData[0][1], kDonors[0].bust); }
+constexpr ResourcePatch kDonorPatches[std::size(kDonors)][2] = { { &ServeDonor0Head, &ServeDonor0Bust } };
+
+void BuildExtras()
+{
+    g_Extras.clear();
+    g_Extras.push_back(kYoda);
+    size_t donors = 0;
+    for (const CustomCharacter& custom : CustomCharacters()) {
+        if (int(g_Extras.size()) >= kMaxExtras) {
+            LOG_WARN("Roster: no select-screen slot left for %s", custom.className.c_str());
+            break;
+        }
+        std::string costume = custom.costume;
+        for (char& c : costume)
+            c = char(tolower(static_cast<unsigned char>(c)));
+        const std::string head = "s_selduel_" + costume + "head", bust = "s_selduel_" + costume + "bust";
+        const auto present = [](const std::string& picture) {
+            const std::string file = "interfc\\front_end\\" + picture + ".stx";
+            return ModFileExists(file); // not the disc: its index is made only once the resource hooks are in
+        };
+        if (!present(head) || !present(bust)) {
+            LOG_INFO("Roster: %s has no select pictures (%s, %s); not on the Versus select screen",
+                custom.className.c_str(), head.c_str(), bust.c_str());
+            continue;
+        }
+        std::string upper = custom.className;
+        for (char& c : upper)
+            c = char(toupper(static_cast<unsigned char>(c)));
+        if (donors >= std::size(kDonors) ||
+            !ReadModFile("interfc\\front_end\\" + head + ".stx", g_DonorData[donors][0]) ||
+            !ReadModFile("interfc\\front_end\\" + bust + ".stx", g_DonorData[donors][1])) {
+            LOG_WARN("Roster: no select-screen pictures can be shown for %s (one custom character so far)",
+                custom.className.c_str());
+            continue;
+        }
+        const std::string donorHead = std::string("interfc\\front_end\\") + kDonors[donors].head + ".stx";
+        const std::string donorBust = std::string("interfc\\front_end\\") + kDonors[donors].bust + ".stx";
+        RegisterResourcePatch(donorHead, kDonorPatches[donors][0]);
+        RegisterResourcePatch(donorBust, kDonorPatches[donors][1]);
+        ExtraFighter extra = {};
+        extra.className = Keep(custom.className);
+        extra.head = kDonors[donors].head;
+        extra.bust = kDonors[donors].bust;
+        ++donors;
+        extra.nameId = Keep("IDS_PORT_" + upper + "_NAME");
+        extra.titleId = Keep("IDS_PORT_" + upper + "_TITLE");
+        SetMenuText(extra.nameId, Wide(custom.name));
+        SetMenuText(extra.titleId, Wide(custom.title));
+        extra.cameras = Keep(custom.base.size() > 1 && custom.base[0] == 'I' ? custom.base.substr(1) : custom.base);
+        for (int player = 0; player < 2; ++player)
+            for (int k = 0; k < 3 && custom.hasSaber; ++k)
+                extra.sabers[player][k] = custom.saber[k];
+        extra.meshes = nullptr;
+        g_Extras.push_back(extra);
+        LOG_INFO("Roster: %s on the Versus select screen (slot %d)", custom.className.c_str(),
+            kFirstExtraSlot + int(g_Extras.size()) - 1);
+    }
+    g_ExtraCount = int(g_Extras.size());
+    g_SlotCount = kFirstExtraSlot + g_ExtraCount;
+    std::memset(g_TextIds, 0, sizeof(g_TextIds));
+}
+
 } // namespace
 
 const char* SelectSlotClass(int slot)
@@ -593,16 +726,16 @@ void SyncRosterClasses()
 {
     std::memcpy(g_Classes, reinterpret_cast<const void*>(uintptr_t(kDuelistClasses)), kFighterCount * sizeof(g_Classes[0]));
     g_Classes[kRandomSlot] = g_Classes[0]; // never read: Random becomes a fighter before the duel
-    for (int i = 0; i < kExtraCount; ++i)
-        g_Classes[kFirstExtraSlot + i] = kExtraFighters[i].className;
-    g_Classes[kSlotCount] = nullptr;
+    for (int i = 0; i < g_ExtraCount; ++i)
+        g_Classes[kFirstExtraSlot + i] = g_Extras[size_t(i)].className;
+    g_Classes[g_SlotCount] = nullptr;
 }
 
 const char* ExtraFighterCameras(int duelSlot)
 {
     if (duelSlot < kFighterCount || duelSlot >= kDuelSlotCount || !g_DuelClasses[duelSlot])
         return nullptr;
-    for (const ExtraFighter& extra : kExtraFighters) {
+    for (const ExtraFighter& extra : g_Extras) {
         if (_stricmp(extra.className, g_DuelClasses[duelSlot]) == 0)
             return extra.cameras;
     }
@@ -611,7 +744,8 @@ const char* ExtraFighterCameras(int duelSlot)
 
 void InstallRoster()
 {
-    static_assert((kSlotCount + 1) * 4 <= 0x7F, "player 2's full-body offset is a signed 8-bit displacement");
+    BuildExtras();
+    static_assert((kFirstExtraSlot + kMaxExtras + 1) * 4 <= 0x7F, "player 2's full-body offset is a signed 8-bit displacement");
     const uint8_t lockCheck[] = { 0x83, 0xFF, 0x09, 0x74 };
     const uint8_t gridLockCheck[] = { 0x83, 0xFE, 0x09, 0x74 };
     const uint8_t textLookup[] = { 0xA1, 0x7C, 0x5F, 0x64, 0x00 }; // mov eax, [kEngineServices]
@@ -634,13 +768,18 @@ void InstallRoster()
         ok = ok && Matches(site.address, site.bytes, site.length);
     for (const TableSite& site : kSaberSites)
         ok = ok && Matches(site.address, site.bytes, site.length);
+    for (uint32_t site : kChosenCompareSites) {
+        int32_t target = int32_t(kCompareNames) - int32_t(site + 5);
+        ok = ok && *reinterpret_cast<const uint8_t*>(uintptr_t(site)) == 0xE8 &&
+            std::memcmp(reinterpret_cast<const void*>(uintptr_t(site + 1)), &target, 4) == 0;
+    }
     if (!ok) {
         LOG_WARN("Roster: the versus screens' code is not as expected; no extra fighters");
         return;
     }
 
     // The select and arena screens.
-    const uint8_t offset = uint8_t((kSlotCount + 1) * 4);
+    const uint8_t offset = uint8_t((g_SlotCount + 1) * 4);
     PatchBytes(kBodyOffsetSite + 3, &offset, 1);
     PatchBytes(kArenaBodyOffsetSite + 3, &offset, 1);
     const uint8_t jae = 0x73;
@@ -669,6 +808,8 @@ void InstallRoster()
     for (size_t i = 0; i < sizeof(kDuelClassSites) / sizeof(kDuelClassSites[0]); ++i)
         PatchDisplacement(kDuelClassSites[i], i + 1 < sizeof(kDuelClassSites) / sizeof(kDuelClassSites[0]) ?
             &g_DuelClasses[0] : &g_DuelClasses[1]);
+    for (uint32_t site : kChosenCompareSites)
+        PatchCall(site, reinterpret_cast<const void*>(&CompareChosenStub), 5);
     g_OriginalDuelSetup = reinterpret_cast<DuelSetupFn>(
         Detour(kDuelSetup, kDuelSetupPrologue, sizeof(kDuelSetupPrologue), reinterpret_cast<const void*>(&DuelSetupHook)));
     std::memcpy(g_SaberColours, reinterpret_cast<const void*>(uintptr_t(kSaberColours)), kFighterCount * 2 * 3 * sizeof(float));

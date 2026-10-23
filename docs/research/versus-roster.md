@@ -84,6 +84,18 @@ number: 0-8 are the fighters, 9 is Random.
   An intro animation is `animation\<name>\<name>_intro.bnm`; Yoda has none, so he has no intro yet
   (his bonus mission's cutscene `cinematics\u113\cin_u113_010.cin` is a candidate).
 
+## Custom characters
+
+The extras are a list made at every start (`roster.cpp`): Yoda, then the [custom characters](../modding/custom-characters.md)
+that bring their select pictures (up to 8 extras), each with its name and title as texts of the port's own
+(`IDS_PORT_<CLASS>_NAME`, `_TITLE`), its base's intro and win cameras and its own saber colour. The duel's fighter
+for a custom character is its base class; the duel keeps a slot's fighter for the player whose chosen name equals
+the fighter's class name (0x27B8CD, 0x27B983), so the port compares the chosen name with the slot's class.
+
+Its pictures are read in the place of a pair the disc has and never shows (`s_selduel_gbghead` / `gbgbust`): the
+menus take only pictures read with `res_null.pak`; a loose picture no PAK has fails in the pre-cache (0x210B6B, the
+image pointer null), declared at the scene's start or not.
+
 ## Loading a character the arena does not have
 
 A duel arena's PAK only holds the nine fighters. When the engine asks for a character the level does

@@ -72,7 +72,29 @@ sounds are the base's (and a character of a class placed in the level has its so
 A model under `mods\` whose name no level has (a new body) is declared to the level when it is first asked for,
 and so are the textures (`.stx`) in its folder: the model loader only asks for the textures the level declared.
 
+## On the Versus select screen
+
+With its select pictures in the pack, a custom character gets a Versus slot of its own (after Yoda's), its name
+and title under it, and fights in the duel as itself (also in the main menu's Heroes vs Villains, which picks
+fighters on the same screen):
+
+```
+mods\interfc\front_end\s_selduel_<costume>head.stx    the grid's cell, 64x64 DXT5 (a ring in its alpha, as the game's)
+mods\interfc\front_end\s_selduel_<costume>bust.stx    the bust above the grid, 256x128 DXT5
+```
+
+(`<costume>` in lower case, e.g. `s_selduel_lukehead.stx`.) The menus use only pictures read with the shared PAK
+(`res_null.pak`; a picture under `mods\` that no PAK has is refused: its pre-cache finds no image, 0x210B6B), so the
+port serves the custom pictures in the place of a pair the disc has and never shows (the cut Grievous bodyguard's,
+`s_selduel_gbghead` / `gbgbust`): **one custom character on the select screen so far**; others are left off it (the
+log says so) and can still be played, spawned and placed.
+
+The duel keeps a slot's fighter for the player whose chosen name equals the fighter's class name (0x27B7D0,
+compared at 0x27B8CD and 0x27B983); a custom character's fighter is its base class, so the port compares the chosen
+name with the slot's class instead.
+
 ## Not yet
 
-- The Versus select screen (a slot of its own, with its pictures), and the HUD portrait (the base's is shown).
+- The HUD portrait (the base's is shown).
 - A voice of its own (the base's lines play), and its name in subtitles.
+- More than one custom character on the Versus select screen.

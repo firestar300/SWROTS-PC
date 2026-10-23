@@ -33,6 +33,7 @@ constexpr uint32_t kCharacterVariants = 0x1E0;
 constexpr uint32_t kCharacterSaberColor = 0xF20;
 
 std::vector<CustomCharacter> g_Customs;
+std::wstring g_Mods;
 
 // A custom class's info, for this start's base info.
 struct Proxy {
@@ -205,6 +206,7 @@ void ReadCharacters(const std::wstring& mods)
 void InstallCustomCharacters(const std::wstring& mods)
 {
     g_Proxies.clear(); // class infos are made anew at every start
+    g_Mods = mods;
     ReadCharacters(mods);
     if (g_Customs.empty())
         return;
@@ -230,6 +232,33 @@ void InstallCustomCharacters(const std::wstring& mods)
 const std::vector<CustomCharacter>& CustomCharacters()
 {
     return g_Customs;
+}
+
+bool ModFileExists(const std::string& relative)
+{
+    if (g_Mods.empty())
+        return false;
+    const std::wstring path = g_Mods + L"\\" + std::wstring(relative.begin(), relative.end());
+    return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+bool ReadModFile(const std::string& relative, std::vector<uint8_t>& data)
+{
+    if (g_Mods.empty())
+        return false;
+    const std::wstring path = g_Mods + L"\\" + std::wstring(relative.begin(), relative.end());
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+    LARGE_INTEGER size{};
+    bool ok = GetFileSizeEx(file, &size) && size.QuadPart < (16 << 20);
+    if (ok) {
+        data.resize(size_t(size.QuadPart));
+        DWORD read = 0;
+        ok = ReadFile(file, data.data(), DWORD(data.size()), &read, nullptr) && read == data.size();
+    }
+    CloseHandle(file);
+    return ok;
 }
 
 const CustomCharacter* FindCustomCharacter(const char* className)

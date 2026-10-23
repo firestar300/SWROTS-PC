@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -33,5 +34,11 @@ void InstallCustomCharacters(const std::wstring& mods);
 // The custom characters (this start's), and one by class name (case-insensitive), or null.
 const std::vector<CustomCharacter>& CustomCharacters();
 const CustomCharacter* FindCustomCharacter(const char* className);
+
+// True when the mods folder has this file (relative, e.g. a custom character's pictures), from the start of the
+// game on (before the resource hooks are installed).
+bool ModFileExists(const std::string& relative);
+// The file's contents; false when there is none.
+bool ReadModFile(const std::string& relative, std::vector<uint8_t>& data);
 
 } // namespace swrots::game
