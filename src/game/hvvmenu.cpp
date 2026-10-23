@@ -116,8 +116,6 @@ bool PatchMainMenu(std::vector<uint8_t>& data)
 
 void PatchMainMenuResource(std::vector<uint8_t>& data)
 {
-    if (GetEnvironmentVariableA("SWROTS_DIAG_NOMENU", nullptr, 0)) // DIAG
-        return;
     std::vector<uint8_t> copy = data;
     if (PatchMainMenu(copy))
         data.swap(copy);

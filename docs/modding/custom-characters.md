@@ -52,6 +52,12 @@ the model gives it, in the model's folder.
 
 A body can be tried before it becomes a character: `player IAnakin mesh luke\luke` wears it as Anakin.
 
+Textures made for another game's lighting can look washed out here: the game lights its characters flatly (no
+per-pixel lighting or bump maps), so colours that another engine warms or deepens show as they are (Battlefront
+II's Luke's hair is an olive grey there, golden in its own lighting); grade them for this game. Where a texture's
+alpha cuts a shape out (hair), fill the transparent texels' colour with the nearby opaque colour: the game filters
+the texture, and black behind a cut-out shows as a dark fringe.
+
 ## How it works
 
 `src/game/customchars.cpp`. The game creates a character of a class through the class registry's lookup (0xE9B60,

@@ -28,17 +28,20 @@ hvv board on|off                        the leaderboard pinned (as holding Tab s
 ```
 
 The game restarts into the match, as a level change does: the fighters stand in two lines facing each other in
-the middle of the floor. **The intro** (about 13 s): for each side a 3 s shot of its line from the front, its
-fighters playing their Versus intros, then a 3 s close shot along the line ("HEROES" / "VILLAINS" with the four
+the middle of the floor. **The intro** (about 7 s): for each side a 1.5 s shot of its line from the front, its
+fighters playing their Versus intros, then a 1.5 s close shot along the line ("HEROES" / "VILLAINS" with the four
 names); then the camera glides back behind you and "FIGHT!". Everyone holds still meanwhile (the game's
 `aiDisabled`, your controls held).
 
 At "FIGHT!" every fighter is set on the nearest enemy (and again whenever it has none: one that came back, or
 whose enemy fell), so no one stands waiting. Each side has its lives: a fighter that falls comes back after its
-death has played out (about 4 s), just outside the fight and facing it, and cannot be hurt for 2 s. When you fall,
-your fall plays out (3 s, nothing can hurt you), then a fresh fighter of your class takes over there. A side out of
-lives keeps fighting with whoever is still standing (you stay down, out, when yours has none); when none is left,
-the other side wins. The game never sees you die (that would end the mission with its Game Over screen).
+death has played out (about 4 s), just outside the fight and facing it, and cannot be hurt for 2 s.
+
+**When you fall** you really die, as in Battlefront: your body plays its death where it fell while the camera goes
+from it to look at whoever defeated you (and follows them), then after 4.5 s you come back at a spawn, shielded
+for 2 s. A side out of lives keeps fighting with whoever is still standing (when yours has none, the camera follows
+a teammate still fighting); when none is left, the other side wins. The game never sees its player die (that would
+end the mission with its Game Over screen): see [how it works](#how-it-works).
 
 **Health**: every fighter has the game's 1000, and the damage it takes is scaled to the mode's health (250: four
 times): the HUD's health bar is as long as the maximum (`max x constant`, 0x25D1A0), so a lower maximum would show
@@ -47,8 +50,9 @@ a stub.
 **On screen** (drawn over the picture, in the game's own HUD font, `interfc\fonts\font_large_white`):
 
 - the scoreboard: each side's lives and a mark for each fighter, lit while it stands (yours ringed);
-- a marker over each of your teammates;
-- the kill feed (top right): who defeated whom, or who fell by themselves;
+- a marker over each of your teammates (a chevron above the head, smaller far away);
+- the kill feed (top right): who defeated whom, or who fell by themselves (names are the characters', yours too,
+  your lines marked);
 - your notices: "DEFEATED <NAME>" with your killstreak and the points, "ASSIST <NAME>", "DEFEATED BY <NAME>";
 - the leaderboard while **Tab** is held: defeats, assists, falls and score of everyone;
 - the end: "HEROES WIN" / "VILLAINS WIN", then the top five come to a podium facing the camera, playing their
@@ -104,14 +108,24 @@ clearest of fighters and nearest the fight), else near the fight within its `Bou
 - **Coming back**: a fallen AI fighter is replaced by a new one of its class (`SpawnCharacterAt`) at a safe place.
   The player must not die (the game ends the mission when it does): its fatal hits are caught (the co-op hooks on
   the health change, 0x151500, and the instant kill, 0x152D30, offer them to the mode first) and it keeps a little
-  health. Moving it at once is not enough: a killing blow is often a move both fighters play (a finisher), the
-  victim's ending on the ground, and a character kept alive stays lying there. So its fall plays out (3 s,
-  invincible), then the port's live player change (`ReplacePlayer`) gives the controls to a fresh fighter of its
-  class, which is moved to a safe place.
+  health. On the next frame the port's live player change (`ReplacePlayer`, here keeping the old body in the level)
+  gives the controls, the camera and the level's references to a fresh fighter of its class, placed where it will
+  come back, held, shielded and "Ignored By AI" (AI data +0x52). The old body is now just a character: the health
+  change deals it a fatal hit naming its killer, and it dies as any fighter does (its death plays, no Game Over).
+  The kill camera (the mode's camera adjuster) starts from the game's camera, moves a third of the way to the body
+  and a little up (the side the game's camera was on is free of walls; behind the body from the killer, it went
+  into them) and turns to the killer; 4.5 s after the fatal hit the fighter comes back.
+- **Who hit whom**: the health change's last argument names the attacker (see Points). Some hits name no one
+  (null): Force lightning's steady damage and some finishing moves. Those go to the nearest enemy within 450 units,
+  one whose AI is set on the victim first (the player counting as one).
 - **The intro and the end**: everyone is woken at once and holds still (`aiDisabled`, the options byte +0xC4; the player's input
   held back); the camera is the port's (a camera adjuster, as co-op's shared camera, in its place for the match):
   look-at shots computed from the fighters' transforms; each fighter's intro starts as its close-up does. The titles
-  and the scoreboard are drawn by the debug menu's layer over the picture (also when the menu is closed).
+  and the scoreboard are drawn by the debug menu's layer over the picture (also when the menu is closed). The font
+  sheet is read from the shared PAK and made a texture in the default pool through a system-memory copy: the
+  port's device takes no managed textures (D3D9Ex; `D3DERR_INVALIDCALL`), which left the overlay in the menu's
+  own font until found. The markers are placed through the game camera's placement and field of view, which is
+  **horizontal** (taken as vertical, points off the middle land 16:9 times too near it).
 - **Facing**: a character's transform is rows right, up, forward and position; at yaw 0 (identity) it faces +z.
 
 ## What was tried before

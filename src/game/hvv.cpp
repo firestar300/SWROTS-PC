@@ -40,7 +40,11 @@ constexpr int kDefaultHealth = 250;       // every fighter's (a Jedi has 1000 of
 constexpr float kHealthScale = 1000.0f;
 constexpr ULONGLONG kRespawnAfter = 4000; // ms after a fighter fell (its death plays out first)
 constexpr ULONGLONG kShieldFor = 2000;    // ms a fighter that came back cannot be hurt
-constexpr ULONGLONG kPlayerDown = 3000;   // ms the player's fall plays (shielded) before it comes back
+// The player's death (as Battlefront's): its body dies where it fell while the camera goes from it to look at its
+// killer; then it comes back.
+constexpr ULONGLONG kPlayerDown = 4500;   // ms from the fatal hit to coming back
+constexpr ULONGLONG kKillCamIn = 1000;    // ms: the camera from the game's to the kill camera
+constexpr ULONGLONG kKillCamBack = 500;   // ms: back to the game's camera, behind the fighter that came back
 constexpr ULONGLONG kEngageEvery = 1000;  // ms: fighters without an enemy to fight are given one
 // Where a fighter comes back: on the floor, just outside the fight, facing it.
 constexpr float kFloorX0 = 1500.0f, kFloorX1 = 24000.0f, kFloorZ0 = 2700.0f, kFloorZ1 = 13500.0f;
@@ -49,11 +53,12 @@ constexpr float kRespawnReach = 950.0f;  // from the fight's middle, at most
 constexpr float kRespawnClear = 380.0f;  // from every fighter, at least (when it can)
 constexpr int kRespawnTries = 32;
 // The intro (ms): for each side a frontal shot of its line playing its Versus intros, then a close shot along the
-// line; the camera back behind the player; "FIGHT!" shows a while after.
-constexpr ULONGLONG kLineShot = 3000, kToPlayer = 1400, kFightBanner = 1500;
+// line (3 s a side); the camera back behind the player; "FIGHT!" shows a while after.
+constexpr ULONGLONG kLineShot = 1500, kToPlayer = 900, kFightBanner = 1500;
 constexpr int kIntroShots = 4;
 // Defeats, assists and points.
 constexpr ULONGLONG kKillerWithin = 10000; // ms: the last enemy hit this recent made the defeat
+constexpr float kLikelyReach = 450.0f;     // a hit naming no attacker: an enemy this near dealt it
 constexpr ULONGLONG kAssistWithin = 15000; // ms: other enemies' hits this recent are assists
 constexpr int kDefeatPoints = 100, kAssistPoints = 50, kStreakPoints = 25;
 constexpr ULONGLONG kNoticeFor = 3500, kFeedFor = 7000;
@@ -69,6 +74,7 @@ constexpr uint32_t kActivate = 0xB4;           // object vfunc, thiscall (): a p
 constexpr uint32_t kPlace = 0x1F4;             // object vfunc, thiscall (const float m[16])
 constexpr uint32_t kPlaySequence = 0x410;      // character vfunc, thiscall (hit zone or null, sequence)
 constexpr uint32_t kObjectById = 0x000A31F0;   // cdecl (instance id) -> object or null
+constexpr uint32_t kChangeHealth = 0x00151500; // character, thiscall (float change, a, attacker): co-op hooks it
 constexpr uint32_t kCharacterHealth = 0x130;
 constexpr uint32_t kCharacterMaxHealth = 0x134;
 constexpr uint32_t kCharacterDead = 0x12C;     // byte: its death played out
@@ -111,8 +117,17 @@ int g_Lives[2] = {};
 int g_Winner = -1;
 ULONGLONG g_InLevelAt = 0, g_WinnerAt = 0, g_LastEngage = 0;
 bool g_Woken = false;
-bool g_PlayerFell = false; // a fatal hit on the player, kept alive: its fall plays, then it comes back
+bool g_PlayerFell = false; // a fatal hit on the player: its old body dies, then it comes back
 ULONGLONG g_PlayerDownAt = 0;
+int g_PlayerKiller = -1;      // who defeated the player last (the kill camera looks at it), or -1
+bool g_Swapped = false;       // the controls went to a fresh fighter; the old body died
+uint8_t* g_Corpse = nullptr;  // the player's old body
+uint32_t g_CorpseId = 0;
+float g_CorpseAt[3] = {};     // where it fell
+float g_DeathView[16] = {};   // the game's camera when the player fell (the kill camera starts there)
+bool g_DeathViewSet = false;
+float g_KillView[16] = {};    // the kill camera's last placement (the way back starts there)
+ULONGLONG g_BackAt = 0;       // when the player came back (the camera returns)
 bool g_IntroWanted = true;
 enum class Phase { Waiting, Intro, Fight, End } g_Phase = Phase::Waiting;
 ULONGLONG g_IntroAt = 0, g_FightAt = 0, g_EndAt = 0;
@@ -148,6 +163,19 @@ constexpr DisplayName kNames[] = { { "IAnakin", "ANAKIN SKYWALKER" }, { "IObiwan
     { "ICinDrallig", "CIN DRALLIG" }, { "IVader", "DARTH VADER" }, { "IDooku", "COUNT DOOKU" },
     { "IGrievous", "GENERAL GRIEVOUS" }, { "ISerra", "SERRA KETO" }, { "IPalpatine", "DARTH SIDIOUS" } };
 
+// Just above a fighter's head, from its feet (the humans' bodies are 73-75 units tall).
+float MarkerHeight(const std::string& className)
+{
+    std::string base = className;
+    if (const CustomCharacter* custom = FindCustomCharacter(className.c_str()))
+        base = custom->base;
+    if (_stricmp(base.c_str(), "IYoda") == 0)
+        return 42.0f;
+    if (_stricmp(base.c_str(), "IGrievous") == 0)
+        return 102.0f;
+    return 86.0f;
+}
+
 std::string DisplayNameOf(const std::string& className)
 {
     if (const CustomCharacter* custom = FindCustomCharacter(className.c_str()))
@@ -161,9 +189,10 @@ std::string DisplayNameOf(const std::string& className)
     return name;
 }
 
+// A fighter's name as shown: its character's, the player's too (its lines are marked as its own).
 std::string ShownName(int i)
 {
-    return i == g_Player ? "YOU" : DisplayNameOf(g_Fighters[i].className);
+    return DisplayNameOf(g_Fighters[i].className);
 }
 
 // The player's own choice of character, kept while a match plays its fighter, given back after.
@@ -386,7 +415,8 @@ void Engage(int i)
     int best = -1;
     float bestDistance = 1e9f;
     for (int k = 0; k < kFighters; ++k) {
-        if (SideOf(k) == SideOf(i) || !Standing(g_Fighters[k]))
+        if (SideOf(k) == SideOf(i) || !Standing(g_Fighters[k]) ||
+            (k == g_Player && (g_PlayerFell || g_Fighters[k].out))) // the player's fresh fighter, waiting
             continue;
         const float* q = Position(g_Fighters[k].object);
         const float d = std::hypot(p[0] - q[0], p[2] - q[2]);
@@ -448,6 +478,8 @@ void Defeated(int victim, ULONGLONG now)
             NoticeFor("ASSIST " + DisplayNameOf(v.className), "", kAssistPoints, SideOf(victim), now);
     }
     if (victim == g_Player)
+        g_PlayerKiller = killer;
+    if (victim == g_Player)
         NoticeFor(killer >= 0 ? "DEFEATED BY " + DisplayNameOf(g_Fighters[killer].className) : "YOU FELL", "", 0,
             killer >= 0 ? SideOf(killer) : SideOf(victim), now);
     g_Feed.push_front({ killer, victim, now });
@@ -457,13 +489,45 @@ void Defeated(int victim, ULONGLONG now)
         killer >= 0 ? ShownName(killer).c_str() : "");
 }
 
+// The enemy most likely behind a hit that names no attacker (Force lightning's steady damage, some finishing moves:
+// the health change's attacker is null): the nearest standing enemy within reach, one whose AI is set on the
+// victim first (the player, which has no AI, counts as one); -1 when none is near.
+int LikelyAttacker(int victim)
+{
+    Fighter& v = g_Fighters[victim];
+    if (!Placed(v))
+        return -1;
+    const float* at = Position(v.object);
+    int best = -1;
+    float bestScore = 1e9f;
+    for (int i = 0; i < kFighters; ++i) {
+        Fighter& f = g_Fighters[i];
+        if (SideOf(i) == SideOf(victim) || !Standing(f))
+            continue;
+        const float* p = Position(f.object);
+        const float d = std::hypot(p[0] - at[0], p[2] - at[2]);
+        if (d > kLikelyReach)
+            continue;
+        uint8_t* brain = i == g_Player ? nullptr : Field<uint8_t*>(f.object, kCharacterAI);
+        const bool onIt = i == g_Player || (brain && Field<uint8_t*>(brain, kAITarget) == v.object);
+        const float score = d - (onIt ? kLikelyReach : 0);
+        if (score < bestScore) {
+            bestScore = score;
+            best = i;
+        }
+    }
+    return best;
+}
+
 // Every hit on a fighter: the enemy that dealt it scores its damage and is remembered for the defeat.
 void Damaged(uint8_t* character, float change, uint32_t, uint8_t* attacker)
 {
     if (!g_Active || g_Phase != Phase::Fight || change >= 0)
         return;
     const int victim = FighterOf(character);
-    const int by = AttackerOf(attacker);
+    int by = AttackerOf(attacker);
+    if (victim >= 0 && by < 0 && !attacker) // a hit that names no one (Force lightning, some finishing moves)
+        by = LikelyAttacker(victim);
     if (victim < 0 || by < 0 || SideOf(by) == SideOf(victim))
         return;
     Fighter& v = g_Fighters[victim];
@@ -494,7 +558,11 @@ bool PlayerFatalHit(uint8_t* character)
     if (!g_PlayerFell) {
         g_PlayerFell = true;
         g_PlayerDownAt = GetTickCount64();
-        Field<uint8_t>(character, kCharacterInvincible) = 1; // no more hits while it is down
+        g_Swapped = false;
+        g_DeathViewSet = false;
+        g_BackAt = 0;
+        std::memcpy(g_CorpseAt, Position(character), sizeof g_CorpseAt);
+        Field<uint8_t>(character, kCharacterInvincible) = 1; // no more hits until its body is let die
         Defeated(g_Player, g_PlayerDownAt);
     }
     return true;
@@ -609,6 +677,18 @@ bool IntroShot(ULONGLONG t, float m[16])
     return true;
 }
 
+// Between two camera placements (`a` 0 to 1): positions and aims blended. `out` may be `to`.
+void Blend(const float from[16], const float to[16], float a, float out[16])
+{
+    float eye[3], target[3];
+    for (int k = 0; k < 3; ++k) {
+        eye[k] = from[12 + k] + (to[12 + k] - from[12 + k]) * a;
+        const float f = from[12 + k] + from[8 + k] * 200, t = to[12 + k] + to[8 + k] * 200;
+        target[k] = f + (t - f) * a;
+    }
+    LookAt(eye, target, out);
+}
+
 // The end: the top five lined up facing the camera, first in the middle (as Battlefront's end screen).
 constexpr float kPodium[5][2] = { { 0, 0 }, { -85, 35 }, { 85, 35 }, { -170, 70 }, { 170, 70 } }; // x, back
 constexpr float kPodiumZ = 0; // relative to the floor's middle
@@ -621,7 +701,65 @@ void EndCamera(float m[16])
     LookAt(eye, target, m);
 }
 
-// The camera during the intro, on the way back to the game's, and at the end.
+// The kill camera (as Battlefront's): from the side of the player's body the game's camera was on when it fell
+// (a place the camera could be: no wall), nearer the body and a little higher, turned to look at its killer (the
+// nearest enemy when no one was credited; the body when none is near). While the player is out of lives it follows
+// a teammate still fighting, from the side it is on.
+int NearestEnemy(const float at[3], float within)
+{
+    int best = -1;
+    for (int i = 0; i < kFighters; ++i) {
+        if (SideOf(i) == SideOf(g_Player) || !Standing(g_Fighters[i]))
+            continue;
+        const float* p = Position(g_Fighters[i].object);
+        const float d = std::hypot(p[0] - at[0], p[2] - at[2]);
+        if (d < within) {
+            within = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+void KillView(float m[16])
+{
+    if (g_Corpse && ObjectById(g_CorpseId) == g_Corpse)
+        std::memcpy(g_CorpseAt, Position(g_Corpse), sizeof g_CorpseAt);
+    float target[3] = { g_CorpseAt[0], g_CorpseAt[1] + 20, g_CorpseAt[2] };
+    float eye[3];
+    if (g_Fighters[g_Player].out && !g_PlayerFell) { // out: a teammate's fight
+        const float* from = g_KillView + 12;
+        for (int i = SideOf(g_Player) * kSide; i < (SideOf(g_Player) + 1) * kSide; ++i) {
+            if (i == g_Player || !Standing(g_Fighters[i]) || g_Fighters[i].out)
+                continue;
+            const float* p = Position(g_Fighters[i].object);
+            const float dx = from[0] - p[0], dz = from[2] - p[2], d = std::max(1.0f, std::hypot(dx, dz));
+            const float want[3] = { p[0] + dx / d * 220, p[1] + 95, p[2] + dz / d * 220 };
+            for (int k = 0; k < 3; ++k)
+                eye[k] = from[k] + (want[k] - from[k]) * 0.05f; // eased, frame by frame
+            const float look[3] = { p[0], p[1] + 45, p[2] };
+            LookAt(eye, look, m);
+            return;
+        }
+        LookAt(from, target, m);
+        return;
+    }
+    int look = g_PlayerKiller >= 0 && Standing(g_Fighters[g_PlayerKiller]) ? g_PlayerKiller : -1;
+    if (look < 0)
+        look = NearestEnemy(g_CorpseAt, 900);
+    if (look >= 0) {
+        const float* k = Position(g_Fighters[look].object);
+        target[0] = k[0];
+        target[1] = k[1] + 50;
+        target[2] = k[2];
+    }
+    for (int k = 0; k < 3; ++k)
+        eye[k] = g_DeathView[12 + k] + (g_CorpseAt[k] - g_DeathView[12 + k]) * 0.35f;
+    eye[1] = std::max(eye[1], g_CorpseAt[1] + 70) + 25;
+    LookAt(eye, target, m);
+}
+
+// The camera during the intro, on the way back to the game's, at the player's death and at the end.
 bool HvvCamera(float m[16], float)
 {
     if (!g_Active)
@@ -629,6 +767,26 @@ bool HvvCamera(float m[16], float)
     if (g_Phase == Phase::End) {
         EndCamera(m);
         return true;
+    }
+    if (g_Phase == Phase::Fight) {
+        const ULONGLONG now = GetTickCount64();
+        if (g_PlayerFell || g_Fighters[g_Player].out) {
+            if (!g_DeathViewSet) {
+                std::copy(m, m + 16, g_DeathView);
+                g_DeathViewSet = true;
+            }
+            float view[16];
+            KillView(view);
+            const float a = g_PlayerFell ? Smooth(float(now - g_PlayerDownAt) / kKillCamIn) : 1.0f;
+            Blend(g_DeathView, view, a, m);
+            std::copy(m, m + 16, g_KillView);
+            return true;
+        }
+        if (g_BackAt && now - g_BackAt < kKillCamBack) { // back to the game's camera
+            Blend(g_KillView, m, Smooth(float(now - g_BackAt) / kKillCamBack), m);
+            return true;
+        }
+        return false;
     }
     if (g_Phase != Phase::Intro)
         return false;
@@ -638,15 +796,7 @@ bool HvvCamera(float m[16], float)
         return true;
     }
     const ULONGLONG back = kIntroShots * kLineShot;
-    // back to the game's own camera: positions and aims blended
-    const float a = Smooth(float(t - back) / kToPlayer);
-    float eye[3], target[3];
-    for (int k = 0; k < 3; ++k) {
-        eye[k] = g_LastShot[12 + k] + (m[12 + k] - g_LastShot[12 + k]) * a;
-        const float from = g_LastShot[12 + k] + g_LastShot[8 + k] * 200, to = m[12 + k] + m[8 + k] * 200;
-        target[k] = from + (to - from) * a;
-    }
-    LookAt(eye, target, m);
+    Blend(g_LastShot, m, Smooth(float(t - back) / kToPlayer), m); // back to the game's own camera
     return true;
 }
 
@@ -823,7 +973,7 @@ HvvState GetHvvState()
         if (o.placed) {
             const float* p = Position(f.object);
             o.head[0] = p[0];
-            o.head[1] = p[1] + 95.0f;
+            o.head[1] = p[1] + MarkerHeight(f.className);
             o.head[2] = p[2];
         }
         o.score = f.score;
@@ -1009,29 +1159,59 @@ void HvvFrame()
         return;
     }
 
-    // The player's fatal hit: its fall plays out (a killing blow is often a move both play, the victim's ending on
-    // the ground), then a fresh fighter of its class takes over the controls (the live player change), at a safe
-    // place, with full health and a moment's shield; a life of its side goes.
+    // The player's fatal hit (kept from the game, whose player must never die: that ends the mission): a fresh
+    // fighter of its class takes over the controls at once (the live player change), held, shielded, out of the
+    // AI's sight, where it will come back; the old body, now just a character, is dealt the death by its killer and
+    // dies there (its death plays). The kill camera meanwhile; then the fighter comes back, a life of its side gone.
     Fighter& me = g_Fighters[g_Player];
-    if (g_PlayerFell && now - g_PlayerDownAt >= kPlayerDown && g_Lives[SideOf(g_Player)] <= 0) {
-        g_PlayerFell = false; // out: it stays down (invincible) until the end
-        me.out = true;
-        LOG_INFO("HvV: you are out");
-    } else if (g_PlayerFell && now - g_PlayerDownAt >= kPlayerDown) {
-        g_PlayerFell = false;
-        --g_Lives[SideOf(g_Player)];
+    if (g_PlayerFell && !g_Swapped) {
+        g_Swapped = true;
+        g_Corpse = nullptr;
+        uint8_t* old = nullptr;
         std::string error;
-        if (ReplacePlayer(error))
+        if (ReplacePlayer(error, &old) && old) {
             player = PlayerObject();
-        else
+            Track(me, player);
+            float m[16];
+            SafePlace(g_Player, m);
+            VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(player, kPlace)(player, nullptr, m);
+            FullHealth(player);
+            Field<uint8_t>(player, kCharacterInvincible) = 1;
+            SetIgnoredByAI(player, true);
+            input::HoldPlayerInput(true);
+            g_Corpse = old;
+            g_CorpseId = Field<uint32_t>(old, 4);
+            Field<uint8_t>(old, kCharacterInvincible) = 0;
+            uint8_t* by = g_PlayerKiller >= 0 && Placed(g_Fighters[g_PlayerKiller]) ? g_Fighters[g_PlayerKiller].object
+                                                                                    : nullptr;
+            reinterpret_cast<void(__fastcall*)(uint8_t*, void*, float, uint32_t, uint32_t)>(uintptr_t(kChangeHealth))(
+                old, nullptr, -10 * kHealthScale, 0, uint32_t(reinterpret_cast<uintptr_t>(by)));
+        } else {
             LOG_WARN("HvV: a fresh fighter could not take over (%s); you get up where you are", error.c_str());
-        Track(me, player);
-        float m[16];
-        SafePlace(g_Player, m);
-        VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(player, kPlace)(player, nullptr, m);
-        FullHealth(player);
-        Shield(me, now);
-        LOG_INFO("HvV: you came back (%d lives left)", g_Lives[SideOf(g_Player)]);
+        }
+    }
+    if (g_PlayerFell && now - g_PlayerDownAt >= kPlayerDown) {
+        g_PlayerFell = false;
+        Field<uint8_t>(player, kCharacterInvincible) = 0;
+        if (g_Lives[SideOf(g_Player)] <= 0) { // out: held, out of the way, until the end
+            me.out = true;
+            float m[16];
+            Transform(g_Bounds[0] + 100, g_Bounds[1] + 100, 0, m);
+            VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(player, kPlace)(player, nullptr, m);
+            Field<uint8_t>(player, kCharacterInvincible) = 1;
+            LOG_INFO("HvV: you are out");
+        } else {
+            --g_Lives[SideOf(g_Player)];
+            float m[16];
+            SafePlace(g_Player, m);
+            VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(player, kPlace)(player, nullptr, m);
+            FullHealth(player);
+            Shield(me, now);
+            SetIgnoredByAI(player, false);
+            input::HoldPlayerInput(false);
+            g_BackAt = now;
+            LOG_INFO("HvV: you came back (%d lives left)", g_Lives[SideOf(g_Player)]);
+        }
     }
 
     for (int i = 0; i < kFighters; ++i) {

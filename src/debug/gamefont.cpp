@@ -59,19 +59,36 @@ bool Load()
         LOG_WARN("Game font: unexpected sheet (%ux%u, format %u)", w, h, format);
         return false;
     }
+    // The device takes no managed textures (D3D9Ex): the sheet is filled in system memory, then copied to the
+    // card (the default pool; released and made again with the device).
+    IDirect3DTexture9* staging = nullptr;
     IDirect3DTexture9* texture = nullptr;
-    if (FAILED(g_Device->CreateTexture(w, h, 1, 0, D3DFMT_DXT5, D3DPOOL_MANAGED, &texture, nullptr)))
-        return false;
+    HRESULT hr = g_Device->CreateTexture(w, h, 1, 0, D3DFMT_DXT5, D3DPOOL_SYSTEMMEM, &staging, nullptr);
+    if (SUCCEEDED(hr))
+        hr = g_Device->CreateTexture(w, h, 1, 0, D3DFMT_DXT5, D3DPOOL_DEFAULT, &texture, nullptr);
     D3DLOCKED_RECT lr;
-    if (FAILED(texture->LockRect(0, &lr, nullptr, 0))) {
-        texture->Release();
+    if (SUCCEEDED(hr))
+        hr = staging->LockRect(0, &lr, nullptr, 0);
+    if (FAILED(hr)) {
+        LOG_WARN("Game font: the sheet's texture could not be made (0x%08lX)", hr);
+        if (staging)
+            staging->Release();
+        if (texture)
+            texture->Release();
         return false;
     }
     const uint8_t* pixels = sheet.data() + sheet.size() - bytes;
     const size_t rowBytes = size_t(w) / 4 * 16;
     for (uint32_t row = 0; row < h / 4; ++row)
         std::memcpy(static_cast<uint8_t*>(lr.pBits) + size_t(row) * lr.Pitch, pixels + row * rowBytes, rowBytes);
-    texture->UnlockRect(0);
+    staging->UnlockRect(0);
+    hr = g_Device->UpdateTexture(staging, texture);
+    staging->Release();
+    if (FAILED(hr)) {
+        LOG_WARN("Game font: the sheet could not be copied to the card (0x%08lX)", hr);
+        texture->Release();
+        return false;
+    }
     g_Texture = texture;
     g_SheetW = float(w);
     g_SheetH = float(h);

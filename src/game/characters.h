@@ -73,6 +73,8 @@ uint8_t* SpawnCharacterAt(const char* className, const std::string& costume, con
     const std::string& mesh, SpawnSide side, const float* place, std::string& error);
 // Puts a character in the running level on a side, as a spawn's (Ally: the player's). False outside a level.
 bool SetCharacterSide(uint8_t* character, SpawnSide side);
+// The AI data's "Ignored By AI" (no one sets out for the character); false when it has no AI data.
+bool SetIgnoredByAI(uint8_t* character, bool ignored);
 const char* SideName(SpawnSide side);
 
 // The running level's player, for display: its class (type name), costume, position and heading
@@ -128,7 +130,8 @@ bool RemoveSpawnedCharacter(uint8_t* character);
 // Changes the running level's player at once, where it stands, to the current choice (class, costume,
 // texture set, body; the player's own class when none is chosen): a new character takes over the
 // controls, the camera and the level's references to the player. False with `error` set when it cannot.
-bool ReplacePlayer(std::string& error);
+// `keepOld`: the old body stays in the level (a character without controls, e.g. to die there), handed back.
+bool ReplacePlayer(std::string& error, uint8_t** keepOld = nullptr);
 
 // The player's saber colour (r, g, b, 0-1), its own only: other characters keep theirs, and power-ups
 // no longer change it. Applies at once to a running level's player, and from then on; null goes back

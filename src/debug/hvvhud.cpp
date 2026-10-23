@@ -59,8 +59,9 @@ float Text(float x, float y, float h, ImU32 colour, const std::string& t, float 
 }
 
 // A point of the world on the screen, through the game camera's placement (rows right, up, forward, position) and
-// field of view (the renderer's, vertical, radians).
-bool OnScreen(const float p[3], const ImGuiViewport* vp, ImVec2& out)
+// field of view (the renderer's: horizontal, radians; taken as vertical, points off the middle came out 16:9 times
+// too near it).
+bool OnScreen(const float p[3], const ImGuiViewport* vp, ImVec2& out, float* depth = nullptr)
 {
     float m[16], fov = 0;
     if (!game::GameCameraPlacement(m, fov) || fov <= 0)
@@ -73,7 +74,9 @@ bool OnScreen(const float p[3], const ImGuiViewport* vp, ImVec2& out)
     const float z = d[0] * m[8] + d[1] * m[9] + d[2] * m[10];
     if (z < 10.0f)
         return false;
-    const float focal = (vp->Size.y / 2) / std::tan(fov / 2);
+    if (depth)
+        *depth = z;
+    const float focal = (vp->Size.x / 2) / std::tan(fov / 2);
     out = ImVec2(vp->Pos.x + vp->Size.x / 2 + x / z * focal, vp->Pos.y + vp->Size.y / 2 - y / z * focal);
     return true;
 }
@@ -109,13 +112,14 @@ void Markers(const game::HvvState& s, const ImGuiViewport* vp, float u)
         if (f.isPlayer || !f.standing || !f.placed || f.side != mySide)
             continue;
         ImVec2 at;
-        if (!OnScreen(f.head, vp, at))
+        float depth = 0;
+        if (!OnScreen(f.head, vp, at, &depth))
             continue;
-        const float r = 7 * u;
-        g_Draw->AddTriangleFilled(ImVec2(at.x - r, at.y - r), ImVec2(at.x + r, at.y - r), ImVec2(at.x, at.y),
-            IM_COL32(0, 0, 0, 120));
-        g_Draw->AddTriangleFilled(ImVec2(at.x - r * 0.75f, at.y - r * 0.9f), ImVec2(at.x + r * 0.75f, at.y - r * 0.9f),
-            ImVec2(at.x, at.y - r * 0.1f), SideColour(mySide));
+        // a chevron pointing down at the head, outlined, a little smaller far away
+        const float r = std::clamp(9.0f * u * (600.0f / std::max(depth, 1.0f)), 6.0f * u, 10.0f * u);
+        const ImVec2 a(at.x - r, at.y - 1.6f * r), b(at.x + r, at.y - 1.6f * r), c(at.x, at.y);
+        g_Draw->AddTriangleFilled(a, b, c, SideColour(mySide));
+        g_Draw->AddTriangle(a, b, c, IM_COL32(0, 0, 0, 200), 1.5f * u);
     }
 }
 
@@ -216,7 +220,7 @@ void Leaderboard(const game::HvvState& s, const ImGuiViewport* vp, float u)
                 g_Draw->AddRectFilled(ImVec2(x - 6 * u, y - 3 * u), ImVec2(x + colW + 6 * u, y + rowH - 4 * u),
                     IM_COL32(255, 196, 90, 40), 3 * u);
             const ImU32 colour = f.out ? kDim : kWhite;
-            Text(x, y, 15 * u, colour, f.isPlayer ? "YOU  (" + game::HvvDisplayName(f.className) + ")" : f.name);
+            Text(x, y, 15 * u, colour, f.isPlayer ? f.name + "  (YOU)" : f.name);
             const int values[] = { f.defeats, f.assists, f.falls, f.score };
             for (int c = 0; c < 4; ++c)
                 Text(cols[c], y, 15 * u, c == 3 ? kGold : colour, std::to_string(values[c]), 1.0f);
@@ -248,7 +252,9 @@ void EndScreen(const game::HvvState& s, const ImGuiViewport* vp, float u)
         g_Draw->AddRectFilled(ImVec2(cx - w / 2 + 6 * u, y + 10 * u + big), ImVec2(cx + w / 2 - 6 * u, y + 30 * u + big),
             Faded(IM_COL32(255, 255, 255, 18), a));
         Text(cx, y + 12 * u + big, 15 * u, Faded(SideColour(f.side), a),
-            f.isPlayer ? "YOU" : game::HvvDisplayName(f.className), 0.5f);
+            game::HvvDisplayName(f.className), 0.5f);
+        if (f.isPlayer)
+            Text(cx, y - 18 * u, 13 * u, Faded(kWhite, a), "YOU", 0.5f);
         char score[32];
         snprintf(score, sizeof score, "%d SCORE", f.score);
         Text(cx, y + h - 22 * u, 16 * u, Faded(kGold, a), score, 0.5f);

@@ -1581,7 +1581,7 @@ bool BodyBoundToAnotherClass(uint8_t* character)
     return it != g_BodyClasses.end() && it->second != CharacterType(character);
 }
 
-bool ReplacePlayer(std::string& error)
+bool ReplacePlayer(std::string& error, uint8_t** keepOld)
 {
     if (!PlayerAlive()) {
         error = g_PlayerSpawned ? "only in story levels, not in Versus" : "no mission is running";
@@ -1663,7 +1663,10 @@ bool ReplacePlayer(std::string& error)
     *reinterpret_cast<int*>(old + kCharacterControl) = 0;
     reinterpret_cast<void(__fastcall*)(uint8_t*, void*, int)>(uintptr_t(kBindController))(old, nullptr, -1);
     RemoveProjectiles();
-    DestroyObject(old);
+    if (keepOld)
+        *keepOld = old;
+    else
+        DestroyObject(old);
     if (!ControllerBoundTo(fresh)) {
         LOG_WARN("Characters: controller 0 lost the new player; bound again");
         reinterpret_cast<void(__fastcall*)(uint8_t*, void*, int)>(uintptr_t(kBindController))(fresh, nullptr, 0);
@@ -1678,6 +1681,15 @@ bool ReplacePlayer(std::string& error)
 const char* SideName(SpawnSide side)
 {
     return kSides[int(side)].name;
+}
+
+bool SetIgnoredByAI(uint8_t* character, bool ignored)
+{
+    uint8_t* ai = character ? *reinterpret_cast<uint8_t**>(character + kCharacterAIData) : nullptr;
+    if (!ai)
+        return false;
+    ai[kAIIgnoredByAI] = ignored ? 1 : 0;
+    return true;
 }
 
 bool SetCharacterSide(uint8_t* character, SpawnSide side)
