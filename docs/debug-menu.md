@@ -306,7 +306,7 @@ characters you spawned in this level; their count is shown beside it.
 Your character's live data and quick helpers, the game's own variables (the ones `set` changes) and
 switches, in one place.
 
-- **Levels**: **Developer map** (`devmap`): the game restarts into an empty, lit, flat floor under the sky
+- **Levels**: a button for each [custom map](modding/custom-maps.md) beside it (`devmap <map>`). **Developer map** (`devmap`): the game restarts into an empty, lit, flat floor under the sky
   (22,500 × 10,800 units), with nothing on it but you (General Grievous; `player` picks another character). Spawn
   characters there (`spawn`) to test anything without a mission's scripts, enemies or walls in the way. The port
   builds it as the level loads, from the bonus mission *Grievous Survival*'s own files; `restart` keeps it. How it
@@ -332,7 +332,7 @@ switches, in one place.
 
 A team mode on the developer map ([Heroes vs Villains](research/heroes-vs-villains.md)): set how many
 **heroes** and **villains** fight (1 to 8 each; 4 against 4 by default), pick them (the Versus fighters, the other
-saber duelists and custom characters), mark the one you play, set each side's **lives** (35) and every fighter's **health** (250;
+saber duelists and custom characters), mark the one you play, choose the **map** (the floor or a custom map), set each side's **lives** (35) and every fighter's **health** (250;
 less makes for quicker falls), and whether the **intro** plays, then **Start**: the game restarts into the match
 (the `hvv` command, which the tab writes for you). **Defaults** puts the default line-up back. Below, the running
 match: each side's lives and fighters standing, the winner, and **Play it again**.

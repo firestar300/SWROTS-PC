@@ -16,6 +16,7 @@
 #include "debug/console.h"
 #include "game/characters.h"
 #include "game/coop.h"
+#include "game/custommaps.h"
 #include "game/devmap.h"
 #include "game/freecam.h"
 #include "game/hvv.h"
@@ -596,6 +597,15 @@ void GameTab()
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("An empty, lit, flat floor under the sky, nothing on it but you: spawn characters to\n"
                           "test anything (devmap). The game restarts into it.");
+    // the custom maps (mods\maps), each on the developer map
+    for (const game::CustomMap& map : game::CustomMaps()) {
+        ImGui::SameLine();
+        if (ImGui::Button(map.name.c_str()))
+            Submit("devmap " + map.id);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("The custom map %s (mods\\maps\\%s) on the developer map (devmap %s).", map.name.c_str(),
+                map.id.c_str(), map.id.c_str());
+    }
     // Player: what it is and where, and its numbers.
     ImGui::SeparatorText("Player");
     const game::PlayerInfo player = game::CurrentPlayer();
@@ -939,6 +949,7 @@ void HvvTab()
         std::vector<std::string> heroes, villains;
         int player = 0, lives = 35, health = 250, heroCount = 4, villainCount = 4;
         bool intro = true;
+        std::string map; // a custom map's id; empty: the floor
     };
     static Picks picks;
     static std::vector<std::string> classes;
@@ -992,6 +1003,16 @@ void HvvTab()
         ImGui::EndTable();
     }
     ImGui::SetNextItemWidth(200.0f * float(g_Scale));
+    const game::CustomMap* chosenMap = picks.map.empty() ? nullptr : game::FindCustomMap(picks.map);
+    if (ImGui::BeginCombo("Map", chosenMap ? chosenMap->name.c_str() : "Developer map")) {
+        if (ImGui::Selectable("Developer map", !chosenMap))
+            picks.map.clear();
+        for (const game::CustomMap& map : game::CustomMaps())
+            if (ImGui::Selectable(map.name.c_str(), chosenMap == &map))
+                picks.map = map.id;
+        ImGui::EndCombo();
+    }
+    ImGui::SetNextItemWidth(200.0f * float(g_Scale));
     ImGui::SliderInt("Lives a side", &picks.lives, 1, 99);
     ImGui::SetNextItemWidth(200.0f * float(g_Scale));
     ImGui::SliderInt("Health", &picks.health, 100, 2000);
@@ -1008,7 +1029,7 @@ void HvvTab()
         for (const std::string& c : picks.villains)
             command += " " + c;
         command += " heroes " + std::to_string(picks.heroCount) + " player " + std::to_string(picks.player) +
-            " lives " + std::to_string(picks.lives) +
+            (picks.map.empty() ? "" : " map " + picks.map) + " lives " + std::to_string(picks.lives) +
             " health " + std::to_string(picks.health) + (picks.intro ? "" : " intro off");
         Submit(command);
     }

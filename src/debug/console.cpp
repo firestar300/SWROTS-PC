@@ -269,7 +269,7 @@ void Help(uint8_t* console)
     Print(LineKind::Output, "                           or a custom map on it (mods/maps; now: %s)", CustomMapList().c_str());
     Print(LineKind::Output, "  hvv [<classes>] [heroes <n>] [player <n>] [lives <n>] [health <n>] [intro on|off] [map <map>]");
     Print(LineKind::Output, "                           Heroes vs Villains: 2-16 classes, heroes then villains (half each");
-    Print(LineKind::Output, "                           unless `heroes` says); hvv board on|off");
+    Print(LineKind::Output, "                           unless `heroes` says); hvv board on|off; hvv end (ends it now)");
     Print(LineKind::Output, "  autorestart [on|off]     whether player changes apply at once (live, or by restarting)");
     Print(LineKind::Output, "  variants <class>         a character class's costumes");
     Print(LineKind::Output, "  meshes [text]            the character meshes on the disc (those containing text)");
@@ -1059,6 +1059,11 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
         // hvv board on|off: the leaderboard pinned (as Tab held shows it)
         if (words.size() > 1 && words[1] == "board") {
             game::SetHvvBoardPinned(words.size() < 3 || words[2] != "off");
+            return true;
+        }
+        if (words.size() > 1 && words[1] == "end") { // hvv end: the running match ends now
+            if (!game::EndHvvNow())
+                Print(LineKind::Error, "no match is being fought");
             return true;
         }
         std::vector<std::string> lineup;

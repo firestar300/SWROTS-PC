@@ -31,12 +31,13 @@ hvv IObiwan IYoda IVader IDooku IGrievous heroes 2
                                         two against three (`heroes`: how many of the classes are heroes)
 hvv map cantina                         on a custom map (mods\maps\cantina, see custom maps)
 hvv board on|off                        the leaderboard pinned (as holding Tab shows it)
+hvv end                                 the running match ends now (the side with more lives wins)
 ```
 
 The game restarts into the match, as a level change does: the fighters stand in two lines facing each other in
-the middle of the floor. **The intro** (about 9 s): for each side a 2.6 s shot of its line from the front, its
-fighters playing their Versus intros, then a 1.6 s close shot along the line ("HEROES" / "VILLAINS" with the
-names); then the camera glides back behind you and "FIGHT!". Everyone holds still meanwhile (the game's
+the middle of the floor. **The intro** (about 9 s): for each side a 2.6 s pan along its line from the front,
+near, its fighters playing their Versus intros (Yoda, who has none, one of his flavour idles), then a 1.6 s close
+shot along the line ("HEROES" / "VILLAINS" with the names); then the camera glides back behind you and "FIGHT!". Everyone holds still meanwhile (the game's
 `aiDisabled`, your controls held).
 
 At "FIGHT!" every fighter is set on the nearest enemy (and again whenever it has none: one that came back, or
@@ -67,8 +68,9 @@ are its target or are locked in it); settings.ini `[HvV] OthersSlowMotion=1` let
   your lines marked);
 - your notices: "DEFEATED <NAME>" with your killstreak and the points, "ASSIST <NAME>", "DEFEATED BY <NAME>";
 - the leaderboard while **Tab** is held: defeats, assists, falls and score of everyone;
-- the end: "HEROES WIN" / "VILLAINS WIN", then the top five come to a podium facing the camera, playing their
-  intros, with a card each (FIRST to FIFTH, name, score); the game's own HUD is hidden meanwhile.
+- the end: "HEROES WIN" / "VILLAINS WIN", then the top five stand on a podium facing the camera (first in the
+  middle, second and third beside, fourth and fifth outside), playing their intros, with a card under each (FIRST to
+  FIFTH, name, score); the game's own HUD is hidden meanwhile.
 
 **Points**: the damage dealt to enemies (in the mode's health), 100 a defeat, 50 an assist, and 25 more for each
 defeat in a streak (up to 8). A defeat is the last enemy that hit the fighter within 10 s; the others that hit it
@@ -141,10 +143,12 @@ clearest of fighters and nearest the fight), else near the fight within its `Bou
   wall, the bar or a platform it cannot step onto stops it. A fighter that stays put for 5 s with its target more
   than 260 units away, or stands near it for 12 s without a blow either way, is moved beside its target to a spot
   clear of the map's boxes (a ring around the target, else the map's spawn nearest it) and set on it again.
-- **The player's death**: the fatal hit is kept from the game; on the next frame the live player change gives the
-  controls to a fresh fighter (the old body removed, as any live change does), placed where it will come back, held,
-  shielded and "Ignored By AI" (AI data +0x52). Where the old body fell, a double of it (an ordinary spawned
-  character) is dealt the death by the killer and dies there. Keeping the player's own body in the level to die
+- **The player's death**: the fatal hit is kept from the game; on the next frame the old body is moved far out of
+  sight (its removal can take a moment, and it played its own fall beside the double's: two deaths), the live player
+  change gives the controls to a fresh fighter (the old body removed, as any live change does), placed where it will
+  come back, held, shielded and "Ignored By AI" (AI data +0x52). Where the old body fell, a double of it (an ordinary
+  spawned character) is dealt the death by the killer and dies there. The kill camera starts from the game's camera
+  as the hit landed. Keeping the player's own body in the level to die
   froze the game once (an object list, next pointer +0x24, walked at 0x1F3DB0, went round in a circle).
 - **Back to the main menu**: a level change is a reboot; the game keeps the profile across one in `Z:\persist.tmp`
   (`cache\persist.tmp`), saved by 0x24D300 (thiscall on the profile [0x7E8F24]; nothing without the profile's data at
@@ -160,7 +164,12 @@ clearest of fighters and nearest the fight), else near the fight within its `Bou
   one whose AI is set on the victim first (the player counting as one).
 - **The intro and the end**: everyone is woken at once and holds still (`aiDisabled`, the options byte +0xC4; the player's input
   held back); the camera is the port's (a camera adjuster, as co-op's shared camera, in its place for the match):
-  look-at shots computed from the fighters' transforms; each fighter's intro starts as its close-up does. The titles
+  look-at shots computed from the fighters' transforms; each line's intros start as its pan does. A character's
+  intro is its sequence named `*_Intro`, started as a reaction (vfunc +0x410); one placed above the floor falls, and
+  the fall stops the sequence, so the end's characters are set down on the floor itself. **The end** moves every
+  character of the match out of sight (fighters, the player, the fallen) and spawns the top five afresh on the podium:
+  the fighters themselves brought their fight along (lying from a blow, turned their own way, mid-move). The
+  podium stands just in front of the heroes' line (open floor on any map; behind it can be a wall). The titles
   and the scoreboard are drawn by the debug menu's layer over the picture (also when the menu is closed). The font
   sheet is read from the shared PAK and made a texture in the default pool through a system-memory copy: the
   port's device takes no managed textures (D3D9Ex; `D3DERR_INVALIDCALL`), which left the overlay in the menu's

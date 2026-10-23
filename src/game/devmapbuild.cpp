@@ -824,29 +824,40 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
         say("%zu collision boxes; ", boxCount);
     }
 
-    // objects: only what a level needs. With a map's music, the level's own music start is kept as it is: the
-    // player's start triggers a sequencer (its first trigger) that picks one of the cave's four music objects
-    // (IAudio of Type Music, event triggered) at random; all four now name the map's track.
+    // objects: only what a level needs. With a map's music, the level's own music start is kept: the player's start
+    // triggers a sequencer (its first trigger, "Single Random Event") over the cave's music objects (IAudio of Type
+    // Music, event triggered). The sequencer keeps its first item alone, and that item's music object, naming the
+    // map's track, is the only music object kept (two naming the same track streamed it both, out of step).
     const bool music = layout && !layout->music.empty();
-    uint32_t sequencerId = 0;
-    int tracks = 0;
+    uint32_t sequencerId = 0, trackId = 0;
     if (music) {
         Object* spawn = FindObject(objects, "IPointSpawnPlayer");
         Property* triggers = spawn ? Find(spawn->props, "Initially trigger objects") : nullptr;
         if (triggers && triggers->data.size() >= 12)
             std::memcpy(&sequencerId, triggers->data.data() + 8, 4);
         for (Object& o : objects) {
-            Property* type = Find(o.props, "Type");
+            if (U32Of(Find(o.props, "ID")) != sequencerId)
+                continue;
+            Property* items = Find(o.props, "Items");
+            Groups list;
+            if (!items || !ReadGroups(items->data, list) || list.empty())
+                break;
+            Property* first = Find(list[0], "Objects"); // capacity, count, the ids
+            if (!first || first->data.size() < 12)
+                break;
+            std::memcpy(&trackId, first->data.data() + 8, 4);
+            list.resize(1);
+            items->data = WriteGroups(list);
+        }
+        for (Object& o : objects) {
             Property* link = Find(o.props, "Sound Link");
-            if (o.cls != "IAudio" || !type || !link || type->data.size() < 9 ||
-                std::memcmp(type->data.data() + 4, "Music", 5) != 0)
+            if (o.cls != "IAudio" || !link || U32Of(Find(o.props, "ID")) != trackId)
                 continue;
             Writer name;
             name.String("ep3\\Ep3_Streaming\\music\\" + layout->music);
             link->data = name.out;
-            ++tracks;
         }
-        if (!sequencerId || !tracks)
+        if (!sequencerId || !trackId)
             return fail("the level's music");
         say("music %s; ", layout->music.c_str());
     }
@@ -854,9 +865,7 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
     for (Object& o : objects) {
         const bool keep = std::any_of(std::begin(kKeep), std::end(kKeep), [&](const char* c) { return o.cls == c; }) ||
             (o.cls == "IStatic" && Find(o.props, "Skybox Render Priority")) ||
-            (music && o.cls == "IAudio" && Find(o.props, "Type") && Find(o.props, "Type")->data.size() >= 9 &&
-                std::memcmp(Find(o.props, "Type")->data.data() + 4, "Music", 5) == 0) ||
-            (music && U32Of(Find(o.props, "ID")) == sequencerId);
+            (music && (U32Of(Find(o.props, "ID")) == sequencerId || U32Of(Find(o.props, "ID")) == trackId));
         if (keep)
             keptObjects.push_back(std::move(o));
     }

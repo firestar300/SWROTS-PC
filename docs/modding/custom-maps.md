@@ -71,8 +71,8 @@ characters.
 after the slot, plays in its place while the map plays (only then: other levels keep the slot's own track, and the
 `mods\audio\xbox\` music replacements are not touched). The track must be in the slot's format: Xbox ADPCM, at the
 slot's sample rate and exactly its length (`tools/audio/hwx.py encode`, see [replacing music](replacing-music.md)).
-The level's own music start is kept: its player start triggers a sequencer that picks one of its four music objects
-at random; all four name the map's slot.
+The level's own music start is kept: its player start triggers a sequencer, which now holds one music object alone,
+naming the map's slot.
 
 ## The model
 
@@ -102,9 +102,11 @@ vertex, is white: hence `Vertices`).
   light (one u32 a vertex); `ILevelProperties`' "Character ambient color" and "Dynamic-mesh ambient color"; the light
   manager's lights' `__intn`.
 - **The music**: Grievous Survival's player start (`IPointSpawnPlayer`, "Initially trigger objects") triggers a
-  sequencer (`ISequencer_x`, "Single Random Event") over four `IAudio` objects of Type Music, event triggered; the
-  dev map keeps them, their "Sound Link" (`ep3\Ep3_Streaming\music\<slot>`) naming the map's slot, and the port
-  serves the map's file in the slot file's place for that start (`kernel::SetDiscFileOverride`, ahead of mods\).
+  sequencer (`ISequencer_x`, "Single Random Event", its "Items" each an `Objects` list) over `IAudio` objects of
+  Type Music, event triggered. The dev map keeps the sequencer with its first item alone and that item's music
+  object, its "Sound Link" (`ep3\Ep3_Streaming\music\<slot>`) naming the map's slot; the port serves the map's file
+  in the slot file's place for that start (`kernel::SetDiscFileOverride`, ahead of mods\). Several music objects
+  naming the same slot streamed it at once, out of step (heard as the track and a quieter echo by turns).
 - **The AI has no paths** on the dev map: it walks straight at its target. In Heroes vs Villains a fighter that a
   wall, the bar or a platform keeps from its target is moved beside it (see [Heroes vs
   Villains](../research/heroes-vs-villains.md#how-it-works)).

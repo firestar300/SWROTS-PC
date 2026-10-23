@@ -44,6 +44,7 @@ struct HvvState {
         bool standing = false, out = false, isPlayer = false;
         bool placed = false;      // in the level now (`head` valid)
         float head[3] = {};       // above its head, in the world
+        float feet[3] = {};       // its feet (its position)
         float health = 0;         // 0 to 1, while placed
         float force = -1;         // 0 to 1; negative: none
         int score = 0, defeats = 0, falls = 0, assists = 0, damage = 0, streak = 0;
@@ -82,6 +83,10 @@ bool StartHvv(const std::vector<std::string>& lineup, int heroes, int player, in
 std::vector<std::string> HvvFighterClasses();
 // A fighter's name as shown (e.g. "OBI-WAN KENOBI").
 std::string HvvDisplayName(const std::string& className);
+
+// Ends the running match at once: the side with more lives left wins (on a tie, the higher total score). False
+// without a match in its fight.
+bool EndHvvNow();
 
 // Pins the leaderboard (as holding Tab shows it), or unpins it.
 void SetHvvBoardPinned(bool pinned);

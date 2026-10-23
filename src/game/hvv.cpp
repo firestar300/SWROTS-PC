@@ -150,6 +150,8 @@ bool g_IntroWanted = true;
 enum class Phase { Waiting, Intro, Fight, End } g_Phase = Phase::Waiting;
 ULONGLONG g_IntroAt = 0, g_FightAt = 0, g_EndAt = 0;
 bool g_MenuAsked = false;   // the way back to the menus is on its way
+uint8_t* g_Podium[5] = {};  // the end's top five: fresh characters on the podium
+bool g_PodiumIntros = false; // their intros are still to start
 int g_ShotPlayed = -1;      // the last intro shot whose line played its intros
 float g_LastShot[16] = {};  // the intro camera's last placement, for the way back to the game's
 bool g_BoardPinned = false;
@@ -266,10 +268,12 @@ void LinePlace(int slot, float& x, float& z, float& yaw)
     yaw = SideOf(slot) == 0 ? 0.0f : kPi; // a character faces +z at yaw 0
 }
 
-void Transform(float x, float z, float yaw, float (&m)[16])
+// A placement on the floor facing `yaw`, `lift` above it (60 for one that may fall onto it: a spawn's; a fighter
+// set down on the floor itself keeps playing what it plays, one that falls is stopped by its fall).
+void Transform(float x, float z, float yaw, float (&m)[16], float lift = 60.0f)
 {
     const float c = std::cos(yaw), s = std::sin(yaw);
-    const float rows[16] = { c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, kDevMapFloorY + 60.0f, z, 1 };
+    const float rows[16] = { c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, kDevMapFloorY + lift, z, 1 };
     std::copy(std::begin(rows), std::end(rows), m);
 }
 
@@ -670,7 +674,8 @@ bool PlayerFatalHit(uint8_t* character)
         g_PlayerDownAt = GetTickCount64();
         g_Swapped = false;
         g_KillEye = -1;
-        g_DeathViewSet = false;
+        float fov = 0; // the camera as the hit lands (the kill camera starts there)
+        g_DeathViewSet = GameCameraPlacement(g_DeathView, fov);
         g_BackAt = 0;
         std::memcpy(g_CorpseAt, Position(character), sizeof g_CorpseAt);
         Field<uint8_t>(character, kCharacterInvincible) = 1; // no more hits until its body is let die
@@ -895,7 +900,7 @@ void HoldEveryone(bool hold)
 
 // A character plays its Versus intro: its sequence named <...>_Intro, found in its list ([[body +0x438] +0x70] +4:
 // +8 count, +0xC items, each named at +0xC) and started as a reaction is (vfunc +0x410 (hit zone or null,
-// sequence)). Yoda has none.
+// sequence)). Yoda has none: one of his "flavour" idles instead.
 void PlayIntro(uint8_t* character)
 {
     uint8_t* body = Field<uint8_t*>(character, 0x438);
@@ -905,15 +910,20 @@ void PlayIntro(uint8_t* character)
         return;
     const int count = Field<int>(list, 8);
     uint8_t** items = Field<uint8_t**>(list, 0xC);
+    uint8_t* flavour = nullptr; // for one without an intro (Yoda): its first "flavour" idle (Idle_Flavor_v1...)
     for (int i = 0; i < count; ++i) {
         const char* name = items[i] ? Field<const char*>(items[i], 0xC) : nullptr;
         const size_t length = name ? strlen(name) : 0;
         if (length > 6 && _stricmp(name + length - 6, "_Intro") == 0) {
-            VirtualOf<bool(__fastcall*)(uint8_t*, void*, void*, uint8_t*)>(character, kPlaySequence)(
-                character, nullptr, nullptr, items[i]);
-            return;
+            flavour = items[i];
+            break;
         }
+        if (!flavour && length >= 11 && _strnicmp(name, "Idle_Flavor", 11) == 0)
+            flavour = items[i];
     }
+    if (flavour)
+        VirtualOf<bool(__fastcall*)(uint8_t*, void*, void*, uint8_t*)>(character, kPlaySequence)(
+            character, nullptr, nullptr, flavour);
 }
 
 // A camera placement (rows right, up, forward, position) at `eye` looking at `target`, up +Y.
@@ -966,9 +976,11 @@ bool IntroShot(ULONGLONG t, float m[16])
     const float lineZ = kDevMapMiddleZ + (side == 0 ? -g_LinesApart / 2 : g_LinesApart / 2);
     const float facing = side == 0 ? 1.0f : -1.0f; // the line faces +z (heroes) or -z
     const float x = kDevMapMiddleX;
-    if (shot % 2 == 0) { // from the front, a little low, drifting across and in
-        const float eye[3] = { x - 60 + 120 * a, floorY + 80 - 10 * a, lineZ + facing * (440 - 60 * a) };
-        const float target[3] = { x, floorY + 55, lineZ };
+    if (shot % 2 == 0) { // from the front, near, a little low, panning along the line (each fighter's intro in turn)
+        const float half = (SideSize(side) - 1) / 2.0f * g_LineGap;
+        const float along = (side == 0 ? -1.0f : 1.0f) * half * (0.75f - 1.5f * a);
+        const float eye[3] = { x + along * 0.8f, floorY + 68, lineZ + facing * 230 };
+        const float target[3] = { x + along, floorY + 52, lineZ };
         LookAt(eye, target, m);
     } else { // close, from one end of the line, along it at chest height
         const float end = (side == 0 ? 1.0f : -1.0f) * ((SideSize(side) - 1) / 2.0f * g_LineGap + 110);
@@ -995,19 +1007,20 @@ void Blend(const float from[16], const float to[16], float a, float out[16])
 constexpr float kPodium[5][2] = { { 0, 0 }, { -85, 35 }, { 85, 35 }, { -170, 70 }, { 170, 70 } }; // x, back
 constexpr float kPodiumZ = 0; // relative to the floor's middle
 
-// The podium stands where the heroes' line stood (open floor on any map), facing the villains' side, where the
-// camera is.
-float PodiumZ() { return kDevMapMiddleZ + kPodiumZ - g_LinesApart / 2; }
+// The podium stands just in front of where the heroes' line stood, its back row on the line (open floor on any map:
+// behind it can be a wall), facing the villains' side, where the camera is.
+float PodiumZ() { return kDevMapMiddleZ + kPodiumZ - g_LinesApart / 2 + kPodium[4][1]; }
 
 void PodiumPlace(int rank, float (&m)[16])
 {
-    const float spread = g_LineGap / kLineGap; // the line's spacing (a map's may be closer)
-    Transform(kDevMapMiddleX + kPodium[rank][0] * spread, PodiumZ() - kPodium[rank][1], 0, m);
+    // facing +z (the camera): its left is -x on screen's right, so the podium's x is turned over (second on the left);
+    // on the floor itself: a fall would stop the intro each plays there
+    Transform(kDevMapMiddleX - kPodium[rank][0], PodiumZ() - kPodium[rank][1], 0, m, 1.0f);
 }
 
 void EndCamera(float m[16])
 {
-    const float back = std::min(330.0f, g_LinesApart - 30);
+    const float back = std::min(330.0f, g_LinesApart - kPodium[4][1] - 30); // short of the villains' line
     const float a = Smooth(float(GetTickCount64() - g_EndAt) / 4000.0f);
     const float eye[3] = { kDevMapMiddleX, kDevMapFloorY + 75 - 10 * a, PodiumZ() + back - 40 * a };
     const float target[3] = { kDevMapMiddleX, kDevMapFloorY + 55, PodiumZ() - 30 };
@@ -1188,6 +1201,9 @@ std::vector<int> Ranking()
 
 // The end begins: everyone holds still, the top five come to the podium (one that is down comes back there), the
 // others go far away, and the five play their intros.
+// The end: every character of the match (fighters, the player, the fallen) goes out of sight, and the top five
+// stand on the podium as fresh characters of their classes: the fighters themselves would bring their fight along
+// (lying from a blow, turned their own way, mid-move), and a character placed where it falls stops its intro.
 void StartEnd(ULONGLONG now)
 {
     g_Phase = Phase::End;
@@ -1195,38 +1211,31 @@ void StartEnd(ULONGLONG now)
     HoldEveryone(true);
     std::vector<int> order = Ranking();
     g_Top.assign(order.begin(), order.begin() + std::min(5, g_Count));
-    for (int i = 0; i < g_Count; ++i) {
-        Fighter& f = g_Fighters[i];
-        const auto place = std::find(g_Top.begin(), g_Top.end(), i);
+    int away = 0;
+    for (uint8_t* c : LevelCharacters()) {
         float m[16];
-        if (place == g_Top.end()) {
-            if (Placed(f)) {
-                Transform(kDevMapMiddleX + 4000 + 300 * i, kDevMapMiddleZ - 4000, 0, m);
-                VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(f.object, kPlace)(f.object, nullptr, m);
-            }
+        Transform(kDevMapMiddleX + 5000 + 250 * float(away % 20), kDevMapMiddleZ - 4000 - 250 * float(away / 20), 0, m);
+        VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(c, kPlace)(c, nullptr, m);
+        Field<uint8_t>(c, kCharacterInvincible) = 1;
+        ++away;
+    }
+    for (size_t rank = 0; rank < 5; ++rank) {
+        g_Podium[rank] = nullptr;
+        if (rank >= g_Top.size())
+            continue;
+        float m[16];
+        PodiumPlace(int(rank), m);
+        std::string error;
+        uint8_t* c = SpawnCharacterAt(g_Fighters[g_Top[rank]].className.c_str(), "", "", "", SpawnSide::Default, m, error);
+        if (!c) {
+            LOG_WARN("HvV: %s is not on the podium (%s)", ShownName(g_Top[rank]).c_str(), error.c_str());
             continue;
         }
-        const int rank = int(place - g_Top.begin());
-        PodiumPlace(rank, m);
-        if (i == g_Player && (f.out || !Standing(f))) { // a fresh fighter takes over from the one lying down
-            std::string error;
-            if (ReplacePlayer(error))
-                Track(f, PlayerObject());
-            if (f.object)
-                VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(f.object, kPlace)(f.object, nullptr, m);
-        } else if (!Standing(f)) {
-            std::string error;
-            if (uint8_t* back = SpawnCharacterAt(f.className.c_str(), "", "", "", SpawnSide::Neutral, m, error))
-                Track(f, back);
-        } else if (f.object) {
-            VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(f.object, kPlace)(f.object, nullptr, m);
-        }
-        if (f.object && Standing(f)) {
-            FullHealth(f.object);
-            Field<uint8_t>(f.object, kCharacterInvincible) = 1;
-            PlayIntro(f.object);
-        }
+        FullHealth(c);
+        Field<uint8_t>(c, kCharacterInvincible) = 1;
+        g_Podium[rank] = c;
     }
+    g_PodiumIntros = true; // a moment after they stand (see HvvFrame)
     LOG_INFO("HvV: the end; first %s with %d", ShownName(g_Top[0]).c_str(), g_Fighters[g_Top[0]].score);
 }
 
@@ -1374,6 +1383,7 @@ HvvState GetHvvState()
             o.head[0] = p[0];
             o.head[1] = p[1] + MarkerHeight(f.className);
             o.head[2] = p[2];
+            std::copy(p, p + 3, o.feet);
             o.health = std::clamp(Field<float>(f.object, kCharacterHealth) / kHealthScale, 0.0f, 1.0f);
             const float maxPower = Field<float>(f.object, kCharacterMaxPower);
             o.force = maxPower > 0 ? std::clamp(Field<float>(f.object, kCharacterPower) / maxPower, 0.0f, 1.0f) : -1.0f;
@@ -1424,6 +1434,12 @@ HvvState GetHvvState()
         s.ending = true;
         s.endingAge = float(now - g_EndAt) / 1000.0f;
         s.top = g_Top;
+        for (size_t rank = 0; rank < g_Top.size() && rank < 5; ++rank) { // where the podium's characters stand
+            auto& o = s.fighters[size_t(g_Top[rank])];
+            o.placed = g_Podium[rank] != nullptr;
+            if (g_Podium[rank])
+                std::copy(Position(g_Podium[rank]), Position(g_Podium[rank]) + 3, o.feet);
+        }
     }
     return s;
 }
@@ -1447,6 +1463,19 @@ std::vector<std::string> HvvFighterClasses()
 std::string HvvDisplayName(const std::string& className)
 {
     return DisplayNameOf(className);
+}
+
+bool EndHvvNow()
+{
+    if (!g_Active || g_Phase != Phase::Fight || g_Winner >= 0)
+        return false;
+    int score[2] = {};
+    for (int i = 0; i < g_Count; ++i)
+        score[SideOf(i)] += g_Fighters[i].score;
+    g_Winner = g_Lives[0] != g_Lives[1] ? (g_Lives[0] > g_Lives[1] ? 0 : 1) : (score[0] >= score[1] ? 0 : 1);
+    g_WinnerAt = GetTickCount64();
+    LOG_INFO("HvV: ended from the console; the %s win", g_Winner == 0 ? "heroes" : "villains");
+    return true;
 }
 
 void SetHvvBoardPinned(bool pinned)
@@ -1564,6 +1593,12 @@ void HvvFrame()
         LOG_INFO("HvV: the fight is on");
     }
     if (g_Phase == Phase::End) {
+        if (g_PodiumIntros && now - g_EndAt >= 200) { // they stand: their intros
+            g_PodiumIntros = false;
+            for (uint8_t* c : g_Podium)
+                if (c)
+                    PlayIntro(c);
+        }
         if (!g_MenuAsked && now - g_EndAt >= kMenuAfter) {
             g_MenuAsked = true;
             BackToMenu();
@@ -1588,6 +1623,11 @@ void HvvFrame()
         g_Corpse = nullptr;
         float fell[16];
         std::memcpy(fell, player + kCharacterTransform, sizeof fell);
+        // the old body out of sight first: its removal can take a moment, and it played its own fall beside the
+        // double's
+        float away[16];
+        Transform(kDevMapMiddleX + 9000, kDevMapMiddleZ + 4500, 0, away);
+        VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(player, kPlace)(player, nullptr, away);
         std::string error;
         if (ReplacePlayer(error)) {
             player = PlayerObject();

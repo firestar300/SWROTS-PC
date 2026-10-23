@@ -289,8 +289,14 @@ void EndScreen(const game::HvvState& s, const ImGuiViewport* vp, float u)
         { 0.89f, 0.70f } };
     for (size_t r = 0; r < s.top.size() && r < 5; ++r) {
         const auto& f = s.fighters[s.top[r]];
-        const float w = (r == 0 ? 250 : 210) * u, h = (r == 0 ? 92 : 78) * u;
-        const float cx = vp->Pos.x + vp->Size.x * kAt[r][0], y = vp->Pos.y + vp->Size.y * kAt[r][1];
+        const float w = (r == 0 ? 190 : 160) * u, h = (r == 0 ? 92 : 78) * u;
+        // under the fighter's feet where it stands on the podium (else a place of its rank)
+        float cx = vp->Pos.x + vp->Size.x * kAt[r][0], y = vp->Pos.y + vp->Size.y * kAt[r][1];
+        ImVec2 at;
+        if (f.placed && OnScreen(f.feet, vp, at)) {
+            cx = std::clamp(at.x, vp->Pos.x + w / 2 + 4 * u, vp->Pos.x + vp->Size.x - w / 2 - 4 * u);
+            y = std::min(at.y + 8 * u, vp->Pos.y + vp->Size.y - h - 8 * u);
+        }
         const float a = std::clamp((s.endingAge - 0.4f - 0.25f * float(r)) / 0.5f, 0.0f, 1.0f);
         g_Draw->AddRectFilled(ImVec2(cx - w / 2, y), ImVec2(cx + w / 2, y + h), Faded(kPanel, a * 1.3f), 4 * u);
         g_Draw->AddRect(ImVec2(cx - w / 2, y), ImVec2(cx + w / 2, y + h), Faded(kEdge, a), 4 * u, 0, 1.5f * u);
