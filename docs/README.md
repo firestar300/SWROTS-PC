@@ -44,3 +44,4 @@ Notes on the game's engine, from its own executable and from related games.
   the free camera
 - [Two players in the story missions](research/coop.md): how the game does co-op, and a second player
   for the campaign (work in progress)
+- [Heroes vs Villains](research/heroes-vs-villains.md): research for a 4 against 4 team mode on the Versus arenas
