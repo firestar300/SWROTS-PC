@@ -93,8 +93,20 @@ The duel keeps a slot's fighter for the player whose chosen name equals the figh
 compared at 0x27B8CD and 0x27B983); a custom character's fighter is its base class, so the port compares the chosen
 name with the slot's class instead.
 
+## Its HUD portrait
+
+```
+mods\interfc\hud_b\hud_face_<costume>01.stx    64x64 DXT5, black where transparent (as the game's faces)
+```
+
+The HUD picks a face by the character's class (0x25E9xx, the face's name from the game's portrait table, the
+lookup 0x27B740 called at 0x25EADD with the character in `esi`); for a custom character the port hands it the
+custom face instead. As with the menus, a texture no PAK has decodes to nothing for the HUD, so the face is served
+in the place of one the disc has and never shows (cut Commander Cody's, `hud_face_unlock_cody01`): one custom
+character's portrait so far. The served pictures keep the replaced texture's own name inside (offset 0x40).
+
 ## Not yet
 
-- The HUD portrait (the base's is shown).
 - A voice of its own (the base's lines play), and its name in subtitles.
-- More than one custom character on the Versus select screen.
+- More than one custom character on the Versus select screen and with a HUD portrait (a way to load pictures
+  that no PAK has).

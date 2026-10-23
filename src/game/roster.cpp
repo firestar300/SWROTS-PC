@@ -637,18 +637,19 @@ struct DonorPictures {
 constexpr DonorPictures kDonors[] = { { "s_selduel_gbghead", "s_selduel_gbgbust" } };
 std::vector<uint8_t> g_DonorData[std::size(kDonors)][2];
 
-// The custom picture with the donor's name inside (0x40, what the menus look textures up by).
-void ServeDonor(std::vector<uint8_t>& data, const std::vector<uint8_t>& custom, const char* name)
+// The custom picture with the donor's own name inside (0x40, what the menus look textures up by, as the disc spells
+// it).
+void ServeDonor(std::vector<uint8_t>& data, const std::vector<uint8_t>& custom)
 {
-    if (custom.size() < 0x40 + 0x28)
+    if (custom.size() < 0x40 + 0x28 || data.size() < 0x40 + 0x28)
         return;
-    data = custom;
-    std::memset(data.data() + 0x40, 0, 0x28);
-    std::memcpy(data.data() + 0x40, name, std::min<size_t>(std::strlen(name), 0x27));
+    std::vector<uint8_t> out = custom;
+    std::memcpy(out.data() + 0x40, data.data() + 0x40, 0x28);
+    data.swap(out);
 }
 
-void ServeDonor0Head(std::vector<uint8_t>& data) { ServeDonor(data, g_DonorData[0][0], kDonors[0].head); }
-void ServeDonor0Bust(std::vector<uint8_t>& data) { ServeDonor(data, g_DonorData[0][1], kDonors[0].bust); }
+void ServeDonor0Head(std::vector<uint8_t>& data) { ServeDonor(data, g_DonorData[0][0]); }
+void ServeDonor0Bust(std::vector<uint8_t>& data) { ServeDonor(data, g_DonorData[0][1]); }
 constexpr ResourcePatch kDonorPatches[std::size(kDonors)][2] = { { &ServeDonor0Head, &ServeDonor0Bust } };
 
 void BuildExtras()

@@ -599,6 +599,42 @@ void* __fastcall PortraitLookupHook(uint8_t* manager, void* edx, const char* nam
     return nullptr;
 }
 
+// The HUD's own portrait (0x25E9xx: the character's class picked by checks, the face's name from kPortraits, the
+// lookup called at 0x25EADD with the character in esi): a custom character (customchars.h) with a portrait of its
+// own shows it, loaded and added to the list the first time.
+constexpr uint32_t kHudPortraitCall = 0x0025EADD;
+
+void* __cdecl PortraitForCharacter(uint8_t* manager, const char* name, int head, const uint8_t* character)
+{
+    const CustomCharacter* custom = CustomCharacterOf(character);
+    if (!custom || custom->hudFace.empty() || head || !manager)
+        return PortraitLookupHook(manager, nullptr, name, head);
+    if (void* found = g_OriginalPortraitLookup(manager, nullptr, custom->hudFace.c_str(), 0))
+        return found;
+    PortraitRecord record = { LoadInterfaceTexture(custom->hudFace.c_str()), nullptr, custom->hudFace.c_str() };
+    if (!record.face) {
+        LOG_WARN("Characters: %s's HUD portrait %s did not load", custom->className.c_str(), custom->face.c_str());
+        return PortraitLookupHook(manager, nullptr, name, head);
+    }
+    reinterpret_cast<void(__fastcall*)(void*, void*, const PortraitRecord*)>(uintptr_t(kPortraitListAdd))(
+        manager + 0x260, nullptr, &record);
+    LOG_INFO("Characters: %s's HUD portrait %s loaded", custom->className.c_str(), custom->face.c_str());
+    return record.face;
+}
+
+__declspec(naked) void PortraitCallStub()
+{
+    __asm {
+        push esi                   // the character
+        push dword ptr [esp + 0xC] // head
+        push dword ptr [esp + 0xC] // name
+        push ecx                   // the game manager
+        call PortraitForCharacter
+        add esp, 0x10
+        ret 8
+    }
+}
+
 } // namespace
 
 int VariantOnDisc(const void* character, int preferred)
@@ -857,6 +893,10 @@ void InstallCharacters()
         std::memcpy(portraitStub + 8, &back, 4);
         g_OriginalPortraitLookup = reinterpret_cast<PortraitLookupFn>(portraitStub);
         PatchJump(kPortraitLookup, reinterpret_cast<const void*>(&PortraitLookupHook));
+        const int32_t lookup = int32_t(kPortraitLookup) - int32_t(kHudPortraitCall + 5);
+        if (*reinterpret_cast<const uint8_t*>(uintptr_t(kHudPortraitCall)) == 0xE8 &&
+            std::memcmp(reinterpret_cast<const void*>(uintptr_t(kHudPortraitCall + 1)), &lookup, 4) == 0)
+            PatchCall(kHudPortraitCall, reinterpret_cast<const void*>(&PortraitCallStub), 5);
     } else {
         LOG_WARN("Characters: unexpected code at the HUD portrait lookup; portraits unchanged");
     }

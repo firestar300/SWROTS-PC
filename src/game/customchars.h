@@ -24,6 +24,8 @@ struct CustomCharacter {
     bool hasSaber = false;
     float saber[3] = {};     // its saber's colour (0-1), when it has one of its own
     int side = 0;            // 0 hero, 1 villain (Heroes vs Villains' default side)
+    std::string hudFace;     // the HUD portrait shown for it (a donor's path, its picture served: see customchars.cpp)
+    std::string face;        // its HUD portrait's path (interfc\hud_b\hud_face_<costume>01), when the mod has one
     std::string source;      // the file it came from
 };
 
@@ -38,6 +40,9 @@ const CustomCharacter* FindCustomCharacter(const char* className);
 // True when the mods folder has this file (relative, e.g. a custom character's pictures), from the start of the
 // game on (before the resource hooks are installed).
 bool ModFileExists(const std::string& relative);
+
+// The custom character a character is (recognised by its costume list, the port's own), or null.
+const CustomCharacter* CustomCharacterOf(const uint8_t* character);
 // The file's contents; false when there is none.
 bool ReadModFile(const std::string& relative, std::vector<uint8_t>& data);
 

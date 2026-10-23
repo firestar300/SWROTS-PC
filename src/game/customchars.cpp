@@ -19,6 +19,7 @@
 #include "core/log.h"
 #include "core/patch.h"
 #include "game/game.h"
+#include "game/resources.h"
 
 namespace swrots::game {
 
@@ -29,7 +30,6 @@ constexpr uint8_t kClassLookupBytes[] = { 0xA1, 0xE8, 0xEB, 0x68, 0x00, 0x83, 0x
 constexpr uint32_t kCreateSlot = 0x30 / 4;
 constexpr size_t kInfoCopy = 0x200;     // bytes of the base's class info copied (it is smaller; reads only)
 constexpr size_t kVtableCopy = 96;      // slots of its vtable copied
-constexpr uint32_t kCharacterVariants = 0x1E0;
 constexpr uint32_t kCharacterSaberColor = 0xF20;
 
 std::vector<CustomCharacter> g_Customs;
@@ -155,9 +155,24 @@ std::string Upper(std::string text)
     return text;
 }
 
+constexpr const char* kFaceDonor = "interfc\\hud_b\\hud_face_unlock_cody01";
+std::vector<uint8_t> g_FaceDonorData;
+bool g_FaceDonorUsed = false;
+
+// The custom portrait with the donor's own name inside (0x40, as the disc spells it).
+void ServeFaceDonor(std::vector<uint8_t>& data)
+{
+    if (g_FaceDonorData.size() < 0x68 || data.size() < 0x68)
+        return;
+    std::vector<uint8_t> out = g_FaceDonorData;
+    std::memcpy(out.data() + 0x40, data.data() + 0x40, 0x28);
+    data.swap(out);
+}
+
 void ReadCharacters(const std::wstring& mods)
 {
     g_Customs.clear();
+    g_FaceDonorUsed = false;
     WIN32_FIND_DATAW found;
     const std::wstring folder = mods + L"\\characters\\";
     HANDLE find = FindFirstFileW((folder + L"*.ini").c_str(), &found);
@@ -190,6 +205,22 @@ void ReadCharacters(const std::wstring& mods)
             c.saber[2] = b / 255.0f;
         }
         c.side = _stricmp(Profile(file, L"Side", L"Hero").c_str(), "villain") == 0 ? 1 : 0;
+        std::string costume = c.costume;
+        for (char& ch : costume)
+            ch = char(tolower(static_cast<unsigned char>(ch)));
+        const std::string face = "interfc\\hud_b\\hud_face_" + costume + "01";
+        g_Mods = mods; // (ModFileExists)
+        if (ModFileExists(face + ".stx")) {
+            c.face = face;
+            // A texture under mods\ that no PAK has decodes to nothing for the HUD (as for the menus): the portrait
+            // is served in the place of one the disc has and never shows (cut Commander Cody's), for the first
+            // custom character with a portrait.
+            if (!g_FaceDonorUsed && ReadModFile(face + ".stx", g_FaceDonorData)) {
+                g_FaceDonorUsed = true;
+                c.hudFace = kFaceDonor;
+                RegisterResourcePatch(std::string(kFaceDonor) + ".stx", &ServeFaceDonor);
+            }
+        }
         std::string source;
         for (const wchar_t* ch = found.cFileName; *ch; ++ch)
             source += char(*ch < 128 ? *ch : '?');
@@ -232,6 +263,17 @@ void InstallCustomCharacters(const std::wstring& mods)
 const std::vector<CustomCharacter>& CustomCharacters()
 {
     return g_Customs;
+}
+
+const CustomCharacter* CustomCharacterOf(const uint8_t* character)
+{
+    if (!character)
+        return nullptr;
+    const uint8_t* list = *reinterpret_cast<const uint8_t* const*>(character + kCharacterVariants);
+    for (auto& p : g_Proxies)
+        if (!p->list.empty() && p->list.data() == list)
+            return p->custom;
+    return nullptr;
 }
 
 bool ModFileExists(const std::string& relative)
