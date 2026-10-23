@@ -187,6 +187,13 @@ void SetMenuText(const char* id, const std::wstring& text)
     buffer[length + 1] = 0;
 }
 
+const wchar_t* MenuTextBuffer(const char* id)
+{
+    std::lock_guard<std::mutex> lock(g_TextLock);
+    auto it = g_Texts.find(MenuKey(id));
+    return it == g_Texts.end() ? nullptr : it->second.get();
+}
+
 void AddMenuHandler(const char* name, MenuHandlerMaker make)
 {
     for (const Handler& handler : g_Handlers)

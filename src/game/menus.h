@@ -20,6 +20,9 @@ uint32_t MenuKey(const char* name);
 // A text for a text id the game does not have (an id of the port's own, "IDS_PORT_..."); it can be changed
 // at any time and shows from the next frame on.
 void SetMenuText(const char* id, const std::wstring& text);
+// Such a text as the string table holds one (its length first, then the characters; it stays for the session), or
+// null when it was never set.
+const wchar_t* MenuTextBuffer(const char* id);
 
 // A menu action of the port's own, for an item's action string: `make` makes a handler (the menu makes one
 // for every item that names the action). Registered with the in-game menus' handlers (the HUD's list).

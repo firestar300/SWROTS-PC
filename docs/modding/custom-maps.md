@@ -14,6 +14,8 @@ mods\maps\cantina\map.ini               the map
 mods\maps\cantina\cantina_light.bin     its baked light (optional)
 mods\maps\cantina\mus_<slot>.hwx        its music (optional)
 mods\maps\cantina\load_a.stx (b, c)     its loading picture (optional)
+mods\maps\cantina\arena_small.stx       its pictures on the Select Arena screen (optional): the row's, 128x32
+mods\maps\cantina\arena_large.stx       and the large one, 256x128 (as the game's s_selduelarena_* pictures)
 mods\meshes\maps\cantina\cantina.msh    its model
 mods\meshes\maps\cantina\*.stx          its textures (named as the model names them)
 ```
@@ -23,9 +25,9 @@ Then:
 
 - **Heroes vs Villains**: its Map row (Multi Player > Heroes vs Villains); in the console `hvv map cantina`; the
   debug menu's Heroes vs Villains tab.
-- **Versus** (the game's own duels: rounds, its HUD, its duel cameras): on the Versus select screen LB / RB choose
-  the arena (top right: the game's choice or a custom map); the duel then plays on the map, whichever arena the
-  arena screen picks. In the console `versus ILuke IVader map cantina` (you against the computer).
+- **Versus** (the game's own duels: rounds, its HUD, its duel cameras): the map is an arena on the Select Arena
+  screen, after the open ones (with its own pictures, see below). In the console `versus ILuke IVader map cantina`
+  (you against the computer).
 - **Walking in it**: `devmap cantina` in the console (`devmap` alone: the floor), or its button on the debug menu's
   Game tab.
 - The launch argument `custommap:<map>` next to `devmap:1` (for example in `mods\Default_Xbox.cfg`).
@@ -143,13 +145,15 @@ duel: the head-to-head flag, Grievous Survival's player start made player 1's sp
 (220 units apart across the middle), and the arena's own camera objects (from the arena's level file as it loads)
 turned and moved from the arena's fighters onto these, their focus on these spawn points. The arena's rail was
 laid out for its own room: on a map with walls a camera adjuster brings the camera nearer the fighters, along its
-line to them, to the last place that sees them (the map's boxes). The select screen's choice rewrites the game's
-launch of the duel (`kernel::SetLaunchFilter`, just before its restart): the arena becomes the Utapau one, with
-`devmap:1 versus:1 custommap:<map>`.
+line to them, to the last place that sees them (the map's boxes). Its row on the Select Arena screen (the arena list,
+`ArenaList`: its entries built from the mission list's Duel rows, 0x2D2AB0) is an entry the port adds after the open
+arenas and Random (the cursor never moves onto a locked row, 0x2C69F0), the Utapau arena's level with the map's
+name; its pictures take places the port adds to the screen's picture sets, drawn with the map's own. Chosen, it
+rewrites the game's launch of the duel (`kernel::SetLaunchFilter`, just before its restart): the arena becomes the
+Utapau one, with `devmap:1 versus:1 custommap:<map>`.
 
 ## Not yet
 
 - Collision other than boxes (a model's own shape: ramps, stairs); fighters stand on the dev map's floor.
 - Paths for the AI (a map's own navigation).
-- A custom map on the game's own arena screen (its choice is on the select screen, LB / RB).
 - The map's own point lights and sky (its light so far: baked, ambient, and the level's lights scaled).

@@ -19,6 +19,7 @@
 
 #include "core/log.h"
 #include "core/patch.h"
+#include "game/customchars.h"
 #include "game/custommaps.h"
 #include "game/devmap.h"
 #include "kernel/kernel.h"
@@ -178,14 +179,162 @@ int g_PerSide = 4;
 // the line-up: kMaxPerSide heroes, then kMaxPerSide villains (the first g_PerSide of each play)
 std::string g_Lineup[2 * kMaxPerSide];
 int g_MapChoice = 0; // 0 the dev map's floor, then the custom maps
-// The game's own Versus on a custom map: LB/RB on its select screen choose the arena (0: the game's own choice, then
-// the custom maps); its duel's launch is then made the dev map's duel on that map (see VersusLaunch).
-int g_VersusMap = 0;
 // The Versus arenas (the missionlist's Duel levels): a duel's launch names one of them.
 constexpr const char* kDuelArenas[] = { "u103_sep_throneroom_01", "u103_sep_throneroom_02", "u107_uta_grievous_01",
     "u107_uta_grievous_02", "u108_cor_palpatine_01", "u108_cor_palpatine_02", "u110_cor_training_00",
     "u110_cor_training_01", "u110_cor_training_02", "u140_mus_theduel_01", "u140_mus_theduel_02",
     "u150_mus_theduel_01", "u150_mus_theduel_02", "u170_ep4_deathstar_02" };
+
+// --- Custom maps on the arena screen ---------------------------------------------------------------------------------
+// The arena list (ArenaList, vtable 0x5D63D8): slot 5 (0x2D2AB0) builds its entries from the mission list's Duel rows
+// (+0x5C {cap, count +0x60, data +0x64} of 16-byte entries {TString map, wide text (length first), TString, bool
+// unlocked}, added by 0x2D29A0 (thiscall on +0x5C, the entry copied); +0x58 Random's row); the port adds one a custom
+// map, the duel's level (u107_uta_grievous_01) with the map's name, after the open arenas and Random: the cursor
+// (0x2C69F0) does not move onto a locked row, and the game opens its arenas in order (the locked ones last). A row's
+// picture is SmallArenaTextSet[row] (0x2D2460: item +0x3C, set while it draws; a custom row's place in the set is
+// swapped in for that draw), the large one LargeArenaTextSet[...] (0x2D2500, slot 0x8C: the cursor +0x20, the picture
+// item +0x40, its record +0x1C), which the port points at its place for a custom row (PatchArenaScreen adds them
+// after the game's); their pictures are the map's own (mods\maps\<id>\arena_small.stx 128x32, arena_large.stx 256x128) when
+// it has them. Chosen (slot 0x88, 0x2D21A0), a custom row makes the duel's launch the dev map's duel on that map
+// (VersusLaunch).
+constexpr uint32_t kArenaVtable = 0x005D63D8;
+constexpr uint32_t kArenaBuildSlot = 0x14, kArenaChosenSlot = 0x88, kArenaCursorSlot = 0x8C, kArenaRowSlot = 0x7C;
+constexpr uint32_t kArenaBuild = 0x002D2AB0, kArenaChosen = 0x002D21A0, kArenaCursor = 0x002D2500, kArenaRow = 0x002D2460;
+constexpr uint32_t kArenaAdd = 0x002D29A0;
+constexpr uint32_t kStringInit = 0x00225100, kStringAssign = 0x00225A10, kStringFree = 0x00225230;
+constexpr const char* kArenaLevel = "u107_uta_grievous_01";
+int g_FirstCustomRow = -1; // the arena list's first custom map's row, -1 none
+int g_VersusMap = 0;
+
+std::wstring Wide(const std::string& text);
+
+using ArenaFn = void(__fastcall*)(uint8_t*, void*);
+using ArenaRowFn = void(__fastcall*)(uint8_t*, void*, uint32_t, float, int);
+
+std::string MapPicture(const CustomMap& map, const char* name)
+{
+    const std::string file = "maps\\" + map.id + "\\" + name;
+    return ModFileExists(file + ".stx") ? file : std::string();
+}
+
+void __fastcall ArenaBuildHook(uint8_t* list, void*)
+{
+    reinterpret_cast<ArenaFn>(uintptr_t(kArenaBuild))(list, nullptr);
+    const auto& maps = CustomMaps();
+    g_FirstCustomRow = -1;
+    if (maps.empty())
+        return;
+    // their rows: before the first locked one (Random's comes before it too), else last
+    const int before = *reinterpret_cast<int*>(list + 0x60);
+    int at = before;
+    for (int i = 0; i < before; ++i)
+        if (!(*reinterpret_cast<uint8_t**>(list + 0x64))[i * 16 + 0xC]) {
+            at = i;
+            break;
+        }
+    for (size_t i = 0; i < maps.size(); ++i) {
+        const std::string id = "IDS_PORT_ARENA_" + std::to_string(i);
+        SetMenuText(id.c_str(), Wide(maps[i].name));
+        struct {
+            uint32_t map;
+            const wchar_t* text;
+            uint32_t spare;
+            uint8_t unlocked, pad[3];
+        } entry = {};
+        reinterpret_cast<void(__fastcall*)(uint32_t*, void*)>(uintptr_t(kStringInit))(&entry.map, nullptr);
+        reinterpret_cast<void(__fastcall*)(uint32_t*, void*)>(uintptr_t(kStringInit))(&entry.spare, nullptr);
+        reinterpret_cast<void(__fastcall*)(uint32_t*, void*, const char*)>(uintptr_t(kStringAssign))(&entry.map, nullptr,
+            kArenaLevel);
+        entry.text = MenuTextBuffer(id.c_str());
+        entry.unlocked = 1;
+        reinterpret_cast<void(__fastcall*)(uint8_t*, void*, const void*)>(uintptr_t(kArenaAdd))(list + 0x5C, nullptr, &entry);
+        reinterpret_cast<void(__fastcall*)(uint32_t*, void*)>(uintptr_t(kStringFree))(&entry.map, nullptr);
+        reinterpret_cast<void(__fastcall*)(uint32_t*, void*)>(uintptr_t(kStringFree))(&entry.spare, nullptr);
+    }
+    // appended; moved to their place (the entries are plain 16 bytes: their strings are pooled pointers)
+    const int count = *reinterpret_cast<int*>(list + 0x60), added = count - before;
+    uint8_t* entries = *reinterpret_cast<uint8_t**>(list + 0x64);
+    if (added > 0 && at < before) {
+        std::vector<uint8_t> moved(entries + before * 16, entries + count * 16);
+        std::memmove(entries + (at + added) * 16, entries + at * 16, size_t(before - at) * 16);
+        std::memcpy(entries + at * 16, moved.data(), moved.size());
+        int& random = *reinterpret_cast<int*>(list + 0x58);
+        if (random != 100 && random >= at)
+            random += added;
+    }
+    g_FirstCustomRow = at;
+    LOG_INFO("HvV menu: %d custom map(s) on the arena screen from row %d", added, g_FirstCustomRow);
+    // the remembered cursor (the launch's +0x80) may name a row of another start's list
+    int& cursor = *reinterpret_cast<int*>(list + 0x20);
+    if (cursor < 0 || cursor >= count)
+        cursor = 0;
+}
+
+// The custom map of an arena row, or null.
+const CustomMap* RowMap(int row)
+{
+    const auto& maps = CustomMaps();
+    const int k = g_FirstCustomRow < 0 ? -1 : row - g_FirstCustomRow;
+    return k >= 0 && k < int(maps.size()) ? &maps[size_t(k)] : nullptr;
+}
+
+uint8_t* SetRecord(uint8_t* item, int index)
+{
+    uint8_t* data = item ? *reinterpret_cast<uint8_t**>(item + 8) : nullptr;
+    uint8_t* set = data ? *reinterpret_cast<uint8_t**>(data + 0x2C) : nullptr;
+    if (!set || index >= *reinterpret_cast<int*>(set + 8))
+        return nullptr;
+    return (*reinterpret_cast<uint8_t***>(set + 0xC))[index];
+}
+
+void __fastcall ArenaCursorHook(uint8_t* list, void*)
+{
+    reinterpret_cast<ArenaFn>(uintptr_t(kArenaCursor))(list, nullptr);
+    const int row = *reinterpret_cast<int*>(list + 0x20);
+    const CustomMap* map = RowMap(row);
+    uint8_t* item = *reinterpret_cast<uint8_t**>(list + 0x40);
+    if (!map || !item)
+        return;
+    uint8_t* record = SetRecord(item, 16 + (row - g_FirstCustomRow)); // after the game's 16 (locked, 14, Random)
+    if (!record)
+        return;
+    *reinterpret_cast<uint8_t**>(item + 0x1C) = record;
+    const std::string picture = MapPicture(*map, "arena_large");
+    if (!picture.empty())
+        DrawRecordWith(record, picture);
+}
+
+void __fastcall ArenaRowHook(uint8_t* list, void*, uint32_t context, float x, int row)
+{
+    const CustomMap* map = RowMap(row);
+    uint8_t* item = *reinterpret_cast<uint8_t**>(list + 0x3C);
+    uint8_t* data = item ? *reinterpret_cast<uint8_t**>(item + 8) : nullptr;
+    uint8_t* set = data ? *reinterpret_cast<uint8_t**>(data + 0x2C) : nullptr;
+    const int place = 15 + (row - g_FirstCustomRow); // after the game's 15 (14 arenas, Random)
+    if (!map || !set || row >= *reinterpret_cast<int*>(set + 8) || place >= *reinterpret_cast<int*>(set + 8)) {
+        reinterpret_cast<ArenaRowFn>(uintptr_t(kArenaRow))(list, nullptr, context, x, row);
+        return;
+    }
+    // the row's draw takes the set's entry of its row: the custom map's place stands there for it
+    uint8_t** records = *reinterpret_cast<uint8_t***>(set + 0xC);
+    std::swap(records[row], records[place]);
+    const std::string picture = MapPicture(*map, "arena_small");
+    if (!picture.empty())
+        DrawRecordWith(records[row], picture);
+    reinterpret_cast<ArenaRowFn>(uintptr_t(kArenaRow))(list, nullptr, context, x, row);
+    std::swap(records[row], records[place]);
+}
+
+void __fastcall ArenaChosenHook(uint8_t* list, void*)
+{
+    const CustomMap* map = RowMap(*reinterpret_cast<int*>(list + 0x20));
+    g_VersusMap = 0;
+    if (map)
+        for (size_t i = 0; i < CustomMaps().size(); ++i)
+            if (&CustomMaps()[i] == map)
+                g_VersusMap = int(i) + 1;
+    reinterpret_cast<ArenaFn>(uintptr_t(kArenaChosen))(list, nullptr);
+}
 
 const CustomMap* VersusMap()
 {
@@ -669,15 +818,7 @@ void Sound(uint8_t* screen, int id)
 bool __fastcall Player1EventHook(uint8_t* screen, void*, int event)
 {
     g_SelectScreen = screen;
-    if (!g_HvvMode) {
-        if ((event == kWhite || event == kBlack) && !CustomMaps().empty()) { // the game's Versus: the arena
-            const int n = int(CustomMaps().size()) + 1;
-            g_VersusMap = (g_VersusMap + (event == kBlack ? 1 : n - 1)) % n;
-            return true;
-        }
-        return reinterpret_cast<Player1EventFn>(uintptr_t(kPlayer1Event))(screen, nullptr, event);
-    }
-    if (g_PickSlot < 0)
+    if (!g_HvvMode || g_PickSlot < 0)
         return reinterpret_cast<Player1EventFn>(uintptr_t(kPlayer1Event))(screen, nullptr, event);
     if (event == kChosen) {
         const int slot = *reinterpret_cast<const int*>(screen + 0x2C);
@@ -796,20 +937,23 @@ void InstallHvvMenu()
     const uint32_t frame = uint32_t(reinterpret_cast<uintptr_t>(&SelectFrameHook));
     PatchBytes(frameSlot, &frame, 4);
     PatchCall(kPlayer1EventCall, reinterpret_cast<const void*>(&Player1EventHook), 5);
-    kernel::SetLaunchFilter(&VersusLaunch);
-}
-
-HvvPickState GetHvvPickState()
-{
-    HvvPickState s;
-    const bool shown = g_SelectScreen && GetTickCount64() - g_SelectSeen < 300;
-    if (shown && !g_HvvMode && !CustomMaps().empty()) { // the game's own Versus: the arena choice
-        s.versus = true;
-        const CustomMap* map = VersusMap();
-        s.arena = map ? map->name : "";
-        return s;
+    const auto slotIs = [](uint32_t slot, uint32_t function) {
+        return *reinterpret_cast<const uint32_t*>(uintptr_t(kArenaVtable + slot)) == function;
+    };
+    if (slotIs(kArenaBuildSlot, kArenaBuild) && slotIs(kArenaChosenSlot, kArenaChosen) &&
+        slotIs(kArenaCursorSlot, kArenaCursor) && slotIs(kArenaRowSlot, kArenaRow)) {
+        const auto patch = [](uint32_t slot, const void* hook) {
+            const uint32_t value = uint32_t(reinterpret_cast<uintptr_t>(hook));
+            PatchBytes(kArenaVtable + slot, &value, 4);
+        };
+        patch(kArenaBuildSlot, reinterpret_cast<const void*>(&ArenaBuildHook));
+        patch(kArenaChosenSlot, reinterpret_cast<const void*>(&ArenaChosenHook));
+        patch(kArenaCursorSlot, reinterpret_cast<const void*>(&ArenaCursorHook));
+        patch(kArenaRowSlot, reinterpret_cast<const void*>(&ArenaRowHook));
+    } else {
+        LOG_WARN("HvV menu: the arena screen's code is not as expected; no custom maps on it");
     }
-    return s;
+    kernel::SetLaunchFilter(&VersusLaunch);
 }
 
 } // namespace swrots::game

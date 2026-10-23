@@ -10,11 +10,4 @@ namespace swrots::game {
 // match starts (hvv.h). At every boot, after the image is loaded.
 void InstallHvvMenu();
 
-// For the overlay: the Versus select screen's arena choice.
-struct HvvPickState {
-    bool versus = false;             // the select screen is the game's own Versus
-    std::string arena;               // the arena chosen with LB/RB (empty: the game's own choice)
-};
-HvvPickState GetHvvPickState();
-
 } // namespace swrots::game

@@ -23,6 +23,7 @@
 #include "core/log.h"
 #include "core/patch.h"
 #include "game/characters.h"
+#include "game/custommaps.h"
 #include "game/customchars.h"
 #include "game/game.h"
 #include "game/menus.h"
@@ -233,13 +234,38 @@ void PatchSelectScreen(std::vector<uint8_t>& data)
 // and nothing else of them, so extras show their busts there.
 void PatchArenaScreen(std::vector<uint8_t>& data)
 {
-    std::vector<Picture> bodies;
-    size_t bodiesAt, bodiesEnd;
+    std::vector<Picture> bodies, small, large;
+    size_t bodiesAt, bodiesEnd, smallAt, smallEnd, largeAt, largeEnd;
+    // back to front (rewriting a set moves what follows it)
     if (!ReadSet(data, "FullBodyTextSet", bodies, bodiesAt, bodiesEnd) || bodies.size() != 2 * kFighterCount + 1) {
         LOG_WARN("Roster: the arena screen's pictures are not as expected");
         return;
     }
     WriteSet(data, bodiesAt, bodiesEnd, WithExtraBodies(bodies, true));
+    // the custom maps' entries (hvvmenu.cpp) take places after the game's own in both arena picture sets: copies of
+    // a game arena's pictures, drawn with the map's own (DrawRecordWith)
+    const size_t maps = CustomMaps().size();
+    if (!maps)
+        return;
+    if (!ReadSet(data, "LargeArenaTextSet", large, largeAt, largeEnd) || large.size() != 16 ||
+        !ReadSet(data, "SmallArenaTextSet", small, smallAt, smallEnd) || small.size() != 15) {
+        LOG_WARN("Roster: the arena screen's arena pictures are not as expected; no custom maps on it");
+        return;
+    }
+    // (the later set first: LargeArenaTextSet follows SmallArenaTextSet or not, either way the positions are re-read)
+    const bool largeFirst = largeAt < smallAt;
+    std::vector<Picture> newSmall = small, newLarge = large;
+    for (size_t i = 0; i < maps; ++i) {
+        newSmall.push_back(small[3]);  // the Utapau arena's (the duel's level)
+        newLarge.push_back(large[4]);
+    }
+    if (largeFirst) {
+        WriteSet(data, smallAt, smallEnd, newSmall);
+        WriteSet(data, largeAt, largeEnd, newLarge);
+    } else {
+        WriteSet(data, largeAt, largeEnd, newLarge);
+        WriteSet(data, smallAt, smallEnd, newSmall);
+    }
 }
 
 // --- Player 2's look ------------------------------------------------------------------------------
@@ -720,12 +746,38 @@ void* ExtraPicture(int extra, int kind)
     return g_Pictures[extra][kind];
 }
 
+// Records the port draws with pictures of its own (DrawRecordWith): the file, then its texture once loaded.
+struct RecordPicture {
+    std::string file;
+    void* texture = nullptr;
+    bool tried = false;
+};
+std::vector<std::pair<uint8_t*, RecordPicture>> g_RecordPictures;
+
 using TextureDrawFn = void(__fastcall*)(uint8_t*, void*, void*);
 
 void __fastcall TextureItemDrawHook(uint8_t* item, void*, void* context)
 {
     const auto draw = reinterpret_cast<TextureDrawFn>(uintptr_t(kTextureItemDraw));
     uint8_t* record = *reinterpret_cast<uint8_t**>(item + 0x1C);
+    for (auto& [own, picture] : g_RecordPictures) {
+        if (own != record || !record)
+            continue;
+        if (!picture.tried) {
+            picture.tried = true;
+            picture.texture = LoadPictureFile(picture.file.c_str());
+            if (!picture.texture)
+                LOG_WARN("Roster: %s did not load", picture.file.c_str());
+        }
+        if (!picture.texture)
+            break;
+        void*& texture = *reinterpret_cast<void**>(record + 0xC);
+        void* const kept = texture;
+        texture = picture.texture;
+        draw(item, nullptr, context);
+        texture = kept;
+        return;
+    }
     uint8_t* data = record ? *reinterpret_cast<uint8_t**>(item + 8) : nullptr;
     uint8_t* set = data ? *reinterpret_cast<uint8_t**>(data + 0x2C) : nullptr;
     const int count = set ? *reinterpret_cast<int*>(set + 8) : 0;
@@ -873,6 +925,17 @@ bool DrawSelectStrip(uint8_t* screen, uint32_t context)
     return true;
 }
 
+void DrawRecordWith(uint8_t* record, const std::string& file)
+{
+    for (auto& entry : g_RecordPictures)
+        if (entry.first == record) {
+            if (entry.second.file != file)
+                entry.second = { file };
+            return;
+        }
+    g_RecordPictures.push_back({ record, { file } });
+}
+
 const char* SelectSlotClass(int slot)
 {
     if (slot >= 0 && slot < kFighterCount)
@@ -906,6 +969,7 @@ void InstallRoster()
 {
     BuildExtras();
     std::memset(g_Pictures, 0, sizeof g_Pictures); // the textures of the last start are gone with it
+    g_RecordPictures.clear();
     std::memset(g_PicturesTried, 0, sizeof g_PicturesTried);
     const uint32_t drawSlot = kTextureItemVtable + 3 * 4;
     if (*reinterpret_cast<const uint32_t*>(uintptr_t(drawSlot)) == kTextureItemDraw) {
