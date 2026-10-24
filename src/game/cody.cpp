@@ -29,10 +29,12 @@
 #include <utility>
 
 #include "core/log.h"
+#include "input/controls.h"
 #include "game/characters.h"
 #include "game/classsetup.h"
 #include "game/customchars.h"
 #include "game/devmap.h"
+#include "game/freecam.h"
 #include "game/hvv.h"
 #include "game/meshedit.h"
 #include "game/resources.h"
@@ -41,6 +43,8 @@ namespace swrots::game {
 
 namespace {
 
+constexpr uint32_t kIsComputer = 0x00176E30;             // cdecl bool (): the AI drives the script's character
+constexpr uint32_t kScriptCharacterContext = 0x006943CC; // +0x68: the character whose script runs, +0x70 its state
 constexpr uint32_t kHeldFrames = 0x00177FF0;             // cdecl int (button, 0), in a script's turn
 constexpr uint32_t kPressed = 0x00178070;                // cdecl bool (button, 1, 0, 2)
 constexpr uint32_t kButtonHeavy = 0x006964DC, kButtonCritical = 0x006964EC; // the script's button ids (Y, B)
@@ -72,7 +76,10 @@ constexpr float kSummonCost = 500, kBombardCost = 400;
 constexpr ULONGLONG kDodgeWaitMs = 700, kRollGuardMs = 650;
 constexpr ULONGLONG kShotIntervalMs = 400;
 constexpr ULONGLONG kHelperLifeMs = 25000;
-constexpr ULONGLONG kComputerDodgeWaitMs = 2500; // the computer's Cody: one dodge in this long at most
+constexpr ULONGLONG kComputerDodgeWaitMs = 1200; // the computer's Cody: one look for a dodge in this long
+// a duel gives its fighters 1000 health (its bar a fixed scale): a blaster against a saber takes hits a third harder
+constexpr float kDamageTaken = 1.33f;
+constexpr uint32_t kCharacterInvincible = 0x5D6; // byte, "Invincible?"
 constexpr float kHelperSide = 90;            // how far beside him they come down
 constexpr float kRappelHeight = 320;         // and from how high (indoor arenas have ceilings)
 constexpr ULONGLONG kHelperEngageMs = 2500;  // they turn on his opponent once down
@@ -113,9 +120,14 @@ struct Kit {
     // also counts a player's character as the computer's while its AI drives it (the duel's intro), so it is not asked
     bool player = false;
     ULONGLONG lastShot = 0, lastFrame = 0, lastDodge = 0, rollUntil = 0;
+    float rollDir[2] = {};         // the roll asked for: where the stick pointed (world x, z), 0 for none
+    bool guarded = false;          // made invincible for a roll (its own byte kept to give back)
+    uint8_t ownInvincible = 0;
+    uint8_t* foe = nullptr;        // his opponent of the round
+    uint32_t foeId = 0;
     bool summon = false;  // asked for, made in CodyFrame
     bool bombard = false; // likewise
-    int roll = 0;         // likewise: 1 left, 2 right
+    int roll = 0;         // likewise: 1 left, 2 right, 3 the stick's side
 };
 std::unordered_map<uint8_t*, Kit> g_Kits;
 
@@ -636,6 +648,20 @@ bool BodyGenerator(const std::string& lowerName, std::vector<uint8_t>& data)
     return made;
 }
 
+// Whether the script's character may start something now: its current sequence lets it branch (the sequence's
+// record +0x30 bit 1, as the decision-frame test 0x173D70 reads it, without that test's own bookkeeping). Not while
+// gripped, knocked down, hit, rolling or falling.
+bool CanAct()
+{
+    uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(kScriptCharacterContext));
+    uint8_t* state = scripts ? At<uint8_t*>(scripts, 0x70) : nullptr;
+    if (!state)
+        return false;
+    uint8_t* record = reinterpret_cast<uint8_t*(__fastcall*)(uint8_t*, void*)>(
+        (*reinterpret_cast<void* const* const*>(state))[1])(state, nullptr);
+    return record && (At<uint32_t>(record, 0x30) >> 1 & 1) != 0;
+}
+
 } // namespace
 
 void InstallCody()
@@ -663,27 +689,29 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     if (kit.id != id) { // a new Cody where an old one was
         kit = Kit{};
         kit.id = id;
-        kit.armedAt = now + kArmAfterMs;
+        kit.armedAt = HvvActive() ? now : now + kArmAfterMs; // (the computer's: not in the duel's intro)
     }
     if (At<int32_t>(character, 0x43C) >= 0)
         kit.player = true;
-    // his health's most: a duel gives its fighters 1000 at each round, more than a blaster against a saber should have
-    if (const CustomCharacter* custom = CustomCharacterOf(character); custom && custom->health > 0) {
-        At<float>(character, kCharacterHealthMost) = custom->health;
-        At<float>(character, kCharacterHealth) = std::min(At<float>(character, kCharacterHealth), custom->health);
-    }
     float& meter = At<float>(character, kCharacterMeter);
     if (kit.lastFrame) // the meter refills
         meter = std::min(At<float>(character, kCharacterMeterMost), meter + kMeterPerSecond * float(now - kit.lastFrame) / 1000.0f);
     kit.lastFrame = now;
-    if (At<float>(character, kCharacterHealth) <= 0 || now < kit.armedAt || (HvvActive() && GetHvvState().intro)) {
+    if (At<float>(character, kCharacterHealth) <= 0 || (HvvActive() && GetHvvState().intro)) {
         Layer(kit, false);
         return;
     }
+    // a player's Cody acts once the game stops driving him (the duel's intro); the computer's after its intro
+    if (kit.player ? reinterpret_cast<bool(__cdecl*)()>(uintptr_t(kIsComputer))() : now < kit.armedAt) {
+        Layer(kit, false);
+        return;
+    }
+    // nothing new while he is gripped, down, hit, rolling or falling
+    const bool free = CanAct();
     const bool squadOut = std::any_of(g_Helpers.begin(), g_Helpers.end(), [&](const Helper& h) { return h.master == character; });
     if (!kit.player) { // shoots as any clone; his specials when his opponent is near
         uint8_t* opponent = OpponentOf(character);
-        if (!opponent || kit.summon || kit.bombard)
+        if (!opponent || !free || kit.summon || kit.bombard)
             return;
         const float* p = Position(character);
         const float* q = Position(opponent);
@@ -699,6 +727,11 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         }
         return;
     }
+    if (!free) {
+        Layer(kit, false);
+        kit.lastBlock = Held(kButtonDodge);
+        return;
+    }
     // his clones (one squad at a time), the bombardment
     if (Pressed(kButtonPush) && !squadOut && !kit.summon && meter >= kSummonCost) {
         meter -= kSummonCost;
@@ -710,13 +743,20 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         kit.bombard = true;
         Say(character, "TKE", "CMC915"); // "Concentrate fire on the target!"
     }
-    // the roll: on the press of block, to the stick's side (the left without one)
-    const bool block = Held(kButtonDodge);
-    if (block && !kit.lastBlock && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs) {
+    // the roll: on the press, where the stick points on the screen (its port's stick, by the camera's right and
+    // forward as drawn), the side nearer it once he has turned to his opponent (CodyFrame)
+    const bool dodge = Held(kButtonDodge);
+    if (dodge && !kit.lastBlock && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs) {
         kit.lastDodge = now;
-        kit.roll = Direction(0x001F54C0, instance) ? 2 : 1;
+        kit.roll = 3; // a side to be chosen
+        kit.rollDir[0] = kit.rollDir[1] = 0;
+        float x = 0, y = 0, view[16], fov = 0;
+        if (input::LeftStick(At<int32_t>(character, 0x43C), x, y) && GameRenderedView(view, fov) && std::hypot(x, y) > 0.3f) {
+            kit.rollDir[0] = x * view[0] + y * view[2]; // the camera's right (the view's first column) and forward
+            kit.rollDir[1] = x * view[8] + y * view[10];
+        }
     }
-    kit.lastBlock = block;
+    kit.lastBlock = dodge;
     // the blaster
     if (!Held(kButtonHeavy)) {
         Layer(kit, false);
@@ -732,23 +772,55 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     }
 }
 
+namespace {
+
+// A roll: facing his opponent, aside, out of reach of any hit while it lasts (the character's "Invincible?" byte,
+// +0x5D6, as Heroes vs Villains' respawns; given back after).
+void Roll(uint8_t* cody, Kit& kit, int side, ULONGLONG now)
+{
+    FaceToward(cody, OpponentOf(cody));
+    if (side == 3) { // the stick's side: by his right as he now stands (his placement's first row)
+        const float* right = reinterpret_cast<const float*>(cody + kCharacterTransform);
+        const float along = kit.rollDir[0] * right[0] + kit.rollDir[1] * right[2];
+        side = along < 0 ? 1 : 2;
+    }
+    if (!PlaySequence(cody, side == 1 ? "Cody_RollLeft" : "Cody_RollRight"))
+        return;
+    LOG_INFO("Cody: rolls %s", side == 1 ? "left" : "right");
+    if (!kit.guarded) {
+        kit.ownInvincible = At<uint8_t>(cody, kCharacterInvincible);
+        kit.guarded = true;
+    }
+    At<uint8_t>(cody, kCharacterInvincible) = 1;
+    kit.rollUntil = now + kRollGuardMs;
+}
+
+// The round is over when his opponent of the round fell (a duel brings both back for the next).
+bool RoundOver(Kit& kit)
+{
+    return kit.foe && (!Live(kit.foe, kit.foeId) || At<float>(kit.foe, kCharacterHealth) <= 0);
+}
+
+} // namespace
+
 void CodyFrame()
 {
     if (g_Kits.empty() && g_Helpers.empty() && g_Shells.empty())
         return;
     const ULONGLONG now = GetTickCount64();
-    // his clones: down, they go for his opponent; their time up (or his), they fall as clones do (the character's
-    // instant kill, vfunc +0xC8: its death, the game takes the body away; removing the object at once, while the
-    // level's lists held it, left a hole in one: 0x16B3C7)
+    // his clones: down, they go for his opponent; their time up, his or the round's, they fall as clones do (the
+    // character's instant kill, vfunc +0xC8: its death, the game takes the body away; removing the object at once,
+    // while the level's lists held it, left a hole in one: 0x16B3C7)
     for (auto it = g_Helpers.begin(); it != g_Helpers.end();) {
         const auto kit = g_Kits.find(it->master);
         const bool masterGone = kit == g_Kits.end() || !Live(it->master, kit->second.id) ||
-            At<float>(it->master, kCharacterHealth) <= 0;
+            At<float>(it->master, kCharacterHealth) <= 0 || RoundOver(kit->second);
         if (!Live(it->object, it->id)) {
             it = g_Helpers.erase(it);
             continue;
         }
         if (now >= it->until || masterGone) {
+            LOG_INFO("Cody: a clone of his falls (%s)", now >= it->until ? "his time" : "the round or Cody over");
             if (At<float>(it->object, kCharacterHealth) > 0)
                 reinterpret_cast<void(__fastcall*)(uint8_t*, void*, uint32_t)>(
                     (*reinterpret_cast<void* const* const*>(it->object))[0xC8 / 4])(it->object, nullptr, 0);
@@ -781,6 +853,17 @@ void CodyFrame()
             continue;
         }
         const bool standing = At<float>(cody, kCharacterHealth) > 0;
+        // his opponent of the round (to know its end), once one stands
+        if (standing && (!kit.foe || RoundOver(kit)))
+            if (uint8_t* foe = OpponentOf(cody); foe && foe != kit.foe) {
+                kit.foe = foe;
+                kit.foeId = At<uint32_t>(foe, 4);
+            }
+        // the roll's guard over
+        if (kit.guarded && now >= kit.rollUntil) {
+            At<uint8_t>(cody, kCharacterInvincible) = kit.ownInvincible;
+            kit.guarded = false;
+        }
         if (kit.summon) {
             kit.summon = false;
             if (standing) {
@@ -798,24 +881,18 @@ void CodyFrame()
             }
         }
         if (kit.roll) {
-            if (standing) { // facing his opponent, aside
-                FaceToward(cody, OpponentOf(cody));
-                kit.rollUntil = now + kRollGuardMs;
-                LOG_INFO("Cody: rolls %s%s", kit.roll == 1 ? "left" : "right",
-                    PlaySequence(cody, kit.roll == 1 ? "Cody_RollLeft" : "Cody_RollRight") ? "" : " (refused)");
-            }
+            if (standing)
+                Roll(cody, kit, kit.roll, now);
             kit.roll = 0;
         }
-        // the computer's Cody rolls aside now and then when his opponent comes close
-        if (standing && !kit.player && now - kit.lastDodge > kComputerDodgeWaitMs) {
-            uint8_t* opponent = OpponentOf(cody);
-            if (opponent) {
+        // the computer's Cody rolls away from his opponent's saber when it comes close, as a Jedi blocks
+        if (standing && !kit.player && now >= kit.armedAt && now - kit.lastDodge > kComputerDodgeWaitMs) {
+            if (uint8_t* opponent = OpponentOf(cody)) {
                 const float* p = Position(cody);
                 const float* q = Position(opponent);
-                kit.lastDodge = now; // looked once a wait: a roll a third of the time
-                if (std::hypot(q[0] - p[0], q[2] - p[2]) < 170.0f && (now / 7) % 3 == 0 && (FaceToward(cody, opponent), true) &&
-                    PlaySequence(cody, (now / 13) % 2 ? "Cody_RollLeft" : "Cody_RollRight")) {
-                    kit.rollUntil = now + kRollGuardMs;
+                kit.lastDodge = now; // looked once a wait: a roll half the time
+                if (std::hypot(q[0] - p[0], q[2] - p[2]) < 200.0f && (now / 7) % 2 == 0) {
+                    Roll(cody, kit, (now / 13) % 2 ? 1 : 2, now);
                     LOG_INFO("Cody: the computer's Cody rolls aside");
                 }
             }
@@ -837,16 +914,14 @@ std::vector<CodyHelper> CodyHelpers()
     return out;
 }
 
-} // namespace swrots::game
-
-namespace swrots::game {
-
 float CodyDamage(uint8_t* character, float change)
 {
     const auto kit = g_Kits.find(character);
-    if (change < 0 && kit != g_Kits.end() && GetTickCount64() < kit->second.rollUntil)
+    if (change >= 0 || kit == g_Kits.end())
+        return change;
+    if (GetTickCount64() < kit->second.rollUntil)
         return 0; // rolling: out of the way
-    return change;
+    return change * kDamageTaken;
 }
 
 } // namespace swrots::game

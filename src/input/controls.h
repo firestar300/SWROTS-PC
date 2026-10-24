@@ -70,6 +70,9 @@ bool Player2HasController();
 // (Player2Shooting), and the game does not see it.
 void SetPlayer2ShootButton(bool active);
 bool Player2Shooting();
+// A game controller port's left stick as the game last read it (the keyboard's movement keys included for player 1),
+// -1..1 each, up positive; false when the port is not open.
+bool LeftStick(int port, float& x, float& y);
 
 // The game rebooted in-process: its controller ports are closed again.
 void ResetPortsForReboot();

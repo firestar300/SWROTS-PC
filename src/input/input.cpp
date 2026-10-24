@@ -150,6 +150,15 @@ bool Player2Shooting()
     return g_Player2Shoot && GetTickCount64() - g_Player2ShotAt < 150;
 }
 
+bool LeftStick(int port, float& x, float& y)
+{
+    if (port < 0 || port >= int(std::size(g_Ports)) || !g_Ports[port].open)
+        return false;
+    x = float(g_Ports[port].last.sThumbLX) / 32767.0f;
+    y = float(g_Ports[port].last.sThumbLY) / 32767.0f;
+    return true;
+}
+
 void SetCoopInput(bool active)
 {
     if (g_CoopInput.exchange(active) != active)

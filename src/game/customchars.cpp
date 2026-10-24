@@ -1206,7 +1206,7 @@ void AddBuiltInCharacters()
     c.code = "CMC";
     c.speaker = "Commander Cody";
     c.speakerKey = "CommanderCody"; // the game's own text
-    c.health = 750; // a Jedi's 1000 was too much against a saber (play test)
+    c.health = 1000; // as a duelist's (the HUD's bar is drawn on that scale); hits on him count a third more (cody.cpp)
     c.force = 1000;
     c.side = 0;
     c.introAnimation = "ClnCom_Signal_Strike";
