@@ -522,6 +522,19 @@ void __cdecl BruteSetHealthHook(float health)
     reinterpret_cast<void(__cdecl*)(float)>(uintptr_t(kSetHealth))(health);
 }
 
+void __cdecl CloneSetHealthHook(float health)
+{
+    BruteSetHealthHook(health);
+    __try {
+        uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(kScriptCharacter));
+        uint8_t* character = scripts ? *reinterpret_cast<uint8_t**>(scripts + 0x68) : nullptr;
+        const CustomCharacter* custom = character ? CustomCharacterOf(character) : nullptr;
+        if (custom && custom->force >= 0)
+            reinterpret_cast<void(__cdecl*)(float, float)>(uintptr_t(kSetForce))(custom->force, custom->force);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
 void __cdecl BruteSetForceHook(float force, float most)
 {
     __try {
@@ -1083,6 +1096,64 @@ void ReadCharacters(const std::wstring& mods)
     FindClose(find);
 }
 
+// Pictures of the disc's served under another name (generated, written to cache\disc): their texture name (0x40, 32
+// bytes) is the new one. Built-in fighters' select head and HUD face.
+std::vector<std::pair<std::string, std::string>> g_PictureCopies; // new name, the disc's (lower case, with .stx)
+
+bool CopyPicture(const std::string& lowerName, std::vector<uint8_t>& data)
+{
+    for (const auto& [name, source] : g_PictureCopies) {
+        if (name != lowerName)
+            continue;
+        if (!ReadDiscResource(source, data) || data.size() < 0x104)
+            return false;
+        std::string texture = name.substr(name.rfind('\\') + 1);
+        texture = texture.substr(0, texture.size() - 4);
+        std::memset(data.data() + 0x40, 0, 32);
+        std::memcpy(data.data() + 0x40, texture.data(), std::min<size_t>(texture.size(), 31));
+        return true;
+    }
+    return false;
+}
+
+// Commander Cody: the cut playable Cody (ICommanderCody: its script survives, but no body, definition or tables) was a
+// clone trooper with his own rules, so he is one here: the clone class on the 212th's body (the clone's costume with its
+// plain texture set), his speaker code (CMC: his lines in the generic dialogue every duel level has), his name
+// (IDS_SPEAKER_CommanderCody), 1000 health and a 1000 meter for his specials as the cut Cody's Init gave him, the
+// signal to attack as his intro. Pictures: his select bust (the menus' PAK has it), his HUD face as his strip head.
+void AddBuiltInCharacters()
+{
+    if (FindCustomCharacter("ICody"))
+        return; // a mod's own Cody
+    CustomCharacter c;
+    c.builtIn = true;
+    c.className = "ICody";
+    c.name = "COMMANDER CODY";
+    c.title = "CLONE COMMANDER";
+    c.base = "ICloneTrooper";
+    c.costume = "Cody";
+    c.mesh = "clonetrooper\\hordeTrooper";
+    c.code = "CMC";
+    c.speaker = "Commander Cody";
+    c.speakerKey = "CommanderCody"; // the game's own text
+    c.health = 1000;
+    c.force = 1000;
+    c.side = 0;
+    c.introAnimation = "ClnCom_Signal_Strike";
+    c.selectBust = "s_selduel_codybust";
+    c.face = c.hudFace = "interfc\\hud_b\\hud_face_codyport01";
+    c.source = "(built in)";
+    // his helmet (the game's Cody unlock portrait; hud_face_cody01 is the clones' blaster icon)
+    g_PictureCopies.push_back({ "interfc\\front_end\\s_selduel_codyhead.stx", "interfc\\hud_b\\hud_face_unlock_cody01.stx" });
+    g_PictureCopies.push_back({ "interfc\\hud_b\\hud_face_codyport01.stx", "interfc\\hud_b\\hud_face_unlock_cody01.stx" });
+    g_Customs.push_back(c);
+    LOG_INFO("Custom characters: ICody (COMMANDER CODY, from ICloneTrooper), built in");
+}
+
+// A clone's Init sets its health (0x35B36D: 0x177AC0 (50, 1)); a custom character on it gets its own, and its meter
+// (Force +0xA40/+0xA44, which the clone has but leaves 0).
+constexpr uint32_t kCloneSetHealthCall = 0x0035B36D;
+
 bool ReadWhole(const std::wstring& path, std::vector<uint8_t>& data)
 {
     HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
@@ -1213,6 +1284,9 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
     g_SpeakerTexts.clear();
     g_Mods = mods;
     ReadCharacters(mods);
+    g_PictureCopies.clear();
+    AddBuiltInCharacters();
+    RegisterResourceGenerator(&CopyPicture);
     BuildVoiceArchive(gameData, cache);
     if (g_Customs.empty())
         return;
@@ -1292,6 +1366,13 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         std::memcpy(call + 1, &rel, 4);
         if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kBruteSetHealthCall)), call, 5) == 0)
             PatchCall(kBruteSetHealthCall, reinterpret_cast<const void*>(&BruteSetHealthHook), 5);
+    }
+    {
+        uint8_t call[5] = { 0xE8 };
+        const int32_t rel = int32_t(kSetHealth) - int32_t(kCloneSetHealthCall + 5);
+        std::memcpy(call + 1, &rel, 4);
+        if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kCloneSetHealthCall)), call, 5) == 0)
+            PatchCall(kCloneSetHealthCall, reinterpret_cast<const void*>(&CloneSetHealthHook), 5);
     }
     {
         uint8_t call[5] = { 0xE8 };

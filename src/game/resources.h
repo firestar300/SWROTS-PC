@@ -44,6 +44,10 @@ void RegisterResourcePatch(const std::string& lowerName, ResourcePatch patch);
 using ResourceGenerator = bool (*)(const std::string& lowerName, std::vector<uint8_t>& data);
 void RegisterResourceGenerator(ResourceGenerator generator);
 
+// Makes a generated resource now (the generators above), written to cache\disc so that a direct load from its file
+// (a picture the port loads itself) finds it; false when no generator makes it.
+bool MakeGeneratedResource(const std::string& lowerName);
+
 // A resource's file contents from the disc's PAKs; false when none has it with its data.
 bool ReadDiscResource(const std::string& lowerName, std::vector<uint8_t>& data);
 

@@ -49,6 +49,10 @@ struct CustomCharacter {
     std::string hudFace;     // the HUD portrait shown for it (a donor's path, its picture served: see customchars.cpp)
     std::string face;        // its HUD portrait's path (interfc\hud_b\hud_face_<costume>01), when the mod has one
     std::string source;      // the file it came from
+    // a fighter of the port's own, made from the game's assets (no files: Commander Cody): its Versus pictures are the
+    // disc's (selectBust, a picture the menus' PAK has) and copies of disc pictures the port writes (generated)
+    bool builtIn = false;
+    std::string selectBust;  // e.g. "s_selduel_codybust"
 };
 
 // Each start of the game image, before the classes are first looked up: reads mods\characters\*.ini and hooks the

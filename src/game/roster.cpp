@@ -719,7 +719,7 @@ void BuildExtras()
             const std::string file = "interfc\\front_end\\" + picture + ".stx";
             return ModFileExists(file); // not the disc: its index is made only once the resource hooks are in
         };
-        if (!present(head) || !present(bust)) {
+        if (!custom.builtIn && (!present(head) || !present(bust))) {
             LOG_INFO("Roster: %s has no select pictures (%s, %s); not on the Versus select screen",
                 custom.className.c_str(), head.c_str(), bust.c_str());
             continue;
@@ -731,8 +731,12 @@ void BuildExtras()
         extra.className = Keep(custom.className);
         extra.head = kStandInHead;
         extra.bust = kStandInBust;
-        extra.files[0] = Keep("interfc\\front_end\\" + head);
+        extra.files[0] = Keep("interfc\\front_end\\" + head); // a built-in fighter's: generated (customchars.cpp)
         extra.files[1] = Keep("interfc\\front_end\\" + bust);
+        if (custom.builtIn && !custom.selectBust.empty()) { // the disc's own, as Yoda's
+            extra.bust = Keep(custom.selectBust);
+            extra.files[1] = nullptr;
+        }
         for (int player = 0; player < 2; ++player) {
             const std::string body = "s_selduel_fb_" + costume + (player ? "_v2" : "_v1");
             if (present(body))
@@ -780,6 +784,7 @@ void* ExtraPicture(int extra, int kind)
         return nullptr;
     if (!g_PicturesTried[extra][kind]) {
         g_PicturesTried[extra][kind] = true;
+        MakeGeneratedResource(std::string(g_Extras[size_t(extra)].files[kind]) + ".stx"); // one the port makes
         g_Pictures[extra][kind] = LoadPictureFile(g_Extras[size_t(extra)].files[kind]);
         if (!g_Pictures[extra][kind])
             LOG_WARN("Roster: %s did not load", g_Extras[size_t(extra)].files[kind]);

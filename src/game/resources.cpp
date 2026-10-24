@@ -1438,6 +1438,11 @@ void RegisterResourceGenerator(ResourceGenerator generator)
         g_Generators.push_back(generator);
 }
 
+bool MakeGeneratedResource(const std::string& lowerName)
+{
+    return Generated(lowerName) != nullptr;
+}
+
 bool ReadDiscResource(const std::string& lowerName, std::vector<uint8_t>& data)
 {
     const PakIndex* owner = nullptr;

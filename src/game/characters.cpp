@@ -635,6 +635,7 @@ void* __cdecl PortraitForCharacter(uint8_t* manager, const char* name, int head,
         return PortraitLookupHook(manager, nullptr, name, head);
     if (void* found = g_OriginalPortraitLookup(manager, nullptr, custom->hudFace.c_str(), 0))
         return found;
+    MakeGeneratedResource(custom->hudFace + ".stx"); // a built-in fighter's, a copy of a disc picture
     PortraitRecord record = { LoadInterfaceTexture(custom->hudFace.c_str(), true), nullptr, custom->hudFace.c_str() };
     if (!record.face) {
         LOG_WARN("Characters: %s's HUD portrait %s did not load", custom->className.c_str(), custom->face.c_str());
