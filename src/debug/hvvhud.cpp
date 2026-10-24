@@ -347,8 +347,9 @@ bool HelperStanding(const uint8_t* object)
     }
 }
 
-// Over each of Commander Cody's clones (cody.h), in Versus and Heroes vs Villains: a chevron and "CODY'S CLONE", blue
-// when they fight for the player (Cody is the player's), red against.
+// Over each of Commander Cody's clones and the droid commander's droids (cody.h), in Versus and Heroes vs Villains: a
+// chevron and their mark ("CODY'S CLONE"), blue when they fight for the player (their master is the player's), red
+// against.
 void CodyMarks(const ImGuiViewport* vp, float u)
 {
     for (const game::CodyHelper& h : game::CodyHelpers()) {
@@ -367,7 +368,7 @@ void CodyMarks(const ImGuiViewport* vp, float u)
         const ImVec2 a(at.x - r, at.y - 1.6f * r), b(at.x + r, at.y - 1.6f * r), c(at.x, at.y);
         g_Draw->AddTriangleFilled(a, b, c, Faded(colour, alpha));
         g_Draw->AddTriangle(a, b, c, IM_COL32(0, 0, 0, int(200 * alpha)), 1.5f * u);
-        Text(at.x, at.y - 1.6f * r - 17 * u * k, 14 * u * k, Faded(colour, alpha), "CODY'S CLONE", 0.5f);
+        Text(at.x, at.y - 1.6f * r - 17 * u * k, 14 * u * k, Faded(colour, alpha), h.label, 0.5f);
     }
 }
 

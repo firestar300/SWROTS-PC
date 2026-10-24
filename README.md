@@ -38,6 +38,9 @@ Things the Xbox release never had:
   against the sabers: he shoots, rolls out of the way instead of blocking, and spends his meter on a
   squad of clones rappelling down beside him or a bombardment on his opponent. The computer's Cody does
   the same. See [his controls](docs/controls.md#commander-cody).
+- **Droid Commander.** Cody's Separatist counterpart: a B1 battle droid commander in its yellow markings,
+  with a blaster, a duck under the saber, droids dropping in to help and a bombardment, and its own lines.
+  See [its controls](docs/controls.md#droid-commander).
 - **Play story levels as anyone, in any costume or body.** Vader in Order 66, Anakin without his
   robe in the Jedi Temple, a 501st clone trooper, Obi-Wan in Anakin's duel outfit: pick a class, a
   costume, a texture set and a body in the debug menu's Characters tab (or `player IAnakin duel`),

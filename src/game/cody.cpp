@@ -16,6 +16,11 @@
 //   - critical (B): a bombardment: shells (the game's IExplosion) falling round his opponent, hurting none of his;
 //     he signals the strike ("Concentrate fire on the target!").
 // What the player's input asks for is made outside the scripts (CodyFrame).
+//
+// The same kit makes his Separatist counterpart, the built-in IDroidCommander (a B1 battle droid commander, the battle
+// droid class on its captain's costume and yellow markings): the captain's rapid blaster, a duck under the saber (its
+// kneel, quicker) for the roll, the droid's push-away for the rifle butt, two battle droids dropped in beside it (they
+// fall in on their own fall and landing) and the same bombardment, each from its own moves and lines (Kind).
 
 #include "game/cody.h"
 
@@ -61,6 +66,11 @@ constexpr uint32_t kCloneNextMuzzle = 0x001760B0;   // cdecl (muzzle*, count)
 constexpr uint32_t kScriptPlaySound = 0x0017AD20;   // cdecl (sound, near, 1, far, -1, 0)
 constexpr uint32_t kCloneMuzzle = 0x3D8, kCloneMuzzleData = 0x3EC, kCloneFireSound = 0x3E4; // in the instance
 constexpr char kCloneShootingLoop[] = "ctroop_atk_shooting_loop";
+// the battle droid's blaster (BattleDroid script, InitSound 0x337500 / StartFX 0x3373B0): its bolt 0x3BF8D0 (instance,
+// script, 0, spread, sound, muzzle), which plays the sound and the muzzle flash itself
+constexpr uint32_t kDroidFireBolt = 0x003BF8D0;
+constexpr uint32_t kDroidMuzzle = 0x268, kDroidFireSound = 0x24C; // in the instance
+constexpr uint32_t kButtonFast = 0x006964D8;     // X (Mouse 1): the droid commander's push-away
 constexpr uint32_t kCharacterHealth = 0x130, kCharacterHealthMost = 0x134, kCharacterMeter = 0xA40, kCharacterMeterMost = 0xA44;
 constexpr uint32_t kCharacterTransform = 0x150, kCharacterOpponent = 0x3B8, kCharacterScript = 0x434;
 constexpr uint32_t kCharacterAI = 0x9FC;
@@ -87,6 +97,7 @@ constexpr float kComputerCloseIn = 230, kComputerStrikeWithin = 130;
 constexpr ULONGLONG kComputerLookMs = 700;
 // a duel gives its fighters 1000 health (its bar a fixed scale): a blaster against a saber takes hits a third harder
 constexpr float kDamageTaken = 1.6f;
+constexpr float kHardestHit = 120; // before kDamageTaken
 // A hit's reaction: ICharacter::Reaction_Call 0x159E20, thiscall on the one hit (bump, collision, &sequence) -> true
 // when dealt with; its own early ways out (the script's "no reactions" bit, a cutscene) return true with none. It also
 // counts a hit on a player holding the block button as blocked (no damage, no reaction): a clone has no block
@@ -126,14 +137,48 @@ uint32_t Dice()
     return state;
 }
 
-bool IsCody(const uint8_t* character)
+// A fighter of the kit: its class (built in, customchars.cpp), its script's class, its moves and its lines.
+struct Kind {
+    const char* className;
+    const char* script;      // the script class its moves are added to
+    const char* helper;      // its reinforcements: their class and costume
+    const char* helperSkin;
+    const char* helperLabel; // their mark
+    bool rappel;             // they rappel down (else they drop in from the same height)
+    bool droid;              // the droid's blaster and shooting layer
+    const char* dodge;       // its dodge, and whether it goes the stick's way (a roll) or is made where it stands (a duck)
+    bool dodgeTurns;
+    const char* melee;       // its blow (the computer's; and the player's on fast attack when playerMelee)
+    bool playerMelee;
+    const char* call;        // its gesture calling the reinforcements, and the strike
+    const char* strike;
+    const char* event;       // the dialogue event its lines are said through
+    const char* callLine;
+    const char* strikeLine;
+};
+constexpr Kind kKinds[] = {
+    { "ICody", "CloneTrooper", "ICloneTrooper", "", "CODY'S CLONE", true, false, "Cody_RollRight", true,
+      "ctroop_atk_riflebutt", false, "Cody_SignalLeft", "Cody_SignalStrike",
+      "TKE", "CLC013", "CMC915" },  // "Bring up the reinforcements!", "Concentrate fire on the target!"
+    { "IDroidCommander", "BattleDroid", "IBattleDroid", "hordeBattleDroid", "COMMANDER'S DROID", false, true,
+      "Droid_Duck", false, "Droid_Pushaway", true, "Droid_Call", "Droid_Strike",
+      "TNT", "BDD951", "BDD943" },  // "Move in, corporal, we'll cover you.", "Fire!"
+};
+
+const Kind* KindOf(const uint8_t* character)
 {
     const CustomCharacter* custom = character ? CustomCharacterOf(character) : nullptr;
-    return custom && custom->builtIn && custom->className == "ICody";
+    if (!custom || !custom->builtIn)
+        return nullptr;
+    for (const Kind& kind : kKinds)
+        if (custom->className == kind.className)
+            return &kind;
+    return nullptr;
 }
 
 struct Kit {
     uint32_t id = 0;
+    const Kind* kind = nullptr;
     bool shooting = false;
     bool lastBlock = false;
     ULONGLONG armedAt = 0; // his specials from then on (not in the duel's intro)
@@ -161,6 +206,7 @@ struct Helper {
     uint8_t* object;
     uint32_t id;
     uint8_t* master;
+    const char* label;
     bool enemy;          // against the player (its master the computer's)
     ULONGLONG engageAt;  // when it turns on its master's opponent (once down)
     ULONGLONG until;
@@ -202,13 +248,18 @@ void Say(uint8_t* character, const char* event, const char* line)
     reinterpret_cast<int(__cdecl*)(const char*, const char*, int, int, int)>(uintptr_t(kSayEvent))(event, "", 1, 0, 0);
 }
 
-void Fire(uint8_t* script, uint8_t* instance)
+void Fire(const Kind& kind, uint8_t* script, uint8_t* instance)
 {
     if (!reinterpret_cast<bool(__cdecl*)()>(uintptr_t(kScriptHasTarget))())
         return;
     const float spread = reinterpret_cast<bool(__cdecl*)()>(uintptr_t(kScriptShotSpread))() ? 0.0f : 10.0f;
     uint32_t spreadBits;
     std::memcpy(&spreadBits, &spread, 4);
+    if (kind.droid) {
+        reinterpret_cast<void(__cdecl*)(uint8_t*, uint8_t*, uint32_t, uint32_t, uint32_t, uint32_t)>(uintptr_t(kDroidFireBolt))(
+            instance, script, 0, spreadBits, At<uint32_t>(instance, kDroidFireSound), At<uint32_t>(instance, kDroidMuzzle));
+        return;
+    }
     reinterpret_cast<void(__cdecl*)(uint8_t*, uint8_t*, uint32_t, uint32_t, uint32_t, uint32_t)>(uintptr_t(kCloneFireBolt))(
         instance, script, 0, spreadBits, At<uint32_t>(instance, kCloneMuzzleData), At<uint32_t>(instance, kCloneMuzzle));
     reinterpret_cast<void(__cdecl*)(uint8_t*, int)>(uintptr_t(kCloneNextMuzzle))(instance + kCloneMuzzle, 4);
@@ -222,7 +273,7 @@ void Layer(Kit& kit, bool on)
         return;
     if (on)
         reinterpret_cast<void(__cdecl*)(const char*, int, int, float, int, int, int, int, int)>(uintptr_t(kScriptPlayLayer))(
-            kCloneShootingLoop, 0, 0, 1.0f, 5, 2, 0, 1, 2);
+            kit.kind && kit.kind->droid ? "BDroid_Atk_Shooting_Loop" : kCloneShootingLoop, 0, 0, 1.0f, 5, 2, 0, 1, 2);
     else
         reinterpret_cast<void(__cdecl*)(int, int)>(uintptr_t(kScriptStopLayer))(2, 5);
     kit.shooting = on;
@@ -287,18 +338,22 @@ bool PlaySequence(uint8_t* character, const char* name)
         character, nullptr, record, 0.0f, 0, 0, 1.0f);
 }
 
-// --- His moves: sequences of the port's on the clone class (only in matches) ---
+// --- Their moves: sequences of the port's on their script classes (only in matches) ---
 struct OwnMove {
+    const char* script;
     const char* name;
     const char* animation;
     float speed;
     uint16_t handle;
 };
 OwnMove g_Moves[] = {
-    { "Cody_RollLeft", "CTroop_Nav_RollOut_L", 1.7f, 0 }, // the roll out of cover, quicker: a dodge
-    { "Cody_RollRight", "CTroop_Nav_RollOut_R", 1.7f, 0 },
-    { "Cody_SignalLeft", "ClnCom_Signal_Left", 1.6f, 0 },     // calling his clones in
-    { "Cody_SignalStrike", "ClnCom_Signal_Strike", 2.4f, 0 }, // calling the strike in (his intro's, quicker)
+    { "CloneTrooper", "Cody_RollRight", "CTroop_Nav_RollOut_R", 1.7f, 0 },    // the roll out of cover, quicker: a dodge
+    { "CloneTrooper", "Cody_SignalLeft", "ClnCom_Signal_Left", 1.6f, 0 },     // calling his clones in
+    { "CloneTrooper", "Cody_SignalStrike", "ClnCom_Signal_Strike", 2.4f, 0 }, // calling the strike in (his intro's, quicker)
+    { "BattleDroid", "Droid_Duck", "BDroid_Nav_KneelIn_V2", 2.2f, 0 },        // its kneel, quick: under the saber
+    { "BattleDroid", "Droid_Pushaway", "BDroid_Atk_Pushaway", 1.2f, 0 },      // its shove (its attack row: AddDroidRows)
+    { "BattleDroid", "Droid_Call", "Bdroid_Atk_PanicShoot", 1.4f, 0 },        // waving its arms for help
+    { "BattleDroid", "Droid_Strike", "BDroid_Atk_Shooting_In", 1.0f, 0 },     // pointing its blaster: fire
 };
 constexpr int kMoveCount = int(std::size(g_Moves));
 constexpr uint32_t kSetup = 0x006965D8;
@@ -326,16 +381,25 @@ template <int K> bool __fastcall MoveFn(uint8_t* self, void*, uint32_t, uint32_t
         setup, nullptr, reinterpret_cast<const char*>(uintptr_t(0x0059C07C)), 0x7D00 + K);
 }
 
+constexpr ClassSequenceFn kMoveFns[] = { &MoveFn<0>, &MoveFn<1>, &MoveFn<2>, &MoveFn<3>, &MoveFn<4>, &MoveFn<5>, &MoveFn<6> };
+static_assert(std::size(kMoveFns) == kMoveCount, "one function per move");
+
 int __cdecl MoveSequences(const char* shortName, ClassSequenceFn* fns, int max)
 {
-    if (!BootIsMatch() || _stricmp(shortName, "CloneTrooper") != 0 || max < kMoveCount || !FindCustomCharacter("ICody"))
+    if (!BootIsMatch())
         return 0;
-    fns[0] = &MoveFn<0>;
-    fns[1] = &MoveFn<1>;
-    fns[2] = &MoveFn<2>;
-    fns[3] = &MoveFn<3>;
-    LOG_INFO("Cody: his rolls and signal added to the clone trooper's moves");
-    return kMoveCount;
+    const Kind* kind = nullptr;
+    for (const Kind& k : kKinds)
+        if (_stricmp(shortName, k.script) == 0 && FindCustomCharacter(k.className))
+            kind = &k;
+    if (!kind)
+        return 0;
+    int count = 0;
+    for (int i = 0; i < kMoveCount && count < max; ++i)
+        if (_stricmp(g_Moves[i].script, kind->script) == 0)
+            fns[count++] = kMoveFns[i];
+    LOG_INFO("Cody: %s's moves added to the %s class (%d)", kind->className, kind->script, count);
+    return count;
 }
 
 // --- His clones rappel down ---
@@ -348,20 +412,19 @@ bool RopesReady()
     return ropes && (*reinterpret_cast<const uint32_t*>(ropes + 0xC) & 0x40000) != 0;
 }
 
-void CallSquad(uint8_t* cody, bool enemy, ULONGLONG now)
+void CallSquad(uint8_t* cody, const Kind& kind, bool enemy, ULONGLONG now)
 {
-
-    const bool rappel = RopesReady();
+    const bool rappel = kind.rappel && RopesReady();
     int made = 0;
     for (int side = -1; side <= 1; side += 2) {
         float m[16];
         std::memcpy(m, cody + kCharacterTransform, sizeof m);
         for (int k = 0; k < 3; ++k) // beside him, a step back
             m[12 + k] += m[k] * kHelperSide * float(side) - m[8 + k] * 40.0f;
-        if (rappel)
+        if (rappel || !kind.rappel) // a droid drops in from the same height
             m[13] += kRappelHeight;
         std::string error;
-        uint8_t* clone = SpawnHelper("ICloneTrooper", std::string(), cody, enemy, m, error);
+        uint8_t* clone = SpawnHelper(kind.helper, kind.helperSkin, cody, enemy, m, error);
         if (!clone) {
             LOG_WARN("Cody: a clone of his could not come (%s)", error.c_str());
             continue;
@@ -369,11 +432,11 @@ void CallSquad(uint8_t* cody, bool enemy, ULONGLONG now)
         const bool roped = rappel && PlaySequence(clone, "CTroop_Rappel_Loop");
         if (rappel && !roped)
             LOG_WARN("Cody: his clone has no rappel here; it drops in");
-        g_Helpers.push_back({ clone, At<uint32_t>(clone, 4), cody, enemy, now + (roped ? kHelperEngageMs : 0), now + kHelperLifeMs });
+        g_Helpers.push_back({ clone, At<uint32_t>(clone, 4), cody, kind.helperLabel, enemy,
+            now + (roped || !kind.rappel ? kHelperEngageMs : 0), now + kHelperLifeMs });
         ++made;
     }
-    LOG_INFO("Cody: %d of his clones called in%s", made, rappel ? ", rappelling" : "");
-
+    LOG_INFO("Cody: %d of %s's reinforcements called in%s", made, kind.className, rappel ? ", rappelling" : "");
 }
 
 // --- The bombardment ---
@@ -708,7 +771,7 @@ bool CanAct(uint8_t* scripts)
     if (name[0] == 'R' && ((name[1] >= '1' && name[1] <= '9' && name[2] == '_') || name[1] == '_'))
         return false;
     static const char* const kCaught[] = { "Fall", "ForceGrasp", "Stun", "Shock", "Death", "Dismember", "KD_", "HitRe",
-        "Rappel", "Cody_" };
+        "Rappel", "Cody_", "Droid_", "Grab", "_GR", "Kill_", "Launch", "Juggle", "WS_" };
     for (const char* part : kCaught)
         if (std::strstr(name, part))
             return false;
@@ -739,6 +802,54 @@ bool __fastcall ReactionCallHook(uint8_t* character, void*, void* bump, void* co
     return dealt;
 }
 
+// The battle droid's script turn: its StateManager (0x3383B0, the clone's twin, same first bytes), the kit after it.
+constexpr uint32_t kDroidStateManager = 0x003383B0;
+constexpr uint8_t kStateManagerBytes[] = { 0x56, 0x57, 0x8B, 0x3D, 0xC0, 0x64, 0x69, 0x00 }; // push esi; push edi; mov edi, [0x6964C0]
+using StateManagerFn = void(__fastcall*)(uint8_t*, void*, uint32_t, uint32_t);
+StateManagerFn g_OriginalDroidStateManager = nullptr;
+
+void __fastcall DroidStateManagerHook(uint8_t* script, void*, uint32_t a, uint32_t b)
+{
+    g_OriginalDroidStateManager(script, nullptr, a, b);
+    const uint8_t* context = *reinterpret_cast<uint8_t* const*>(uintptr_t(kScriptCharacterContext));
+    uint8_t* instance = *reinterpret_cast<uint8_t**>(uintptr_t(0x006964C0));
+    if (context)
+        CloneKitFrame(script, instance, *reinterpret_cast<uint8_t* const*>(context + 0x68));
+}
+
+uint8_t* Trampoline(uint32_t address, const uint8_t* bytes, uint32_t length)
+{
+    uint8_t* s = AllocStub(length + 5);
+    std::memcpy(s, bytes, length);
+    s[length] = 0xE9;
+    const int32_t rel = int32_t(address + length) - int32_t(uintptr_t(s) + length + 5);
+    std::memcpy(s + length + 1, &rel, 4);
+    return s;
+}
+
+// The droid's shove as the droid commander's own move (Droid_Pushaway): the attack table's row for the droid's own
+// (BDroid_Atk_Pushaway: damage, range, knockback) under its name too.
+constexpr const char* kDroidTable = "meshes\\chars\\common\\a_battledroid.csv";
+
+void AddDroidRows(std::vector<uint8_t>& data)
+{
+    const std::string text(data.begin(), data.end());
+    const std::string key = "BDroid_Atk_Pushaway,";
+    size_t at = text.find(key);
+    if (at == std::string::npos || (at > 0 && text[at - 1] != '\n')) {
+        LOG_WARN("Cody: the battle droid's attack table has no push-away row");
+        return;
+    }
+    const size_t end = text.find('\n', at);
+    std::string row = "Droid_Pushaway" + text.substr(at + key.size() - 1, (end == std::string::npos ? text.size() : end) - at - key.size() + 1);
+    if (!row.empty() && row.back() == '\r')
+        row.pop_back();
+    if (!data.empty() && data.back() != '\n')
+        data.insert(data.end(), { '\r', '\n' });
+    row += "\r\n";
+    data.insert(data.end(), row.begin(), row.end());
+}
+
 } // namespace
 
 void InstallCody()
@@ -749,19 +860,22 @@ void InstallCody()
     g_ShellOwners.clear();
     for (OwnMove& move : g_Moves)
         move.handle = 0;
-    if (!FindCustomCharacter("ICody"))
+    if (std::none_of(std::begin(kKinds), std::end(kKinds), [](const Kind& k) { return FindCustomCharacter(k.className) != nullptr; }))
         return;
     AddClassSequences(&MoveSequences);
+    if (FindCustomCharacter("IDroidCommander")) {
+        if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kDroidStateManager)), kStateManagerBytes, sizeof kStateManagerBytes) == 0) {
+            static uint8_t* stub = Trampoline(kDroidStateManager, kStateManagerBytes, sizeof kStateManagerBytes);
+            g_OriginalDroidStateManager = reinterpret_cast<StateManagerFn>(stub);
+            PatchJump(kDroidStateManager, reinterpret_cast<const void*>(&DroidStateManagerHook));
+        } else {
+            LOG_WARN("Cody: unexpected code at the battle droid's turn; the droid commander has no kit");
+        }
+        RegisterResourcePatch(kDroidTable, &AddDroidRows);
+    }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kReactionCall)), kReactionCallBytes, sizeof kReactionCallBytes) == 0) {
         // the stub lives in the port's memory and survives reboots; the jump goes into every new image
-        static uint8_t* stub = [] {
-            uint8_t* s = AllocStub(sizeof kReactionCallBytes + 5);
-            std::memcpy(s, kReactionCallBytes, sizeof kReactionCallBytes);
-            s[sizeof kReactionCallBytes] = 0xE9;
-            const int32_t rel = int32_t(kReactionCall + sizeof kReactionCallBytes) - int32_t(uintptr_t(s) + sizeof kReactionCallBytes + 5);
-            std::memcpy(s + sizeof kReactionCallBytes + 1, &rel, 4);
-            return s;
-        }();
+        static uint8_t* stub = Trampoline(kReactionCall, kReactionCallBytes, sizeof kReactionCallBytes);
         g_OriginalReactionCall = reinterpret_cast<ReactionCallFn>(stub);
         PatchJump(kReactionCall, reinterpret_cast<const void*>(&ReactionCallHook));
     } else {
@@ -773,7 +887,8 @@ void InstallCody()
 
 void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
 {
-    if (!IsCody(character) || !instance)
+    const Kind* kind = KindOf(character);
+    if (!kind || !instance)
         return;
     Kit& kit = g_Kits[character];
     const uint32_t id = At<uint32_t>(character, 4);
@@ -781,6 +896,7 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     if (kit.id != id) { // a new Cody where an old one was
         kit = Kit{};
         kit.id = id;
+        kit.kind = kind;
         kit.armedAt = HvvActive() ? now : now + kArmAfterMs; // (the computer's: not in the duel's intro)
     }
     if (At<int32_t>(character, 0x43C) >= 0)
@@ -839,12 +955,12 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
             meter -= kSummonCost;
             kit.lastSummon = now;
             kit.summon = true;
-            Say(character, "TKE", "CLC013");
+            Say(character, kind->event, kind->callLine);
         } else if (apart > 250 && apart < kComputerCallsWithin && canBombard && meter >= kBombardCost + 100) {
             meter -= kBombardCost;
             kit.lastBombard = now;
             kit.bombard = true;
-            Say(character, "TKE", "CMC915");
+            Say(character, kind->event, kind->strikeLine);
         }
         return;
     }
@@ -880,14 +996,16 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         meter -= kSummonCost;
         kit.lastSummon = now;
         kit.summon = true;
-        Say(character, "TKE", "CLC013"); // "Bring up the reinforcements!"
+        Say(character, kind->event, kind->callLine);
     }
     if (kit.bombardAsked && canBombard && fresh(kit.bombardAsked)) {
         meter -= kBombardCost;
         kit.lastBombard = now;
         kit.bombard = true;
-        Say(character, "TKE", "CMC915"); // "Concentrate fire on the target!"
+        Say(character, kind->event, kind->strikeLine);
     }
+    if (kind->playerMelee && Pressed(kButtonFast) && !kit.melee) // the droid's shove (the clone's rifle butt is its own)
+        kit.melee = true;
     // the roll, where the stick pointed (CodyFrame)
     if (kit.rollAsked && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs && meter >= kRollCost && fresh(kit.rollAsked)) {
         kit.lastDodge = now;
@@ -906,7 +1024,7 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     if (now - kit.lastShot >= kShotIntervalMs) {
         kit.lastShot = now;
         meter -= kShotCost;
-        Fire(script, instance);
+        Fire(*kind, script, instance);
     }
 }
 
@@ -917,6 +1035,13 @@ namespace {
 // his forward row). While it lasts no hit lands on him (ReactionCallHook and CodyDamage).
 void Roll(uint8_t* cody, Kit& kit, float dx, float dz, ULONGLONG now)
 {
+    if (!kit.kind->dodgeTurns) { // a duck where it stands
+        if (PlaySequence(cody, kit.kind->dodge)) {
+            kit.rollAt = now;
+            LOG_INFO("Cody: %s ducks", kit.kind->className);
+        }
+        return;
+    }
     if (std::hypot(dx, dz) < 0.01f)
         if (uint8_t* opponent = OpponentOf(cody)) {
             const float* p = Position(cody);
@@ -933,7 +1058,7 @@ void Roll(uint8_t* cody, Kit& kit, float dx, float dz, ULONGLONG now)
         reinterpret_cast<void(__fastcall*)(uint8_t*, void*, const float*)>(
             (*reinterpret_cast<void* const* const*>(cody))[0x1F4 / 4])(cody, nullptr, m);
     }
-    if (!PlaySequence(cody, "Cody_RollRight"))
+    if (!PlaySequence(cody, kit.kind->dodge))
         return;
     kit.rollAt = now;
     LOG_INFO("Cody: rolls (%.2f, %.2f)", dx, dz);
@@ -1015,14 +1140,14 @@ void CodyFrame()
         if (kit.summon) {
             kit.summon = false;
             if (canAct) {
-                PlaySequence(cody, "Cody_SignalLeft"); // he waves them in
-                CallSquad(cody, !kit.player, now);
+                PlaySequence(cody, kit.kind->call); // he waves them in
+                CallSquad(cody, *kit.kind, !kit.player, now);
             }
         }
         if (kit.bombard) {
             kit.bombard = false;
             if (uint8_t* target = canAct ? OpponentOf(cody) : nullptr) {
-                PlaySequence(cody, "Cody_SignalStrike"); // the strike signal
+                PlaySequence(cody, kit.kind->strike); // the strike signal
                 for (int i = 0; i < kShells; ++i)
                     g_Shells.push_back({ cody, kit.id, target, now + kFirstShellMs + ULONGLONG(i) * kShellGapMs });
                 LOG_INFO("Cody: bombardment on %p", target);
@@ -1037,7 +1162,7 @@ void CodyFrame()
             kit.melee = false;
             if (canAct) {
                 FaceToward(cody, OpponentOf(cody));
-                PlaySequence(cody, "ctroop_atk_riflebutt");
+                PlaySequence(cody, kit.kind->melee);
             }
         }
         ++it;
@@ -1046,14 +1171,14 @@ void CodyFrame()
 
 bool KeepsLimbs(const uint8_t* character)
 {
-    return IsCody(character);
+    return KindOf(character) != nullptr;
 }
 
 std::vector<CodyHelper> CodyHelpers()
 {
     std::vector<CodyHelper> out;
     for (const Helper& h : g_Helpers)
-        out.push_back({ h.object, h.master, h.enemy });
+        out.push_back({ h.object, h.master, h.enemy, h.label });
     return out;
 }
 
@@ -1064,7 +1189,10 @@ float CodyDamage(uint8_t* character, float change)
         return change;
     if (Guarded(kit->second, GetTickCount64()))
         return 0; // rolling: out of the way
-    return change * kDamageTaken;
+    if (At<float>(character, kCharacterHealth) <= 0)
+        return change; // already down (the game's own end of him)
+    // a blow the game deals a trooper or a droid as a kill (its one-hit reactions: -1000) counts as a hard one
+    return std::max(change, -kHardestHit) * kDamageTaken;
 }
 
 } // namespace swrots::game

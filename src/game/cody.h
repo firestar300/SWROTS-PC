@@ -30,6 +30,7 @@ struct CodyHelper {
     uint8_t* object;
     uint8_t* master;
     bool enemy; // against the player (its Cody the computer's)
+    const char* label; // its mark ("CODY'S CLONE")
 };
 std::vector<CodyHelper> CodyHelpers();
 

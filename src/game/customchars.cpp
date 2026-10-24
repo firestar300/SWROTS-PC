@@ -108,6 +108,10 @@ void BuildList(Proxy& p, const uint8_t* baseList)
     p.textureSet = 0;
     for (int i = 0; i < 6 && !p.custom->textureSet.empty() && baseList; ++i) {
         const char*& suffix = *reinterpret_cast<const char**>(p.list.data() + 0x14 + i * 4);
+        if (suffix && _stricmp(suffix, p.custom->textureSet.c_str()) == 0) { // one of the base's own
+            p.textureSet = i + 1;
+            break;
+        }
         if (!suffix) {
             suffix = p.custom->textureSet.c_str();
             p.textureSet = i + 1;
@@ -941,7 +945,7 @@ uint8_t* __fastcall CreateCustom(uint8_t* info, void*)
         *reinterpret_cast<const float**>(character + kCharacterSaberColor) = p->custom->saber;
     if (p->textureSet) { // its own texture set
         *reinterpret_cast<int*>(character + kCharacterTextureSet) = p->textureSet;
-        if (!p->custom->textureSetFile.empty())
+        if (!p->custom->textureSetFile.empty() && !DeclareDiscResource(p->custom->textureSetFile))
             DeclareGeneratedResource(p->custom->textureSetFile, 0);
     }
     g_Made.push_back(character);
@@ -1186,6 +1190,47 @@ bool CopyPicture(const std::string& lowerName, std::vector<uint8_t>& data)
     return false;
 }
 
+// Cody's Separatist counterpart: a B1 battle droid commander, the battle droid class on its captain's costume
+// (hordeBattleDroidCaptain, list index 5: the rapid blaster and the captain's pulse bolt) with the yellow markings
+// (texture set _var01), its speaker code BDD (the captain's BDC has no lines), 1000 health and a 1000 meter as Cody's.
+// Its kit is Cody's (cody.cpp). Pictures: none of a B1 on the disc; the random bust and head stand in
+// unless a mod gives its own (interfc\front_end\s_selduel_droidbust.stx / s_selduel_droidhead.stx,
+// interfc\hud_b\hud_face_droidport01.stx).
+void AddDroidCommander()
+{
+    if (FindCustomCharacter("IDroidCommander"))
+        return;
+    CustomCharacter c;
+    c.builtIn = true;
+    c.className = "IDroidCommander";
+    c.name = "DROID COMMANDER";
+    c.title = "SEPARATIST DROID";
+    c.base = "IBattleDroid";
+    c.costume = "hordeBattleDroidCaptain";
+    c.mesh = "battledroid\\hordeBattleDroid";
+    c.code = "BDD";
+    c.speaker = "Battle droid";
+    c.speakerKey = "Battledroid";
+    c.health = 1000;
+    c.force = 1000;
+    c.side = 1;
+    c.introAnimation = "BDroid_Atk_Shooting_In";
+    c.introLine = "BDD945";              // "Ready weapons."
+    c.outroAnimation = "BDroid_Atk_Shooting_Out";
+    c.outroLine = "BDD963";              // "Jedi down. Situation normal."
+    c.textureSet = "_var01";             // the yellow markings
+    c.textureSetFile = "meshes\\chars\\battledroid\\hordebattledroid_var01.stx";
+    c.selectBust = ModFileExists("interfc\\front_end\\s_selduel_droidbust.stx") ? "s_selduel_droidbust" : "s_selduel_randombust";
+    c.face = c.hudFace = "interfc\\hud_b\\hud_face_droidport01";
+    c.source = "(built in)";
+    if (!ModFileExists("interfc\\front_end\\s_selduel_droidhead.stx"))
+        g_PictureCopies.push_back({ "interfc\\front_end\\s_selduel_droidhead.stx", "interfc\\front_end\\s_selduel_randomhead.stx" });
+    if (!ModFileExists("interfc\\hud_b\\hud_face_droidport01.stx"))
+        g_PictureCopies.push_back({ "interfc\\hud_b\\hud_face_droidport01.stx", "interfc\\front_end\\s_selduel_randomhead.stx" });
+    g_Customs.push_back(c);
+    LOG_INFO("Custom characters: IDroidCommander (DROID COMMANDER, from IBattleDroid), built in");
+}
+
 // Commander Cody: the cut playable Cody (ICommanderCody: its script survives, but no body, definition or tables) was a
 // clone trooper with his own rules, so he is one here: the clone class on the 212th's body (the clone's costume with its
 // plain texture set), his speaker code (CMC: his lines in the generic dialogue every duel level has), his name
@@ -1193,6 +1238,7 @@ bool CopyPicture(const std::string& lowerName, std::vector<uint8_t>& data)
 // signal to attack as his intro. Pictures: his select bust (the menus' PAK has it), his HUD face as his strip head.
 void AddBuiltInCharacters()
 {
+    AddDroidCommander();
     if (FindCustomCharacter("ICody"))
         return; // a mod's own Cody
     CustomCharacter c;
@@ -1227,8 +1273,9 @@ void AddBuiltInCharacters()
 }
 
 // A clone's Init sets its health (0x35B36D: 0x177AC0 (50, 1)); a custom character on it gets its own, and its meter
-// (Force +0xA40/+0xA44, which the clone has but leaves 0).
+// (Force +0xA40/+0xA44, which the clone has but leaves 0). The battle droid's the same (0x338B06: 30).
 constexpr uint32_t kCloneSetHealthCall = 0x0035B36D;
+constexpr uint32_t kDroidSetHealthCall = 0x00338B06;
 
 bool ReadWhole(const std::wstring& path, std::vector<uint8_t>& data)
 {
@@ -1449,6 +1496,13 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         std::memcpy(call + 1, &rel, 4);
         if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kCloneSetHealthCall)), call, 5) == 0)
             PatchCall(kCloneSetHealthCall, reinterpret_cast<const void*>(&CloneSetHealthHook), 5);
+    }
+    {
+        uint8_t call[5] = { 0xE8 };
+        const int32_t rel = int32_t(kSetHealth) - int32_t(kDroidSetHealthCall + 5);
+        std::memcpy(call + 1, &rel, 4);
+        if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kDroidSetHealthCall)), call, 5) == 0)
+            PatchCall(kDroidSetHealthCall, reinterpret_cast<const void*>(&CloneSetHealthHook), 5);
     }
     {
         uint8_t call[5] = { 0xE8 };

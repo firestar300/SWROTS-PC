@@ -95,3 +95,19 @@ He waves his clones in and signals the strike, and says so; in Versus he has an 
 weapons.", "Target eliminated."). His specials wait 8 seconds into each round. The
 computer's Cody uses the same: he calls his squad and his bombardments when his opponent is near, and up close he
 rolls away from the saber or strikes with his rifle butt, from the same meter.
+
+## Droid Commander
+
+Cody's Separatist counterpart, a B1 battle droid commander with yellow markings, plays the same way with the same
+meter, costs and waits:
+
+| Pad (PlayStation) | Keyboard and mouse (default) | What it does | Meter |
+|---|---|---|---|
+| Y (Triangle), held | Mouse 2, held | fires its blaster | 20 a shot |
+| X (Square) | Mouse 1 | shoves its opponent away | - |
+| White (L1) | Q | ducks under the saber (no hit lands in the middle of the duck); one a second | 150 |
+| RT (R2) | F | waves for help: two battle droids drop in beside it and fight for 25 seconds, marked "COMMANDER'S DROID" | 500 |
+| B (Circle) | E | the same bombardment as Cody's ("Fire!") | 600 |
+
+Its intro and win: "Ready weapons." and "Jedi down. Situation normal." A blow that would destroy a battle droid at
+once (a Jedi's droid finishers) only hurts it hard, as it does Cody.
