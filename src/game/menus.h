@@ -24,7 +24,7 @@ void SetMenuText(const char* id, const std::wstring& text);
 // null when it was never set.
 const wchar_t* MenuTextBuffer(const char* id);
 // Texts asked for by one id answered with another's (e.g. the keyboard's wording): `redirect` gets the id's key and
-// gives the key to look up (the same for none).
+// gives the key to look up (the same for none). Several can be set (each its own ids).
 void SetMenuTextRedirect(uint32_t (*redirect)(uint32_t key));
 
 // A menu action of the port's own, for an item's action string: `make` makes a handler (the menu makes one

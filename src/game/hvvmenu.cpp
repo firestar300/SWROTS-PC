@@ -766,8 +766,33 @@ uint8_t* MakeButton()
 uint8_t* __fastcall MakeButtonSlot(uint8_t*, void*) { return MakeButton(); }
 void __fastcall Nothing(uint8_t*, void*) {}
 
+// The pause screen during a match: Restart HvV and Quit HvV, their questions in the match's words.
+uint32_t MatchTexts(uint32_t key)
+{
+    static const char* const kPairs[][2] = { { "IDS_PAUSE_RESTART_MISSION", "IDS_PORT_HVV_RESTART" },
+        { "IDS_PAUSE_QUIT_MISSION", "IDS_PORT_HVV_QUIT" }, { "IDS_PAUSE_RESTART", "IDS_PORT_HVV_RESTART" },
+        { "IDS_PAUSE_QUIT", "IDS_PORT_HVV_QUIT" }, { "IDS_PAUSE_RESTART_MESSAGE", "IDS_PORT_HVV_RESTART_MESSAGE" },
+        { "IDS_PAUSE_QUIT_MESSAGE", "IDS_PORT_HVV_QUIT_MESSAGE" } };
+    static uint32_t keys[std::size(kPairs)][2];
+    if (!keys[0][0])
+        for (size_t i = 0; i < std::size(kPairs); ++i)
+            for (int k = 0; k < 2; ++k)
+                keys[i][k] = MenuKey(kPairs[i][k]);
+    if (!HvvActive())
+        return key;
+    for (const auto& pair : keys)
+        if (pair[0] == key)
+            return pair[1];
+    return key;
+}
+
 void InstallScreens()
 {
+    SetMenuText("IDS_PORT_HVV_RESTART", L"Restart HvV");
+    SetMenuText("IDS_PORT_HVV_QUIT", L"Quit HvV");
+    SetMenuText("IDS_PORT_HVV_RESTART_MESSAGE", L"Are you sure you want to restart the match? Its score will be lost.");
+    SetMenuText("IDS_PORT_HVV_QUIT_MESSAGE", L"Are you sure you want to quit the match? Its score will be lost.");
+    SetMenuTextRedirect(&MatchTexts);
     std::memcpy(g_ValueVtable, reinterpret_cast<const void*>(uintptr_t(kOnOffVtable)), sizeof g_ValueVtable);
     g_OnOffDraw = reinterpret_cast<DrawFn>(uintptr_t(g_ValueVtable[3]));
     g_OnOffEvent = reinterpret_cast<ItemEventFn>(uintptr_t(g_ValueVtable[4]));

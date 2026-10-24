@@ -35,17 +35,25 @@ TableFindFn g_OriginalTableFind = nullptr;
 std::mutex g_TextLock;
 std::unordered_map<uint32_t, std::unique_ptr<wchar_t[]>> g_Texts;
 
-uint32_t (*g_TextRedirect)(uint32_t) = nullptr;
+std::vector<uint32_t (*)(uint32_t)> g_TextRedirects;
 
 void* __fastcall TableFindHook(uint8_t* table, void*, uint32_t* out, const uint32_t* key)
 {
     uint32_t redirected = 0;
-    if (key && g_TextRedirect) {
-        redirected = g_TextRedirect(*key);
+    for (auto redirect : g_TextRedirects) {
+        if (!key)
+            break;
+        redirected = redirect(*key);
         if (redirected != *key) {
             void* result = g_OriginalTableFind(table, nullptr, out, &redirected);
             if (out && *out)
                 return result;
+            std::lock_guard<std::mutex> lock(g_TextLock); // or one of the port's own texts
+            auto it = g_Texts.find(redirected);
+            if (out && it != g_Texts.end()) {
+                *out = uint32_t(reinterpret_cast<uintptr_t>(it->second.get()));
+                return result;
+            }
         }
     }
     void* result = g_OriginalTableFind(table, nullptr, out, key);
@@ -200,7 +208,8 @@ void SetMenuText(const char* id, const std::wstring& text)
 
 void SetMenuTextRedirect(uint32_t (*redirect)(uint32_t key))
 {
-    g_TextRedirect = redirect;
+    if (std::find(g_TextRedirects.begin(), g_TextRedirects.end(), redirect) == g_TextRedirects.end())
+        g_TextRedirects.push_back(redirect);
 }
 
 const wchar_t* MenuTextBuffer(const char* id)
