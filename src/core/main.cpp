@@ -23,6 +23,7 @@
 #include "debug/menu.h"
 #include "game/aliases.h"
 #include "game/characters.h"
+#include "game/classsetup.h"
 #include "game/coop.h"
 #include "game/customchars.h"
 #include "game/custommaps.h"
@@ -174,6 +175,7 @@ static void StartGame(const void* launchData)
     debug::InstallConsoleHooks();
     game::InstallDevOptions(g_Boot.debugDisplays);
     game::InstallGameFixes();
+    game::InstallClassSetup();
     game::InstallCustomCharacters(g_Boot.paths.mods, g_Boot.paths.gameData, g_Boot.paths.cache);
     game::InstallVersus();
     game::InstallRoster();

@@ -14,11 +14,15 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <array>
 #include <memory>
 #include <sstream>
+#include <utility>
 
 #include "core/log.h"
 #include "core/patch.h"
+#include "game/classsetup.h"
+#include "game/devmap.h"
 #include "game/game.h"
 #include "game/menus.h"
 #include "kernel/kernel.h"
@@ -176,6 +180,17 @@ size_t& LineTurn(const void* lines)
 
 // StartEntry returns 0 when it refuses the entry (another line is on) and the engine asks again every frame (a saber
 // lock's HIT for seconds), else the started or queued line's id: the character's next line is taken only then.
+// A duel intro's or outro's line (SayEvent "TNT" / "KIL" in the "Versus" context, see IntroSequences), waiting for
+// the dialogue engine to start it (it may refuse and ask again on later frames): the character's INT / WIN lines
+// are said for it when it has them.
+struct DuelLine {
+    const uint8_t* speaker = nullptr;
+    const char* event = nullptr; // "TNT" or "KIL", as asked
+    const char* own = nullptr;   // "INT" or "WIN"
+    ULONGLONG until = 0;
+};
+DuelLine g_DuelLine;
+
 int __fastcall StartEntryHook(uint8_t* engine, void*, uint8_t* speaker, int entry, int a, int b, int c)
 {
     const CustomCharacter* custom = speaker && g_VoiceServed ? CustomCharacterOf(speaker) : nullptr;
@@ -183,8 +198,13 @@ int __fastcall StartEntryHook(uint8_t* engine, void*, uint8_t* speaker, int entr
         return g_StartEntry(engine, nullptr, speaker, entry, a, b, c);
     uint8_t* e = *reinterpret_cast<uint8_t**>(engine + kDialogueEntries) + size_t(entry) * kDialogueEntrySize;
     const char* name = *reinterpret_cast<const char**>(e + 0x14);
+    const char* duel = nullptr; // this entry answers the duel's line: its INT / WIN lines first
+    if (g_DuelLine.speaker == speaker && name && GetTickCount64() < g_DuelLine.until &&
+        _strnicmp(name, g_DuelLine.event, 3) == 0)
+        duel = g_DuelLine.own;
+    for (int pass = duel ? 0 : 1; pass < 2; ++pass)
     for (const auto& event : custom->voice) {
-        if (!name || _strnicmp(name, event.first.c_str(), 3) != 0 || event.second.empty())
+        if (!name || event.second.empty() || _strnicmp(pass == 0 ? duel : name, event.first.c_str(), 3) != 0)
             continue;
         size_t& turn = LineTurn(&event.second);
         const char* line = PooledString(event.second[turn % event.second.size()]);
@@ -195,11 +215,39 @@ int __fastcall StartEntryHook(uint8_t* engine, void*, uint8_t* speaker, int entr
         id = line;
         const int result = g_StartEntry(engine, nullptr, speaker, entry, a, b, c);
         id = own;
-        if (result)
+        if (result) {
             ++turn;
+            if (duel)
+                g_DuelLine = {};
+            LOG_INFO("Custom characters: %s says %s (%s)", custom->className.c_str(), line, name);
+        }
         return result;
     }
     return g_StartEntry(engine, nullptr, speaker, entry, a, b, c);
+}
+
+// The duel's say (0x17ACC0, cdecl (event, context, ...): the current script's character says a line of the event;
+// first bytes mov eax, [0x6943CC]). A custom character playing another duelist's intro (Intro=) has a base whose
+// speaker has no lines for the "Versus" context: its line is asked without it (the speaker's taunts and kills).
+constexpr uint32_t kSayEvent = 0x0017ACC0;
+constexpr uint8_t kSayEventBytes[] = { 0xA1, 0xCC, 0x43, 0x69, 0x00 };
+using SayEventFn = int(__cdecl*)(const char*, const char*, int, int, int);
+SayEventFn g_SayEvent = nullptr;
+
+int __cdecl SayEventHook(const char* event, const char* context, int a, int b, int c)
+{
+    const CustomCharacter* custom = nullptr;
+    uint8_t* character = nullptr;
+    if (context && event && strcmp(context, "Versus") == 0) {
+        uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(0x006943CC));
+        character = scripts ? *reinterpret_cast<uint8_t**>(scripts + 0x68) : nullptr;
+        custom = character ? CustomCharacterOf(character) : nullptr;
+    }
+    if (!custom)
+        return g_SayEvent(event, context, a, b, c);
+    const bool intro = _strnicmp(event, "TNT", 3) == 0;
+    g_DuelLine = { character, intro ? "TNT" : "KIL", intro ? "INT" : "WIN", GetTickCount64() + 4000 };
+    return g_SayEvent(event, custom->intro >= 0 ? "" : context, a, b, c);
 }
 
 // The custom lines' files and texts, all characters'.
@@ -336,8 +384,9 @@ void ForceRules(uint8_t* inst, uint8_t* classObject, const CustomCharacter& cust
             inst[0x2D9] = custom.forcePowers & 16 ? 1 : 0;
         }
     }
-    if (call(0x00176E30)) // the computer's character: its Force is the AI's
-        return;
+    // the computer's character (0x176E30) offers every power it can pay for; its attack table's rows (the Force
+    // class's, added to the base's: ForceRows) choose among them by range and facing, its conditions are not asked
+    const bool ai = call(0x00176E30);
     // the gate (nothing else chosen, ...), as Vader's
     if (inst[0x1DA] || call(0x002BD150) || !call(0x002BC160) || inst[0x2F2])
         return;
@@ -345,11 +394,18 @@ void ForceRules(uint8_t* inst, uint8_t* classObject, const CustomCharacter& cust
         *reinterpret_cast<const uint32_t*>(uintptr_t(0x006964E8)), 0, 0, 10, 1, 0);
     const bool push = taps >= 1, lightning = Pressed(0x006964F4), saberThrow = Pressed(0x00696500);
     const bool heal = Pressed(0x00696514) && Pressed(0x00696518);
-    const bool canPush = inst[0x2DC] != 0, canGrip = inst[0x2DB] != 0, canLightning = inst[0x2DD] != 0;
-    const bool canThrow = inst[0x2DF] && !inst[0x2F9], canHeal = inst[0x2D9] != 0;
+    const float force = ai ? reinterpret_cast<float(__cdecl*)()>(uintptr_t(0x00177B10))() : 0.0f;
+    const auto affords = [&](uint32_t costAt) { return !ai || force >= *reinterpret_cast<float*>(inst + costAt); };
+    const bool canPush = inst[0x2DC] && affords(0x33C), canGrip = inst[0x2DB] && affords(0x340);
+    const bool canLightning = inst[0x2DD] && affords(0x330), canThrow = inst[0x2DF] && !inst[0x2F9] && affords(0x338);
+    // heal: the computer's only below its health threshold (0x2BCF60)
+    const bool canHeal = inst[0x2D9] && (!ai || reinterpret_cast<float(__cdecl*)()>(uintptr_t(0x00177B40))() <
+        reinterpret_cast<float(__cdecl*)()>(uintptr_t(0x002BCF60))());
     if (canGrip) // the grip's target (jedi_functions: 0x426190 (inst, class object, 0x1E0, 24, 350))
         reinterpret_cast<void(__cdecl*)(uint8_t*, uint8_t*, int, float, float)>(uintptr_t(0x00426190))(inst,
             classObject, 0x1E0, 24.0f, 350.0f);
+    if (ai && !call(0x002BD030)) // the character's "Allow Force Powers"
+        return;
     const uint32_t alt = reinterpret_cast<bool(__cdecl*)(int)>(uintptr_t(0x001741A0))(0x32) ? 2 : 0;
     const bool back = Direction(0x001F5440, inst), left = Direction(0x001F5480, inst), right = Direction(0x001F54C0, inst);
     // each power: back, left, right, then any way
@@ -407,6 +463,57 @@ void __cdecl BruteSetForceHook(float force, float most)
     reinterpret_cast<void(__cdecl*)(float, float)>(uintptr_t(kSetForce))(force, most);
 }
 
+// The computer's choice among the moves its rules offer is its attack table's (a_<class>.csv, one per script
+// class: TAttackTable::Cache 0x1ADFF0 from ICharacter::Init, bound to the class's sequences by name, 0x1ABEB0): a
+// row gives a move its range, facing, bias and damage; an offered move without one is taken at any distance. The
+// Jedi Brute's has no Force rows: the Force class's (ForceFrom=) are added to it, those it lacks. The Jedi Brute's
+// own rules never offer a Force move, so the game's brutes choose as before.
+constexpr const char* kForceBaseTable = "meshes\\chars\\common\\a_jdbrute.csv";
+std::string g_ForceRowsFrom; // the Force class's table, e.g. "meshes\chars\common\a_vader.csv"
+
+void AddForceRows(std::vector<uint8_t>& data)
+{
+    std::vector<uint8_t> donor;
+    if (g_ForceRowsFrom.empty() || !ReadDiscResource(g_ForceRowsFrom, donor))
+        return;
+    const auto rowName = [](const std::string& line) { return line.substr(0, line.find(',')); };
+    const auto lines = [](const std::vector<uint8_t>& bytes) {
+        std::vector<std::string> out;
+        std::string line;
+        for (uint8_t b : bytes) {
+            if (b == '\n') {
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+                out.push_back(line);
+                line.clear();
+            } else {
+                line += char(b);
+            }
+        }
+        if (!line.empty())
+            out.push_back(line);
+        return out;
+    };
+    std::vector<std::string> own = lines(data);
+    std::string added;
+    int count = 0;
+    for (const std::string& line : lines(donor)) {
+        const std::string name = rowName(line);
+        static const char* const kForceMoves[] = { "ForcePush", "ForceGrasp", "ForceLightning", "ForceHeal", "ForceSaberThrow" };
+        if (std::none_of(std::begin(kForceMoves), std::end(kForceMoves),
+                [&](const char* p) { return _strnicmp(name.c_str(), p, strlen(p)) == 0; }))
+            continue;
+        if (std::any_of(own.begin(), own.end(), [&](const std::string& o) { return _stricmp(rowName(o).c_str(), name.c_str()) == 0; }))
+            continue;
+        added += line + "\r\n";
+        ++count;
+    }
+    if (!data.empty() && data.back() != '\n')
+        data.insert(data.end(), { '\r', '\n' });
+    data.insert(data.end(), added.begin(), added.end());
+    LOG_INFO("Custom characters: %s gets %d Force rows from %s", kForceBaseTable, count, g_ForceRowsFrom.c_str());
+}
+
 void __cdecl BruteRulesHook(uint8_t* inst, uint8_t* classObject)
 {
     reinterpret_cast<RulesFn>(uintptr_t(kBruteRules))(inst, classObject);
@@ -417,6 +524,99 @@ void __cdecl BruteRulesHook(uint8_t* inst, uint8_t* classObject)
         if (custom && custom->forceControls && inst && classObject)
             ForceRules(inst, classObject, *custom);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+// A duelist's Versus intro and outro for a custom character (Intro=). Each duelist class has two sequence functions
+// (<prefix>_Intro / _Outro: the animation of the same name, the line said at an animation event, SayEvent "TNT" /
+// "KIL" in the "Versus" context), which the duel finds by name in the character's class's records (0x27B550:
+// "%s_%s" of [char +0x324] and "Intro"/"Outro", looked up by 0x150D60). The donor's functions are added to the
+// base class's setup (classsetup.h) as they are, through wrappers that hand them a scratch class object (their
+// only use of it is the handle slot they write, which would be one of the base's own); the duel's name for the
+// character is the donor's prefix (at 0x27B5A2: push eax ("Intro"/"Outro"); push edi (the name); lea eax,
+// [esp+0x1C]).
+struct Duelist {
+    const char* className;
+    const char* prefix;
+    uint32_t intro, outro;
+    const char* cameras; // cinematics\introcamera\<cameras>_Intro_Cam.cin
+};
+constexpr Duelist kDuelists[] = {
+    { "IVader", "Vader", 0x0048A990, 0x0048AAA0, "Vader" },
+    { "IAnakin", "Anakin", 0x00314A10, 0x00314AF0, "Anakin" },
+    { "ICinDrallig", "Cin", 0x0034CAB0, 0x0034CBA0, "CinDrallig" },
+    { "IDooku", "Dooku", 0x00372FF0, 0x003730D0, "Dooku" },
+    { "IMace", "Mace", 0x00421AC0, 0x00421BA0, "Mace" },
+    { "IObiwan", "Obi", 0x00447090, 0x00447170, "Obiwan" },
+    { "IOldObiwan", "OldObiwan", 0x00461170, 0x00461250, "obiold" },
+    { "ISerra", "Serra", 0x00474450, 0x00474530, "Serra" },
+};
+constexpr int kMaxIntroFns = 16;
+uint32_t g_IntroTargets[kMaxIntroFns] = {};
+alignas(16) uint8_t g_ScratchClass[0x2000] = {};
+
+template <int K> bool __fastcall IntroFn(uint8_t*, void*, uint32_t a, uint32_t b)
+{
+    return reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint32_t, uint32_t)>(uintptr_t(g_IntroTargets[K]))(
+        g_ScratchClass, nullptr, a, b);
+}
+
+template <int... K> constexpr std::array<ClassSequenceFn, sizeof...(K)> IntroFns(std::integer_sequence<int, K...>)
+{
+    return { &IntroFn<K>... };
+}
+constexpr auto kIntroFns = IntroFns(std::make_integer_sequence<int, kMaxIntroFns>());
+
+int __cdecl IntroSequences(const char* shortName, ClassSequenceFn* fns, int max)
+{
+    // only where intros play (a Versus duel, Heroes vs Villains): the added sequences' animations become the class's
+    // required ones, which another level need not have
+    if (!BootIsMatch())
+        return 0;
+    int count = 0;
+    bool added[std::size(kDuelists)] = {};
+    for (const CustomCharacter& c : g_Customs) {
+        if (c.intro < 0 || added[c.intro] || c.base.size() < 2 || _stricmp(c.base.c_str() + 1, shortName) != 0)
+            continue;
+        if (count + 2 > max || count + 2 > kMaxIntroFns)
+            break;
+        added[c.intro] = true;
+        const Duelist& d = kDuelists[c.intro];
+        g_IntroTargets[count] = d.intro;
+        fns[count] = kIntroFns[size_t(count)];
+        ++count;
+        g_IntroTargets[count] = d.outro;
+        fns[count] = kIntroFns[size_t(count)];
+        ++count;
+        LOG_INFO("Custom characters: %s plays %s's duel intro and outro", c.className.c_str(), d.className);
+    }
+    return count;
+}
+
+constexpr uint32_t kIntroName = 0x0027B5A2;
+constexpr uint8_t kIntroNameBytes[] = { 0x50, 0x57, 0x8D, 0x44, 0x24, 0x1C };
+const char* g_IntroName = nullptr;
+
+const char* __stdcall IntroName(const uint8_t* character, const char* name)
+{
+    const CustomCharacter* custom = CustomCharacterOf(character);
+    return custom && custom->intro >= 0 ? kDuelists[custom->intro].prefix : name;
+}
+
+__declspec(naked) void IntroNameEntry()
+{
+    __asm {
+        pushad
+        push edi
+        push esi
+        call IntroName
+        mov g_IntroName, eax
+        popad
+        push eax
+        push g_IntroName
+        lea eax, [esp + 0x1C]
+        push 0x0027B5A8
+        ret
     }
 }
 
@@ -629,7 +829,8 @@ void ReadCharacters(const std::wstring& mods)
         c.force = force.empty() ? -1.0f : std::clamp(float(atof(force.c_str())), 0.0f, 10000.0f);
         const std::string health = Profile(file, L"Health");
         c.health = health.empty() ? -1.0f : std::clamp(float(atof(health.c_str())), 1.0f, 100000.0f);
-        c.forceControls = !Profile(file, L"ForceFrom").empty();
+        c.forceFrom = Profile(file, L"ForceFrom");
+        c.forceControls = !c.forceFrom.empty();
         {
             const std::string powers = Upper(Profile(file, L"ForcePowers"));
             if (!powers.empty()) {
@@ -640,6 +841,14 @@ void ReadCharacters(const std::wstring& mods)
                     if (powers.find(p.name) != std::string::npos)
                         c.forcePowers |= p.bit;
             }
+        }
+        if (const std::string intro = Profile(file, L"Intro"); !intro.empty()) {
+            for (size_t i = 0; i < std::size(kDuelists); ++i)
+                if (_stricmp(intro.c_str(), kDuelists[i].className) == 0 && _stricmp(intro.c_str(), c.base.c_str()) != 0)
+                    c.intro = int(i);
+            if (c.intro < 0 && _stricmp(intro.c_str(), c.base.c_str()) != 0)
+                LOG_WARN("Custom characters: %ls: Intro=%s is not a duelist with an intro of its own", found.cFileName,
+                    intro.c_str());
         }
         c.hilt = Profile(file, L"Hilt");
         if (!c.hilt.empty() && _strnicmp(c.hilt.c_str(), "Meshes", 6) != 0) // "lsaberluke\lsaberluke" alone too
@@ -869,6 +1078,19 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         g_StartEntry = reinterpret_cast<StartEntryFn>(startEntryStub);
         PatchJump(kStartEntry, reinterpret_cast<const void*>(&StartEntryHook));
     }
+    g_DuelLine = {};
+    if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kSayEvent)), kSayEventBytes, sizeof kSayEventBytes) == 0) {
+        static uint8_t* sayStub = [] { // once: the port's memory outlives the game's reboots
+            uint8_t* stub = AllocStub(sizeof kSayEventBytes + 5);
+            std::memcpy(stub, kSayEventBytes, sizeof kSayEventBytes);
+            stub[sizeof kSayEventBytes] = 0xE9;
+            const int32_t rel = int32_t(kSayEvent + sizeof kSayEventBytes) - int32_t(uintptr_t(stub) + sizeof kSayEventBytes + 5);
+            std::memcpy(stub + sizeof kSayEventBytes + 1, &rel, 4);
+            return stub;
+        }();
+        g_SayEvent = reinterpret_cast<SayEventFn>(sayStub);
+        PatchJump(kSayEvent, reinterpret_cast<const void*>(&SayEventHook));
+    }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kSaberSetup)), kSaberSetupBytes, sizeof kSaberSetupBytes) == 0)
         PatchCall(kSaberSetup, reinterpret_cast<const void*>(&SaberSetupHook), sizeof kSaberSetupBytes);
     g_Made.clear();
@@ -901,6 +1123,17 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kBruteRulesCall)), call, 5) == 0)
             PatchCall(kBruteRulesCall, reinterpret_cast<const void*>(&BruteRulesHook), 5);
     }
+    g_ForceRowsFrom.clear();
+    for (const CustomCharacter& c : g_Customs) {
+        if (!c.forceControls || _stricmp(c.base.c_str(), "IJDBrute") != 0 || c.forceFrom.size() < 2)
+            continue;
+        std::string table = "meshes\\chars\\common\\a_" + c.forceFrom.substr(1) + ".csv";
+        for (char& ch : table)
+            ch = char(tolower(static_cast<unsigned char>(ch)));
+        g_ForceRowsFrom = table; // one table per base: the first character's Force class
+        RegisterResourcePatch(kForceBaseTable, &AddForceRows);
+        break;
+    }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kJediSetup)), kJediSetupBytes, sizeof kJediSetupBytes) == 0) {
         static uint8_t* jediStub = [] { // once: the port's memory outlives the game's restarts
             uint8_t* s = AllocStub(13);
@@ -918,11 +1151,25 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         g_OriginalJediSetup = reinterpret_cast<JediSetupFn>(jediStub);
         PatchJump(kJediSetup, reinterpret_cast<const void*>(&JediSetupHook));
     }
+    if (std::any_of(g_Customs.begin(), g_Customs.end(), [](const CustomCharacter& c) { return c.intro >= 0; })) {
+        if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kIntroName)), kIntroNameBytes, sizeof kIntroNameBytes) == 0) {
+            AddClassSequences(&IntroSequences);
+            PatchJump(kIntroName, reinterpret_cast<const void*>(&IntroNameEntry));
+            PatchNop(kIntroName + 5, sizeof kIntroNameBytes - 5);
+        } else {
+            LOG_WARN("Custom characters: the duel intro's name is not as expected; custom characters keep the base's intro");
+        }
+    }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kSpeakerNameStore)), kSpeakerNameStoreBytes,
             sizeof kSpeakerNameStoreBytes) == 0)
         PatchCall(kSpeakerNameStore, reinterpret_cast<const void*>(&SpeakerNameStore), sizeof kSpeakerNameStoreBytes);
     else
         LOG_WARN("Custom characters: the subtitles' speaker name is not as expected; custom characters keep the base's");
+}
+
+const char* IntroCameras(const CustomCharacter& custom)
+{
+    return custom.intro >= 0 ? kDuelists[custom.intro].cameras : nullptr;
 }
 
 const std::vector<CustomCharacter>& CustomCharacters()

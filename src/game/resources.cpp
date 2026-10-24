@@ -1273,9 +1273,38 @@ bool AnimationLookupResolved(void* self, void* edx, void* script, void* classInf
         const PakIndex* owner = nullptr;
         const PakIndex::Entry* entry = FindElsewhere(g_LevelIndex,
             [&](const PakIndex* index) { return index->FindFileWithData(file, kAnimationType); }, owner);
-        if (entry && LoadUndeclared(g_LevelScene, entry->name, *entry)) {
+        const auto endsWith = [&](const char* tail) {
+            const size_t n = strlen(tail);
+            return file.size() > n && file.compare(file.size() - n, n, tail) == 0;
+        };
+        const bool duelAnimation = endsWith("_intro.bnm") || endsWith("_outro.bnm");
+        if (entry && !duelAnimation && LoadUndeclared(g_LevelScene, entry->name, *entry)) {
             ++resolved;
             continue;
+        }
+        if (entry && duelAnimation && found && found->count > 0 && found->data[0]) {
+            // Another duelist's Versus intro or outro, asked for by a class a custom character plays it on (Intro=,
+            // customchars.cpp): the class finds animations only in its own folder, that of the animations it found
+            // (declared in the duelist's own folder, it would not be found; the level may hold it there already).
+            std::string other = static_cast<const char*>(found->data[0]) + 4;
+            for (char& c : other)
+                c = char(tolower(static_cast<unsigned char>(c)));
+            other += ".bnm";
+            const PakIndex* otherOwner = nullptr;
+            const PakIndex::Entry* sibling = FindElsewhere(g_LevelIndex,
+                [&](const PakIndex* index) { return index->FindFileWithData(other, kAnimationType); }, otherOwner);
+            if (sibling) {
+                const std::string own = sibling->name.substr(0, sibling->name.rfind('\\') + 1) + file;
+                {
+                    std::lock_guard<std::mutex> lock(g_AliasLock);
+                    g_Aliases[own] = entry->name;
+                }
+                if (LoadUndeclared(g_LevelScene, own, *entry)) {
+                    LOG_INFO("Declare: %s as %s", entry->name.c_str(), own.c_str());
+                    ++resolved;
+                }
+                continue;
+            }
         }
         if (entry)
             continue;

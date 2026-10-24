@@ -37,7 +37,10 @@ struct CustomCharacter {
     // Force powers on a base whose controls have none (ForceFrom=IVader: the Jedi's Force controls, as Vader's; the
     // Jedi Brute's): which ones (ForcePowers=, the Jedi's defaults when empty: push, grip, saber throw, heal)
     bool forceControls = false;
+    std::string forceFrom;   // that class (ForceFrom=), e.g. "IVader": its attack table's Force rows for the computer
     int forcePowers = -1;    // bits: 1 push, 2 grip, 4 saber throw, 8 lightning, 16 heal; -1 the defaults
+    int intro = -1;          // whose Versus intro and outro it plays (Intro=, a duelist: its animations, line timing and
+                             // cameras), an index into the port's duelists; -1 the base's own
     int side = 0;            // 0 hero, 1 villain (Heroes vs Villains' default side)
     std::string hudFace;     // the HUD portrait shown for it (a donor's path, its picture served: see customchars.cpp)
     std::string face;        // its HUD portrait's path (interfc\hud_b\hud_face_<costume>01), when the mod has one
@@ -59,6 +62,8 @@ bool ModFileExists(const std::string& relative);
 
 // The custom character a character is (recognised by its costume list, the port's own), or null.
 const CustomCharacter* CustomCharacterOf(const uint8_t* character);
+// The duel cameras' name of the duelist whose intro a custom character plays (Intro=), or null for the base's.
+const char* IntroCameras(const CustomCharacter& custom);
 // The file's contents; false when there is none.
 bool ReadModFile(const std::string& relative, std::vector<uint8_t>& data);
 

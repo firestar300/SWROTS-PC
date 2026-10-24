@@ -46,6 +46,8 @@ Force=1000               ; the Force it holds (optional; the base's: the Jedi Br
 ForceFrom=IVader         ; Force controls on a base without them (optional; the Jedi Brute so far: push, grip by
                          ; holding the push, saber throw, heal, as Vader's)
 ForcePowers=Push Grip SaberThrow Heal ; which (optional; Lightning too if listed)
+Intro=IVader             ; whose Versus intro and outro it plays (optional; the base's): IAnakin, ICinDrallig, IDooku,
+                         ; IMace, IObiwan, IOldObiwan, ISerra or IVader
 Side=Hero                ; Hero or Villain: its side in Heroes vs Villains by default
 Speaker=Luke             ; its name in subtitles (optional; the name's first word)
 Code=                    ; whose lines it says, a dialogue speaker code such as AKN or OBW (optional; the base's)
@@ -54,6 +56,8 @@ Code=                    ; whose lines it says, a dialogue speaker code such as 
 BAT=luk001 luk002        ; battle cries
 TNT=luk003 luk004        ; taunts
 KIL=luk008 luk009        ; after a kill
+INT=luk010               ; in its Versus intro (optional; else a TNT line)
+WIN=luk011               ; on winning a Versus round (optional; else a KIL line)
 
 [Subtitles]              ; optional: the texts of its own lines
 LUK001=For the Rebellion!
@@ -103,8 +107,16 @@ as Vader's: the Force button tapped pushes (back, left or right with the stick f
 the saber-throw button throws, both stick clicks heal, and lightning when listed in `ForcePowers=` (the script
 instance's enable bytes +0x2DC push, +0x2DB grip, +0x2DF throw, +0x2DD lightning, +0x2D9 heal; their costs +0x330..
 as the Jedi set-up 0x400EE0 sets them, which the Jedi Brute's Init leaves out). The second stance has its own set.
-Its Force sounds are the base's (the Jedi Brute has none: the moves are silent so far). The computer's Maul does not
-use them yet (its moves come from the a_ table, which has no Force rows for the Jedi Brute).
+Its Force sounds are the base's (the Jedi Brute has none: the moves are silent so far).
+
+The computer uses them too. Its rules are the same ones (the AI runs the class's player rules: what they offer on a
+decision frame are its candidates, 0x175D60), so the port offers it every power it can pay for (the Force at least
+the power's cost, heal only below its health threshold, and only while the character's "Allow Force Powers" is on,
+as Vader's do), and its attack table chooses among them: a class's `a_<class>.csv` (one per script class, bound to
+its moves by name) gives each move its range, facing and odds. The Jedi Brute's has no Force rows, so the
+`ForceFrom=` class's are added to it as it loads (`a_vader.csv`'s ForcePush, ForceGrasp, ForceLightning, ForceHeal
+and ForceSaberThrow rows, those it lacks). The game's own Jedi Brutes share that table but their rules never offer a
+Force move, and they hold no Force: they fight as before.
 
 ## How it works
 
@@ -158,6 +170,22 @@ stays in view).
 In the duel a fighter needs intro and outro cameras (`cinematics\introcamera\<name>_Intro_Cam.cin`, outro the
 same): a custom character uses its base's, and a base that was never a duelist (the Jedi Brute) Vader's (without
 them the duel's start waits forever and a round's end crashes).
+
+### Its intro and outro
+
+A duelist's intro and outro (the win at a round's end) are sequences of its class (`Vader_Intro`, `Vader_Outro`:
+the animation of the same name, and the line said at a moment of it, a taunt in the intro and a kill line in the
+outro, from the dialogue entries for Versus). The duel plays the sequence named after the fighter's character
+(0x27B550: `<name>_Intro`), so a custom character plays its base's; a base that was never a duelist (the Jedi Brute)
+has none and just stands there. With `Intro=` it plays that duelist's, with its cameras: the duelist's two sequence
+functions are added to the base class's own when the class is set up (src/game/classsetup.cpp: after the class's
+own, before its end marker, so each gets a record as the class's own do; they are handed a scratch class object,
+since the handle slot they write would be one of the base's own), its animations are declared in the base class's
+animation folder (the class finds its animations only there), and the duel asks for the duelist's name.
+
+Its line in them is its `INT` line (intro) or `WIN` line (outro) when it has them, else a `TNT` or `KIL` line of its
+own, else the base speaker's: with `Intro=`, the base's speaker has no lines for the Versus context, so the line is
+asked for without it (0x17ACC0).
 
 The duel keeps a slot's fighter for the player whose chosen name equals the fighter's class name (0x27B7D0,
 compared at 0x27B8CD and 0x27B983); a custom character's fighter is its base class, so the port compares the chosen

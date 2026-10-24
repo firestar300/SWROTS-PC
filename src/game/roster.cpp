@@ -717,7 +717,10 @@ void BuildExtras()
         extra.titleId = Keep("IDS_PORT_" + upper + "_TITLE");
         SetMenuText(extra.nameId, Wide(custom.name));
         SetMenuText(extra.titleId, Wide(custom.title));
-        extra.cameras = Keep(custom.base.size() > 1 && custom.base[0] == 'I' ? custom.base.substr(1) : custom.base);
+        if (const char* cameras = IntroCameras(custom)) // the duelist's whose intro it plays (timed to its animation)
+            extra.cameras = cameras;
+        else
+            extra.cameras = Keep(custom.base.size() > 1 && custom.base[0] == 'I' ? custom.base.substr(1) : custom.base);
         for (int player = 0; player < 2; ++player)
             for (int k = 0; k < 3 && custom.hasSaber; ++k)
                 extra.sabers[player][k] = custom.saber[k];
