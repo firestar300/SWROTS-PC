@@ -452,9 +452,12 @@ void FireShell(uint8_t* cody, uint8_t* target)
 constexpr const char* kBodySource = "meshes\\chars\\clonetrooper\\hordetrooper.msh";
 constexpr const char* kBody = "meshes\\chars\\clonetrooper\\hordetrooper_cody.msh";
 const std::vector<MeshBox> kRangefinder = {
-    { { 3.8f, 68.8f, 0.2f }, { 4.7f, 74.4f, 1.8f }, { 24.0f, 88.0f } },     // the unit: a tall flat panel on the side,
-                                                                          // just behind the visor, white as the dome
-    { { 4.05f, 74.4f, 0.75f }, { 4.4f, 76.4f, 1.1f }, { 24.5f, 97.5f } },  // its short dark antenna on top
+    // the helmet's front is at z 6 to 7.5 under the brow (y 70 to 71), its sides at x 4
+    { { -3.2f, 70.5f, 4.6f }, { 3.2f, 71.1f, 7.3f }, { 6.0f, 92.0f } },     // the orange brim over the visor (the
+                                                                          // painted brow's texel), out past the front
+    { { 3.55f, 71.0f, 1.2f }, { 4.25f, 72.4f, 2.2f }, { 24.5f, 97.5f } },   // the rangefinder's hinge on his right
+    { { 3.95f, 72.4f, 0.9f }, { 4.2f, 75.6f, 3.0f }, { 24.5f, 97.5f } },    // its viewplate, flipped up: a thin grey
+                                                                          // plate standing over the dome's side
 };
 
 // His markings: the 212th's helmet (one 128x128 DXT1 texture for the whole body, the helmet unwrapped once and mirrored
