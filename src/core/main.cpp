@@ -24,6 +24,7 @@
 #include "game/aliases.h"
 #include "game/characters.h"
 #include "game/classsetup.h"
+#include "game/cody.h"
 #include "game/coop.h"
 #include "game/customchars.h"
 #include "game/custommaps.h"
@@ -177,6 +178,7 @@ static void StartGame(const void* launchData)
     game::InstallGameFixes();
     game::InstallClassSetup();
     game::InstallCustomCharacters(g_Boot.paths.mods, g_Boot.paths.gameData, g_Boot.paths.cache);
+    game::InstallCody();
     game::InstallVersus();
     game::InstallRoster();
     game::InstallAnimationAliases();

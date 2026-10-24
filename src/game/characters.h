@@ -137,6 +137,12 @@ int RemoveSpawned();
 // Removes one spawned character (still there), as RemoveSpawned does. False when it is not one.
 bool RemoveSpawnedCharacter(uint8_t* character);
 
+// A character fighting for another (a fighter's reinforcement, e.g. Commander Cody's clones): created and placed at
+// `place` (a transform) in any running level, Versus too, on its master's side (its teams; against the player when the
+// master is); removed as a spawned character. Null with `error` when it cannot.
+uint8_t* SpawnHelper(const char* className, const std::string& skin, uint8_t* master, const float* place,
+    std::string& error);
+
 // Changes the running level's player at once, where it stands, to the current choice (class, costume,
 // texture set, body; the player's own class when none is chosen): a new character takes over the
 // controls, the camera and the level's references to the player. False with `error` set when it cannot.

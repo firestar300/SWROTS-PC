@@ -2,6 +2,7 @@
 // mission, is in docs/research/coop.md.
 
 #include "game/coop.h"
+#include "game/cody.h"
 #include "game/devmap.h"
 
 #include <windows.h>
@@ -1161,10 +1162,12 @@ void ClonePlayer2Shooting(uint8_t* script, uint8_t* instance)
 void __fastcall CloneStateManagerHook(uint8_t* script, void*, uint32_t a, uint32_t b)
 {
     g_OriginalCloneStateManager(script, nullptr, a, b);
-    if (!g_State.playing || !g_State.p2 || g_State.boss)
-        return;
     const uint8_t* characterContext = *reinterpret_cast<uint8_t* const*>(uintptr_t(kScriptCharacterContext));
     uint8_t* instance = *reinterpret_cast<uint8_t**>(uintptr_t(kScriptContext));
+    if (characterContext) // Commander Cody's kit (cody.h)
+        CloneKitFrame(script, instance, *reinterpret_cast<uint8_t* const*>(characterContext + 0x68));
+    if (!g_State.playing || !g_State.p2 || g_State.boss)
+        return;
     if (!characterContext || !instance || *reinterpret_cast<uint8_t* const*>(characterContext + 0x68) != g_State.p2)
         return;
     ClonePlayer2Shooting(script, instance);
@@ -1190,6 +1193,8 @@ DismemberCutFn g_OriginalDismemberCut = nullptr;
 uint32_t __fastcall DismemberCutHook(uint8_t* binding, void*, void* part, uint32_t value)
 {
     uint8_t* character = binding ? Field<uint8_t*>(binding, 4) : nullptr;
+    if (KeepsLimbs(character)) // Commander Cody
+        return 0;
     if (character && character == g_State.p2 && g_State.playing && !g_State.boss) {
         static uint8_t* noted = nullptr;
         if (noted != character) {
@@ -1203,7 +1208,7 @@ uint32_t __fastcall DismemberCutHook(uint8_t* binding, void*, void* part, uint32
 
 void __stdcall DismemberNotifyHook(uint8_t* character, uint32_t kind, uint32_t value, void* part)
 {
-    if (character && character == g_State.p2 && g_State.playing && !g_State.boss)
+    if ((character && character == g_State.p2 && g_State.playing && !g_State.boss) || KeepsLimbs(character))
         return;
     g_OriginalDismemberNotify(character, kind, value, part);
 }

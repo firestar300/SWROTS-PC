@@ -13,6 +13,8 @@
 #include "debug/console.h"
 #include "core/settings.h"
 #include "debug/gamefont.h"
+#include "game/cody.h"
+#include "game/devmap.h"
 #include "game/freecam.h"
 #include "game/hvv.h"
 #include "game/hvvmenu.h"
@@ -65,20 +67,30 @@ float Text(float x, float y, float h, ImU32 colour, const std::string& t, float 
 bool OnScreen(const float p[3], const ImGuiViewport* vp, ImVec2& out, float* depth = nullptr)
 {
     float m[16], fov = 0;
-    if (!game::GameCameraPlacement(m, fov) || fov <= 0)
-        return false;
+    float x, y, z;
+    if (game::GameRenderedView(m, fov) && fov > 0) { // the view as drawn (row vectors: p * view)
+        x = p[0] * m[0] + p[1] * m[4] + p[2] * m[8] + m[12];
+        y = p[0] * m[1] + p[1] * m[5] + p[2] * m[9] + m[13];
+        z = p[0] * m[2] + p[1] * m[6] + p[2] * m[10] + m[14];
+    } else {
+        if (!game::GameCameraPlacement(m, fov) || fov <= 0)
+            return false;
+        const float d[3] = { p[0] - m[12], p[1] - m[13], p[2] - m[14] };
+        x = d[0] * m[0] + d[1] * m[1] + d[2] * m[2];
+        y = d[0] * m[4] + d[1] * m[5] + d[2] * m[6];
+        z = d[0] * m[8] + d[1] * m[9] + d[2] * m[10];
+    }
     if (fov > 3.2f)
         fov *= 3.14159265f / 180.0f;
-    const float d[3] = { p[0] - m[12], p[1] - m[13], p[2] - m[14] };
-    const float x = d[0] * m[0] + d[1] * m[1] + d[2] * m[2];
-    const float y = d[0] * m[4] + d[1] * m[5] + d[2] * m[6];
-    const float z = d[0] * m[8] + d[1] * m[9] + d[2] * m[10];
     if (z < 10.0f)
         return false;
     if (depth)
         *depth = z;
     const float focal = (vp->Size.x / 2) / std::tan(fov / 2);
-    out = ImVec2(vp->Pos.x + vp->Size.x / 2 + x / z * focal, vp->Pos.y + vp->Size.y / 2 - y / z * focal);
+    // a Versus duel's camera spans the field of view across the height too (measured: its picture is stretched to the
+    // screen's shape); the dev map's (Heroes vs Villains) has square pixels
+    const float focalY = game::BootIsVersusDuel() ? (vp->Size.y / 2) / std::tan(fov / 2) : focal;
+    out = ImVec2(vp->Pos.x + vp->Size.x / 2 + x / z * focal, vp->Pos.y + vp->Size.y / 2 - y / z * focalY);
     return true;
 }
 
@@ -326,6 +338,43 @@ void EndScreen(const game::HvvState& s, const ImGuiViewport* vp, float u)
     }
 }
 
+// A helper still standing, and whether it is against the player: its master is the computer's (no controller,
+// +0x43C below 0).
+bool HelperStanding(const uint8_t* object, const uint8_t* master, bool& enemy)
+{
+    __try {
+        enemy = *reinterpret_cast<const int32_t*>(master + 0x43C) < 0;
+        return *reinterpret_cast<const float*>(object + 0x130) > 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// Over each of Commander Cody's clones (cody.h), in Versus and Heroes vs Villains: a chevron and "CODY'S CLONE", blue
+// when they fight for the player (Cody is the player's), red against.
+void CodyMarks(const ImGuiViewport* vp, float u)
+{
+    for (const game::CodyHelper& h : game::CodyHelpers()) {
+        bool enemy = false;
+        if (!HelperStanding(h.object, h.master, enemy))
+            continue;
+        const ImU32 colour = enemy ? kVillains : kHeroes;
+        const float* p = reinterpret_cast<const float*>(h.object + 0x150 + 48);
+        const float head[3] = { p[0], p[1] + 82.0f, p[2] };
+        ImVec2 at;
+        float depth = 0;
+        if (!OnScreen(head, vp, at, &depth) || depth > 2500.0f)
+            continue;
+        const float alpha = std::clamp((2500.0f - depth) / 700.0f, 0.0f, 1.0f) * 0.9f;
+        const float k = std::clamp(700.0f / std::max(depth, 1.0f), 0.65f, 1.0f);
+        const float r = 8.0f * u * k;
+        const ImVec2 a(at.x - r, at.y - 1.6f * r), b(at.x + r, at.y - 1.6f * r), c(at.x, at.y);
+        g_Draw->AddTriangleFilled(a, b, c, Faded(colour, alpha));
+        g_Draw->AddTriangle(a, b, c, IM_COL32(0, 0, 0, int(200 * alpha)), 1.5f * u);
+        Text(at.x, at.y - 1.6f * r - 17 * u * k, 14 * u * k, Faded(colour, alpha), "CODY'S CLONE", 0.5f);
+    }
+}
+
 bool TabHeld()
 {
     if (!(GetAsyncKeyState(VK_TAB) & 0x8000))
@@ -348,12 +397,14 @@ void DrawHvvHud()
         hudHidden = hide;
         WriteGameVariable("hud", hudHidden ? "0" : "1");
     }
-    // before the fighters are there (the loading screen) and in the game's pause menu: nothing (Tab neither)
-    if (!s.active || !s.started || s.paused)
-        return;
     g_Draw = ImGui::GetForegroundDrawList();
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const float u = std::max(0.5f, vp->Size.y / 720.0f);
+    if (!game::GamePaused() && !(s.active && (s.ending || s.intro)))
+        CodyMarks(vp, u);
+    // before the fighters are there (the loading screen) and in the game's pause menu: nothing (Tab neither)
+    if (!s.active || !s.started || s.paused)
+        return;
     if (s.ending) {
         EndScreen(s, vp, u);
         return;

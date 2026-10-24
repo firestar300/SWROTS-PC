@@ -1795,6 +1795,42 @@ bool SetCharacterSide(uint8_t* character, SpawnSide side)
     return true;
 }
 
+uint8_t* SpawnHelper(const char* className, const std::string& skin, uint8_t* master, const float* place,
+    std::string& error)
+{
+    const char* name = RegisteredClassName(className);
+    if (!name || !master || !place) {
+        error = std::string(className) + ": not a class the game knows";
+        return nullptr;
+    }
+    char who[96];
+    sprintf_s(who, "helper %s #%d", name, ++g_Spawned);
+    uint8_t* object = CreateCharacter(name, std::string(), skin, std::string(), who, error);
+    if (!object)
+        return nullptr;
+    if (BodyBoundToAnotherClass(object)) {
+        error = std::string(name) + " wears " + CharacterBody(object) + ", a body another class wore in this level";
+        return nullptr;
+    }
+    if (!PlaceCharacter(object, place, name, error))
+        return nullptr;
+    RecordBody(object);
+    // its master's side: its teams, and against the player when its master is (a computer's fighter)
+    uint32_t teams = 0;
+    if (CharacterTeams(master, teams))
+        SetCharacterTeams(object, teams);
+    // a player's (its controller, +0x43C, set: 0x176A90): with the player; the computer's: against
+    const bool masterIsPlayer = *reinterpret_cast<const int32_t*>(master + 0x43C) >= 0;
+    if (uint8_t* ai = *reinterpret_cast<uint8_t**>(object + kCharacterAIData)) {
+        ai[kAIHasSide] = 1;
+        ai[kAITargetPlayer] = masterIsPlayer ? 0 : 1;
+    }
+    LOG_INFO("Characters: %s for %p at %.0f %.0f %.0f", who, master, place[12], place[13], place[14]);
+    ++g_SpawnedInLevel;
+    g_SpawnedCharacters.push_back({ object, *reinterpret_cast<uint32_t*>(object + 4) });
+    return object;
+}
+
 bool SpawnCharacter(const char* className, const std::string& costume, const std::string& skin,
     const std::string& mesh, SpawnSide side, std::string& error)
 {

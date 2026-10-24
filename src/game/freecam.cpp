@@ -226,12 +226,18 @@ RenderCameraFn g_OriginalRenderCamera = nullptr;
 constexpr float kShakeReach = 25.0f; // world units
 Matrix g_ToView = {};
 bool g_HaveToView = false;
+Matrix g_RenderedView = {};
+bool g_HaveRenderedView = false;
 
 char __fastcall RenderCameraHook(void* renderer, void* edx, int kind, const Matrix* matrix)
 {
     if (kind != 0 || !matrix || !g_HaveGameView)
         return g_OriginalRenderCamera(renderer, edx, kind, matrix);
     const int pass = g_CameraPass++;
+    if (pass == 0) { // the frame's view, as drawn (for marks over the world)
+        g_RenderedView = *matrix;
+        g_HaveRenderedView = true;
+    }
     if (!g_Flying) {
         if (pass == 0) {
             g_ToView = Multiply(Affine(*matrix), Affine(g_GameView));
@@ -283,6 +289,15 @@ bool GameCameraPlacement(float rows[16], float& fov)
     return true;
 }
 
+bool GameRenderedView(float view[16], float& fov)
+{
+    if (!g_HaveRenderedView)
+        return false;
+    std::memcpy(view, g_RenderedView.m, sizeof(g_RenderedView.m));
+    fov = g_HaveGameFov ? g_GameFov : 0.0f;
+    return true;
+}
+
 void SetCameraAdjuster(CameraAdjuster adjuster)
 {
     g_Adjuster = adjuster;
@@ -297,7 +312,7 @@ void InstallFreeCamera()
     g_AutoStartMs = GetEnvironmentVariableA("SWROTS_FREECAM", delay, sizeof(delay)) ? DWORD(atof(delay) * 1000.0) : 0;
     g_AutoStartTick = GetTickCount();
     g_Flying = false;
-    g_HaveGameView = g_HaveToView = g_HaveGameFov = false;
+    g_HaveGameView = g_HaveToView = g_HaveGameFov = g_HaveRenderedView = false;
     input::HoldPlayerInput(false);
     const auto matches = [](uint32_t address, const uint8_t* bytes, size_t length) {
         return std::memcmp(reinterpret_cast<const void*>(uintptr_t(address)), bytes, length) == 0;

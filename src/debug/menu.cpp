@@ -15,6 +15,7 @@
 #include "core/log.h"
 #include "debug/console.h"
 #include "game/characters.h"
+#include "game/cody.h"
 #include "game/coop.h"
 #include "game/custommaps.h"
 #include "game/devmap.h"
@@ -1054,7 +1055,7 @@ void HvvTab()
 
 bool OverlayShown()
 {
-    return g_Ready && game::HvvActive();
+    return g_Ready && (game::HvvActive() || !game::CodyHelpers().empty()); // HvV's screen, Cody's clones' marks
 }
 
 void RenderMenu()
@@ -1100,6 +1101,7 @@ void MenuAfterFrame()
     RunQueuedConsoleCommands();
     game::PlayerFrame();
     game::CoopFrame();
+    game::CodyFrame();
     game::HvvFrame();
 }
 

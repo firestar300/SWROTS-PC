@@ -14,6 +14,9 @@ bool FreeCameraOn();
 // gave the renderer (0 when not seen yet), as shown (with any adjustment below). False before the game has
 // placed it.
 bool GameCameraPlacement(float rows[16], float& fov);
+// The view matrix the renderer drew the latest frame's main pass with (world to view, rows; a duel arena's camera is
+// placed in the arena's own frame, so this, not the placement, takes world points to the screen), and the field of view.
+bool GameRenderedView(float view[16], float& fov);
 
 // An adjustment of the game camera's placement outside a flight (co-op's shared camera): called once a frame
 // with the game's placement and the field of view; true when it changed `rows`. Null for none.

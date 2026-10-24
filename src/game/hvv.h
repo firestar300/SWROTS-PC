@@ -21,6 +21,8 @@ bool HvvActive();
 
 // Whether nothing of the match's map (its collision boxes) stands between two points of the world.
 bool HvvLineOfSight(const float a[3], const float b[3]);
+// Whether the game is paused (its pause menu).
+bool GamePaused();
 
 // The match, for the overlay (scoreboard, titles, markers, kill feed, leaderboard, end) and the debug menu.
 struct HvvState {
