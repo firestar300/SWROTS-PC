@@ -109,7 +109,11 @@ as Vader's: the Force button tapped pushes (back, left or right with the stick f
 the saber-throw button throws, both stick clicks heal, and lightning when listed in `ForcePowers=` (the script
 instance's enable bytes +0x2DC push, +0x2DB grip, +0x2DF throw, +0x2DD lightning, +0x2D9 heal; their costs +0x330..
 as the Jedi set-up 0x400EE0 sets them, which the Jedi Brute's Init leaves out). The second stance has its own set.
-Its Force sounds are the base's (the Jedi Brute has none: the moves are silent so far).
+Its Force sounds are the `ForceFrom=` class's: a character's sounds are its event tree's (`s_<class>`, [file
+formats](file-formats.md#event-trees): the sounds it loads and what plays when its sequences and animations play), and
+the Jedi Brute's has none for the Force, so Vader's Force entries (push, grip, saber throw, heal, lightning, the
+sounds they load) are added to it as it loads. They are keyed by the Force sequences and animations, which the Jedi
+Brute plays the same as Vader; the game's brutes never play them. (So far for `ForceFrom=IVader` on the Jedi Brute.)
 
 The computer uses them too. Its rules are the same ones (the AI runs the class's player rules: what they offer on a
 decision frame are its candidates, 0x175D60), so the port offers it every power it can pay for (the Force at least

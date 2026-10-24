@@ -159,3 +159,26 @@ Forty classes have lists, with about 75 skins between them, including characters
 few levels (Serra, Cin Drallig) and cut ones (Emperor, Luke). Level files (`levels\<level>.slp`) place characters as class instances
 (`IVader`, `IOldObiwan`, `IStormtrooper`) with properties such as `Name`, `Transform`, `Player?`
 and `Enemies`.
+
+## Event trees
+
+A character's sounds are its event trees: `meshes/chars/common/s_<class>.xml` (compiled `.xbl_xml` in the PAKs,
+resource type 31), named by its definition (`meshes/chars/common/<class>`, type 38). A tree lists the sounds the
+character loads and what plays when its sequences or animations play. All 30 trees on the disc follow this layout:
+
+```c
+file  = u32 0x18, u32 entryCount, entry[entryCount]
+str   = u32 length, bytes                         // no terminator
+entry = str kind, then
+        "CharEvent_LoadSound": str soundId, str file
+        "CharEvent_Sequence":  str name, u32 isAnimation, u32 eventCount, event[eventCount]
+event = str kind, u32 frame, u32 enter, u32 exit, then
+        "CharEvent_PlaySound": str soundId, u8 loops, f32 volume, f32 range
+        "CharEvent_StopSound": str soundId
+```
+
+A `CharEvent_Sequence` entry with `isAnimation` 0 fires when a sequence of that name plays, with 1 when any sequence
+playing that animation does (both are looked up when a sequence starts; names compare case-insensitively). `enter`
+events fire as it starts, `exit` events as it ends, others at their frame. The engine knows more event kinds
+(footsteps, scripts, item collision, velocity, health and power changes, animation speed); the disc's trees use
+only these two.
