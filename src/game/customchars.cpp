@@ -333,6 +333,44 @@ bool __fastcall JediSetupHook(uint8_t* character, void*)
     return result;
 }
 
+// A special's charge-up effect (the streaks around the saber, IDS_FX_Saber_Chargeup_<colour>: saber_powerup_red, _grn,
+// _blue, _purple) is picked by the script instance's saber colour (+0x374, an RGB; 0x4106D0, thiscall (instance, ...4),
+// ret 0x14: exactly red, green, blue or purple, else none), which a custom character's base set (the Jedi Brute's
+// green). For a custom character with its own colour, the pick sees the nearest of the four.
+constexpr uint32_t kChargeupPick = 0x004106D0;
+constexpr uint8_t kChargeupPickBytes[] = { 0x8B, 0x54, 0x24, 0x04, 0xF3, 0x0F, 0x10, 0x8A, 0x74, 0x03, 0x00, 0x00 };
+using ChargeupPickFn = void(__fastcall*)(void*, void*, uint8_t*, void*, void*, void*, void*);
+ChargeupPickFn g_ChargeupPick = nullptr;
+
+void __fastcall ChargeupPickHook(void* self, void*, uint8_t* instance, void* a, void* b, void* c, void* d)
+{
+    uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(0x006943CC));
+    uint8_t* character = scripts ? *reinterpret_cast<uint8_t**>(scripts + 0x68) : nullptr;
+    const CustomCharacter* custom = character ? CustomCharacterOf(character) : nullptr;
+    if (!custom || !custom->hasSaber || !instance)
+        return g_ChargeupPick(self, nullptr, instance, a, b, c, d);
+    static const float kColours[4][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { 1, 0, 1 } };
+    int best = 0;
+    float bestDistance = 1e9f;
+    for (int i = 0; i < 4; ++i) {
+        float distance = 0;
+        for (int k = 0; k < 3; ++k)
+            distance += (custom->saber[k] - kColours[i][k]) * (custom->saber[k] - kColours[i][k]);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = i;
+        }
+    }
+    float* colour = reinterpret_cast<float*>(instance + 0x374);
+    float own[3];
+    std::memcpy(own, colour, sizeof own);
+    std::memcpy(colour, kColours[best], sizeof own);
+    static const char* const kNames[4] = { "red", "green", "blue", "purple" };
+    LOG_INFO("Custom characters: %s's charge-up effect is the %s one", custom->className.c_str(), kNames[best]);
+    g_ChargeupPick(self, nullptr, instance, a, b, c, d);
+    std::memcpy(colour, own, sizeof own);
+}
+
 // A script's size change of its character (0x178FD0, cdecl (scale, frames): at once (+0x194) or eased over the frames
 // (+0x2C0 the target, +0x2C4 the time)): Vader's duel intro grows him to 1.1 and back to 1. A custom character's
 // size (Scale=) is its 1: the change is relative to it, so another duelist's intro keeps its size.
@@ -1165,6 +1203,19 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         PatchJump(kStartEntry, reinterpret_cast<const void*>(&StartEntryHook));
     }
     g_DuelLine = {};
+    if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kChargeupPick)), kChargeupPickBytes, sizeof kChargeupPickBytes) == 0) {
+        static uint8_t* pickStub = [] { // once: the port's memory outlives the game's reboots
+            uint8_t* stub = AllocStub(sizeof kChargeupPickBytes + 5);
+            std::memcpy(stub, kChargeupPickBytes, sizeof kChargeupPickBytes);
+            stub[sizeof kChargeupPickBytes] = 0xE9;
+            const int32_t rel = int32_t(kChargeupPick + sizeof kChargeupPickBytes) -
+                int32_t(uintptr_t(stub) + sizeof kChargeupPickBytes + 5);
+            std::memcpy(stub + sizeof kChargeupPickBytes + 1, &rel, 4);
+            return stub;
+        }();
+        g_ChargeupPick = reinterpret_cast<ChargeupPickFn>(pickStub);
+        PatchJump(kChargeupPick, reinterpret_cast<const void*>(&ChargeupPickHook));
+    }
     if (std::any_of(g_Customs.begin(), g_Customs.end(), [](const CustomCharacter& c) { return c.scale != 1.0f; }) &&
         std::memcmp(reinterpret_cast<const void*>(uintptr_t(kScriptSetScale)), kScriptSetScaleBytes, sizeof kScriptSetScaleBytes) == 0)
         PatchJump(kScriptSetScale, reinterpret_cast<const void*>(&ScriptSetScale));
