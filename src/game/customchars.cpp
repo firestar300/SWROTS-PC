@@ -1206,10 +1206,11 @@ void AddBuiltInCharacters()
     c.code = "CMC";
     c.speaker = "Commander Cody";
     c.speakerKey = "CommanderCody"; // the game's own text
-    c.health = 1000; // as a duelist's (the HUD's bar is drawn on that scale); hits on him count a third more (cody.cpp)
+    c.health = 1000; // as a duelist's (the HUD's bar is drawn on that scale); hits on him count more (cody.cpp)
     c.force = 1000;
     c.side = 0;
     c.introAnimation = "ClnCom_Signal_Strike";
+    c.introSpeed = 2.0f;                 // about 3 s
     c.introLine = "CMC951";              // "Ready weapons."
     c.outroAnimation = "ClnCom_Signal_Right";
     c.outroLine = "CMC967";              // "Target eliminated."

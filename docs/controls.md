@@ -76,18 +76,22 @@ its place, and puts the caps into the tips' icon table (0x7F0608, whose sizes th
 
 ## Commander Cody
 
-Cody (Versus and Heroes vs Villains) has a blaster, not a saber, and a meter where a Jedi's Force bar is. It fills
-again over time (about 35 a second, 1000 when full) and pays for his shots, his squad and his bombardment:
+Cody (Versus and Heroes vs Villains) has a blaster, not a saber, and a meter where a Jedi's Force bar is. It starts
+each round empty, fills over time (about 35 a second, 1000 when full) and pays for his shots, rolls, squad and
+bombardment:
 
 | Pad (PlayStation) | Keyboard and mouse (default) | What he does | Meter |
 |---|---|---|---|
 | Y (Triangle), held | Mouse 2, held | fires his blaster (stops when the meter runs dry) | 20 a shot |
 | X (Square) | Mouse 1 | rifle butt | - |
-| White (L1) | Q | rolls the way the stick points (back when you hold back), else away from his opponent; no hit or hit reaction lands while he rolls (a clone cannot block); one every 0.7 s | - |
-| RT (R2) | F | calls two of his clones: they rappel down beside him and fight for 25 seconds, marked "CODY'S CLONE" (blue when they are yours, red when they are against you); one squad at a time | 500 |
-| B (Circle) | E | a bombardment: four shells fall around his opponent, knocking down and hurting his enemies only | 600 |
+| White (L1) | Q | rolls the way the stick points (back when you hold back), else away from his opponent; no hit lands in the middle of the roll (not as it starts: roll before the blow, not as it lands); one a second | 150 |
+| RT (R2) | F | calls two of his clones: they rappel down beside him and fight for 25 seconds, marked "CODY'S CLONE" (blue when they are yours, red when they are against you); one squad at a time, then 30 s before the next | 500 |
+| B (Circle) | E | a bombardment: four shells fall around his opponent, knocking down and hurting his enemies only; 20 s before the next | 600 |
+
+A clone cannot block: holding the block/target button only locks on. His armour takes saber hits harder than a
+Jedi's guard would.
 
 He waves his clones in and signals the strike, and says so; in Versus he has an intro and a win of his own ("Ready
-weapons.", "Target eliminated."). His specials wait until the duel's intro is over. The
+weapons.", "Target eliminated."). His specials wait 8 seconds into each round. The
 computer's Cody uses the same: he calls his squad and his bombardments when his opponent is near, and up close he
 rolls away from the saber or strikes with his rifle butt, from the same meter.

@@ -64,6 +64,7 @@ constexpr char kCloneShootingLoop[] = "ctroop_atk_shooting_loop";
 constexpr uint32_t kCharacterHealth = 0x130, kCharacterHealthMost = 0x134, kCharacterMeter = 0xA40, kCharacterMeterMost = 0xA44;
 constexpr uint32_t kCharacterTransform = 0x150, kCharacterOpponent = 0x3B8, kCharacterScript = 0x434;
 constexpr uint32_t kCharacterAI = 0x9FC;
+constexpr uint32_t kCharacterPort = 0x43C;     // the controller port driving it, -1 none
 constexpr uint32_t kAISetTarget = 0x00193D90;  // thiscall on the AI controller (target)
 constexpr uint32_t kObjectById = 0x000A31F0;   // cdecl (instance id) -> object or null
 constexpr uintptr_t kPlaySequence = 0x150E30;  // ICharacter, thiscall (sequence, 0, 0, 0, speed)
@@ -72,9 +73,12 @@ constexpr uintptr_t kFindSequence = 0x150D60;  // ICharacter, thiscall (name) ->
 // his meter
 constexpr float kMeterPerSecond = 35;
 constexpr float kSummonCost = 500, kBombardCost = 600, kShotCost = 20;
-// his dodge costs nothing (a Jedi's block costs no Force either), one a kDodgeWaitMs at most, and no hit lands on him
-// while he rolls (kRollGuardMs: a roll in time beats a combo, as a block does)
-constexpr ULONGLONG kDodgeWaitMs = 700, kRollGuardMs = 650;
+// his roll costs a little meter, one a kDodgeWaitMs at most; no hit lands on him in the middle of it (from kRollGuardFromMs
+// to kRollGuardToMs after it starts: a roll in time beats a combo, a roll as the blow lands does not)
+constexpr float kRollCost = 150;
+constexpr ULONGLONG kDodgeWaitMs = 1000, kRollGuardFromMs = 120, kRollGuardToMs = 480;
+// a round starts with his meter empty, his specials no sooner than kSpecialsAfterMs, each with its own wait after use
+constexpr ULONGLONG kSpecialsAfterMs = 8000, kSummonWaitMs = 30000, kBombardWaitMs = 20000;
 constexpr ULONGLONG kPressKeepMs = 350;
 constexpr ULONGLONG kShotIntervalMs = 450;
 constexpr ULONGLONG kHelperLifeMs = 25000;
@@ -82,9 +86,10 @@ constexpr ULONGLONG kHelperLifeMs = 25000;
 constexpr float kComputerCloseIn = 230, kComputerStrikeWithin = 130;
 constexpr ULONGLONG kComputerLookMs = 700;
 // a duel gives its fighters 1000 health (its bar a fixed scale): a blaster against a saber takes hits a third harder
-constexpr float kDamageTaken = 1.33f;
+constexpr float kDamageTaken = 1.6f;
 // A hit's reaction: ICharacter::Reaction_Call 0x159E20, thiscall on the one hit (bump, collision, &sequence) -> true
-// when dealt with; its own early ways out (the script's "no reactions" bit, a cutscene) return true with none
+// when dealt with; its own early ways out (the script's "no reactions" bit, a cutscene) return true with none. It also
+// counts a hit on a player holding the block button as blocked (no damage, no reaction): a clone has no block
 constexpr uint32_t kReactionCall = 0x00159E20;
 constexpr uint8_t kReactionCallBytes[] = { 0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0 }; // push ebp; mov ebp, esp; and esp, -16
 constexpr float kHelperSide = 90;            // how far beside him they come down
@@ -135,7 +140,10 @@ struct Kit {
     // a player's Cody: he had a controller (+0x43C, -1 for none) once since he came. The game's own test (0x1545A0)
     // also counts a player's character as the computer's while its AI drives it (the duel's intro), so it is not asked
     bool player = false;
-    ULONGLONG lastShot = 0, lastFrame = 0, lastDodge = 0, rollUntil = 0;
+    ULONGLONG lastShot = 0, lastFrame = 0, lastDodge = 0, rollAt = 0;
+    ULONGLONG roundStart = 0, lastSummon = 0, lastBombard = 0; // his round's start, his specials' last use
+    bool roundEnded = false;  // his round over (he or his opponent down), until the next one starts
+    bool emptyMeter = true;   // the meter to empty at his next turn (a round's start)
     float rollDir[2] = {};         // the roll asked for: where the stick pointed (world x, z), 0 for none
     uint8_t* foe = nullptr;        // his opponent of the round
     uint32_t foeId = 0;
@@ -707,16 +715,28 @@ bool CanAct(uint8_t* scripts)
     return true;
 }
 
-// No reaction to a hit while he rolls (CodyDamage takes its damage away): dealt with, as the game's own ways out.
+bool Guarded(const Kit& kit, ULONGLONG now)
+{
+    return kit.rollAt && now >= kit.rollAt + kRollGuardFromMs && now < kit.rollAt + kRollGuardToMs;
+}
+
+// No reaction to a hit in his roll's guard (CodyDamage takes its damage away): dealt with, as the game's own ways out.
+// Otherwise the hit as on anyone not holding the block button (a player's controller, +0x43C, out of it for the call).
 using ReactionCallFn = bool(__fastcall*)(uint8_t*, void*, void*, void*, void*);
 ReactionCallFn g_OriginalReactionCall = nullptr;
 
 bool __fastcall ReactionCallHook(uint8_t* character, void*, void* bump, void* collision, void* sequence)
 {
     const auto kit = g_Kits.find(character);
-    if (kit != g_Kits.end() && GetTickCount64() < kit->second.rollUntil)
+    if (kit == g_Kits.end())
+        return g_OriginalReactionCall(character, nullptr, bump, collision, sequence);
+    if (Guarded(kit->second, GetTickCount64()))
         return true;
-    return g_OriginalReactionCall(character, nullptr, bump, collision, sequence);
+    const int32_t port = At<int32_t>(character, kCharacterPort);
+    At<int32_t>(character, kCharacterPort) = -1;
+    const bool dealt = g_OriginalReactionCall(character, nullptr, bump, collision, sequence);
+    At<int32_t>(character, kCharacterPort) = port;
+    return dealt;
 }
 
 } // namespace
@@ -766,6 +786,12 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     if (At<int32_t>(character, 0x43C) >= 0)
         kit.player = true;
     float& meter = At<float>(character, kCharacterMeter);
+    if (kit.emptyMeter) { // a round starts (CodyFrame): the meter from nothing
+        kit.emptyMeter = false;
+        kit.roundStart = now;
+        kit.lastSummon = kit.lastBombard = 0;
+        meter = 0;
+    }
     if (kit.lastFrame) // the meter refills
         meter = std::min(At<float>(character, kCharacterMeterMost), meter + kMeterPerSecond * float(now - kit.lastFrame) / 1000.0f);
     kit.lastFrame = now;
@@ -782,6 +808,11 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     kit.scripts = ScriptContext();
     const bool free = CanAct(kit.scripts);
     const bool squadOut = std::any_of(g_Helpers.begin(), g_Helpers.end(), [&](const Helper& h) { return h.master == character; });
+    const bool specials = now >= kit.roundStart + kSpecialsAfterMs;
+    const bool canSummon = specials && !squadOut && !kit.summon && meter >= kSummonCost &&
+        (!kit.lastSummon || now >= kit.lastSummon + kSummonWaitMs);
+    const bool canBombard = specials && !kit.bombard && meter >= kBombardCost &&
+        (!kit.lastBombard || now >= kit.lastBombard + kBombardWaitMs);
     if (!kit.player) { // shoots as any clone; up close he rolls away or strikes; his specials when his opponent is near
         uint8_t* opponent = OpponentOf(character);
         if (!opponent || !free || kit.summon || kit.bombard || kit.roll || kit.melee)
@@ -789,7 +820,7 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         const float* p = Position(character);
         const float* q = Position(opponent);
         const float apart = std::hypot(q[0] - p[0], q[2] - p[2]);
-        if (apart < kComputerCloseIn && now >= kit.nextLook && now - kit.lastDodge >= kDodgeWaitMs) {
+        if (apart < kComputerCloseIn && now >= kit.nextLook && now - kit.lastDodge >= kDodgeWaitMs && meter >= kRollCost) {
             kit.nextLook = now + kComputerLookMs;
             const uint32_t dice = Dice() % 100;
             if (dice < 45) { // away from the saber, a little aside
@@ -797,18 +828,21 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
                 kit.rollDir[0] = p[0] - q[0] + (q[2] - p[2]) * side;
                 kit.rollDir[1] = p[2] - q[2] - (q[0] - p[0]) * side;
                 kit.lastDodge = now;
+                meter -= kRollCost;
                 kit.roll = true;
             } else if (dice < 80 && apart < kComputerStrikeWithin) {
                 kit.melee = true;
             }
             return;
         }
-        if (apart < kComputerCallsWithin && !squadOut && meter >= kSummonCost) {
+        if (apart < kComputerCallsWithin && canSummon) {
             meter -= kSummonCost;
+            kit.lastSummon = now;
             kit.summon = true;
             Say(character, "TKE", "CLC013");
-        } else if (apart > 250 && apart < kComputerCallsWithin && meter >= kBombardCost + 100) {
+        } else if (apart > 250 && apart < kComputerCallsWithin && canBombard && meter >= kBombardCost + 100) {
             meter -= kBombardCost;
+            kit.lastBombard = now;
             kit.bombard = true;
             Say(character, "TKE", "CMC915");
         }
@@ -842,19 +876,22 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         return;
     }
     // his clones (one squad at a time), the bombardment
-    if (kit.summonAsked && !squadOut && !kit.summon && meter >= kSummonCost && fresh(kit.summonAsked)) {
+    if (kit.summonAsked && canSummon && fresh(kit.summonAsked)) {
         meter -= kSummonCost;
+        kit.lastSummon = now;
         kit.summon = true;
         Say(character, "TKE", "CLC013"); // "Bring up the reinforcements!"
     }
-    if (kit.bombardAsked && !kit.bombard && meter >= kBombardCost && fresh(kit.bombardAsked)) {
+    if (kit.bombardAsked && canBombard && fresh(kit.bombardAsked)) {
         meter -= kBombardCost;
+        kit.lastBombard = now;
         kit.bombard = true;
         Say(character, "TKE", "CMC915"); // "Concentrate fire on the target!"
     }
     // the roll, where the stick pointed (CodyFrame)
-    if (kit.rollAsked && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs && fresh(kit.rollAsked)) {
+    if (kit.rollAsked && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs && meter >= kRollCost && fresh(kit.rollAsked)) {
         kit.lastDodge = now;
+        meter -= kRollCost;
         kit.roll = true;
     }
     // the blaster
@@ -898,7 +935,7 @@ void Roll(uint8_t* cody, Kit& kit, float dx, float dz, ULONGLONG now)
     }
     if (!PlaySequence(cody, "Cody_RollRight"))
         return;
-    kit.rollUntil = now + kRollGuardMs;
+    kit.rollAt = now;
     LOG_INFO("Cody: rolls (%.2f, %.2f)", dx, dz);
 }
 
@@ -960,6 +997,13 @@ void CodyFrame()
             continue;
         }
         const bool standing = At<float>(cody, kCharacterHealth) > 0;
+        // a round ends with him or his opponent down; the next starts when both stand again
+        if (!standing || RoundOver(kit)) {
+            kit.roundEnded = true;
+        } else if (kit.roundEnded) {
+            kit.roundEnded = false;
+            kit.emptyMeter = true;
+        }
         // his opponent of the round (to know its end), once one stands
         if (standing && (!kit.foe || RoundOver(kit)))
             if (uint8_t* foe = OpponentOf(cody); foe && foe != kit.foe) {
@@ -1018,7 +1062,7 @@ float CodyDamage(uint8_t* character, float change)
     const auto kit = g_Kits.find(character);
     if (change >= 0 || kit == g_Kits.end())
         return change;
-    if (GetTickCount64() < kit->second.rollUntil)
+    if (Guarded(kit->second, GetTickCount64()))
         return 0; // rolling: out of the way
     return change * kDamageTaken;
 }
