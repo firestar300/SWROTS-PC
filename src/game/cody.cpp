@@ -61,10 +61,11 @@ constexpr uint32_t kObjectById = 0x000A31F0;   // cdecl (instance id) -> object 
 constexpr uintptr_t kPlaySequence = 0x150E30;  // ICharacter, thiscall (sequence, 0, 0, 0, speed)
 
 constexpr ULONGLONG kShotIntervalMs = 250;
-constexpr int kBurstBolts = 8;
-constexpr ULONGLONG kBurstIntervalMs = 70;
-constexpr float kBurstCost = 250, kMeterPerSecond = 40;
-constexpr ULONGLONG kSummonWaitMs = 30000, kHelperLifeMs = 25000;
+// his specials, paid from his meter (the player's Cody and the computer's alike)
+constexpr float kMeterPerSecond = 40;
+constexpr float kSummonCost = 500, kBombardCost = 400, kDodgeCost = 150;
+constexpr ULONGLONG kHelperLifeMs = 25000;
+constexpr ULONGLONG kComputerDodgeWaitMs = 2500; // the computer's Cody: one dodge in this long at most
 constexpr float kHelperSide = 90;      // how far beside him they come in
 constexpr float kComputerCallsWithin = 900; // the computer's Cody calls his clones with his opponent this near
 
@@ -87,9 +88,9 @@ bool IsCody(const uint8_t* character)
 struct Kit {
     uint32_t id = 0;
     bool shooting = false;
-    ULONGLONG lastShot = 0, lastFrame = 0, nextBurst = 0, summonReady = 0;
-    int burstLeft = 0;
-    bool summon = false; // asked for, made in CodyFrame
+    ULONGLONG lastShot = 0, lastFrame = 0, lastDodge = 0;
+    bool summon = false;  // asked for, made in CodyFrame
+    bool bombard = false; // likewise
 };
 std::unordered_map<uint8_t*, Kit> g_Kits;
 
@@ -163,6 +164,28 @@ uint8_t* OpponentOf(uint8_t* character)
     return best;
 }
 
+// Plays one of a character's sequences by name, as the duel plays an intro (ICharacter 0x150E30); false without it.
+bool PlaySequence(uint8_t* character, const char* wanted)
+{
+    uint8_t* script = At<uint8_t*>(character, kCharacterScript);
+    uint8_t* list = script ? At<uint8_t*>(script, 4) : nullptr;
+    const int count = list ? At<int>(list, 8) : 0;
+    uint8_t** items = list ? At<uint8_t**>(list, 0xC) : nullptr;
+    for (int i = 0; i < count; ++i) {
+        const char* name = items[i] ? At<const char*>(items[i], 0xC) : nullptr;
+        if (name && _stricmp(name, wanted) == 0)
+            return reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint8_t*, float, int, int, float)>(kPlaySequence)(
+                character, nullptr, items[i], 0.0f, 0, 0, 1.0f);
+    }
+    return false;
+}
+
+// The bombardment: explosions called down on his opponent (see the recipe in Bombard's comment).
+void Bombard(uint8_t* cody)
+{
+    LOG_INFO("Cody: bombardment called on %p", OpponentOf(cody)); // made once the explosions are found
+}
+
 // --- His rolls: sequences of the port's on the clone class ---
 struct Roll {
     const char* name;
@@ -223,8 +246,10 @@ void __cdecl CloneRulesHook(uint8_t* instance, uint8_t* classObject)
         uint8_t* character = scripts ? At<uint8_t*>(scripts, 0x68) : nullptr;
         if (!IsCody(character) || !g_Rolls[0].handle || reinterpret_cast<bool(__cdecl*)()>(uintptr_t(kIsComputer))())
             return;
-        if (!Pressed(kButtonBlock))
+        float& meter = At<float>(character, kCharacterMeter);
+        if (!Pressed(kButtonBlock) || meter < kDodgeCost)
             return;
+        meter -= kDodgeCost;
         const bool left = Direction(0x001F5480, instance), right = Direction(0x001F54C0, instance);
         const bool toLeft = left || (!right && g_RollLeftNext);
         if (!left && !right)
@@ -273,44 +298,37 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     kit.lastFrame = now;
     if (At<float>(character, kCharacterHealth) <= 0) {
         Layer(kit, false);
-        kit.burstLeft = 0;
         return;
     }
+    float& meter = At<float>(character, kCharacterMeter);
+    const bool squadOut = std::any_of(g_Helpers.begin(), g_Helpers.end(), [&](const Helper& h) { return h.master == character; });
     const bool computer = reinterpret_cast<bool(__cdecl*)()>(uintptr_t(kIsComputer))();
-    if (computer) { // shoots as any clone; calls his clones when his opponent is near
-        if (now >= kit.summonReady && !kit.summon) {
-            uint8_t* opponent = OpponentOf(character);
-            if (opponent) {
-                const float* p = reinterpret_cast<const float*>(character + kCharacterTransform + 48);
-                const float* q = reinterpret_cast<const float*>(opponent + kCharacterTransform + 48);
-                if (std::hypot(q[0] - p[0], q[2] - p[2]) < kComputerCallsWithin)
-                    kit.summon = true;
-            }
+    if (computer) { // shoots as any clone; his specials when his opponent is near (CodyFrame dodges for him)
+        uint8_t* opponent = OpponentOf(character);
+        if (!opponent || kit.summon || kit.bombard)
+            return;
+        const float* p = reinterpret_cast<const float*>(character + kCharacterTransform + 48);
+        const float* q = reinterpret_cast<const float*>(opponent + kCharacterTransform + 48);
+        const float apart = std::hypot(q[0] - p[0], q[2] - p[2]);
+        if (apart < kComputerCallsWithin && !squadOut && meter >= kSummonCost + kDodgeCost) {
+            meter -= kSummonCost;
+            kit.summon = true;
+        } else if (apart > 250 && apart < kComputerCallsWithin && meter >= kBombardCost + kDodgeCost + 100) {
+            meter -= kBombardCost;
+            kit.bombard = true;
         }
         return;
     }
-    // his clones
-    if (Pressed(kButtonPush) && now >= kit.summonReady && !kit.summon)
+    // his clones (one squad at a time), the bombardment
+    if (Pressed(kButtonPush) && !squadOut && !kit.summon && meter >= kSummonCost) {
+        meter -= kSummonCost;
         kit.summon = true;
-    // the burst
-    float& meter = At<float>(character, kCharacterMeter);
-    if (Pressed(kButtonCritical) && kit.burstLeft == 0 && meter >= kBurstCost) {
-        meter -= kBurstCost;
-        kit.burstLeft = kBurstBolts;
-        kit.nextBurst = now + 50;
+    }
+    if (Pressed(kButtonCritical) && !kit.bombard && meter >= kBombardCost) {
+        meter -= kBombardCost;
+        kit.bombard = true;
     }
     const bool held = reinterpret_cast<int(__cdecl*)(uint32_t, int)>(uintptr_t(kHeldFrames))(Button(kButtonHeavy), 0) > 0;
-    if (kit.burstLeft > 0) {
-        if (!kit.shooting)
-            kit.nextBurst = std::max(kit.nextBurst, now + 50); // a few frames into the layer
-        Layer(kit, true);
-        if (now >= kit.nextBurst) {
-            Fire(script, instance);
-            --kit.burstLeft;
-            kit.nextBurst = now + kBurstIntervalMs;
-        }
-        return;
-    }
     if (!held) {
         Layer(kit, false);
         return;
@@ -355,7 +373,6 @@ void CodyFrame()
         }
         if (kit.summon) {
             kit.summon = false;
-            kit.summonReady = now + kSummonWaitMs;
             uint8_t* opponent = OpponentOf(cody);
             int made = 0;
             for (int side = -1; side <= 1; side += 2) {
@@ -377,17 +394,24 @@ void CodyFrame()
                 ++made;
             }
             LOG_INFO("Cody: %d of his clones called in", made);
-            // he signals them in: his intro (the attack signal), as the duel plays it
-            uint8_t* script = At<uint8_t*>(cody, kCharacterScript);
-            uint8_t* list = script ? At<uint8_t*>(script, 4) : nullptr;
-            const int count = list ? At<int>(list, 8) : 0;
-            uint8_t** items = list ? At<uint8_t**>(list, 0xC) : nullptr;
-            for (int i = 0; i < count; ++i) {
-                const char* name = items[i] ? At<const char*>(items[i], 0xC) : nullptr;
-                if (name && _stricmp(name, "Cody_Intro") == 0) {
-                    reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint8_t*, float, int, int, float)>(kPlaySequence)(
-                        cody, nullptr, items[i], 0.0f, 0, 0, 1.0f);
-                    break;
+            PlaySequence(cody, "Cody_Intro"); // he signals them in: his intro (the attack signal)
+        }
+        if (kit.bombard) {
+            kit.bombard = false;
+            Bombard(cody);
+        }
+        // the computer's Cody rolls aside now and then when his opponent comes close
+        if (At<int32_t>(cody, 0x43C) < 0 && At<float>(cody, kCharacterHealth) > 0 && now - kit.lastDodge > kComputerDodgeWaitMs) {
+            float& meter = At<float>(cody, kCharacterMeter);
+            uint8_t* opponent = OpponentOf(cody);
+            if (opponent && meter >= kDodgeCost) {
+                const float* p = reinterpret_cast<const float*>(cody + kCharacterTransform + 48);
+                const float* q = reinterpret_cast<const float*>(opponent + kCharacterTransform + 48);
+                kit.lastDodge = now; // looked once a wait: a roll a third of the time
+                if (std::hypot(q[0] - p[0], q[2] - p[2]) < 170.0f && (now / 7) % 3 == 0 &&
+                    PlaySequence(cody, (now / 13) % 2 ? "Cody_RollLeft" : "Cody_RollRight")) {
+                    meter -= kDodgeCost;
+                    LOG_INFO("Cody: the computer's Cody rolls aside");
                 }
             }
         }
