@@ -29,6 +29,7 @@
 #include <utility>
 
 #include "core/log.h"
+#include "core/patch.h"
 #include "input/controls.h"
 #include "game/characters.h"
 #include "game/classsetup.h"
@@ -70,17 +71,22 @@ constexpr uintptr_t kFindSequence = 0x150D60;  // ICharacter, thiscall (name) ->
 
 // his meter
 constexpr float kMeterPerSecond = 35;
-constexpr float kSummonCost = 500, kBombardCost = 400;
+constexpr float kSummonCost = 500, kBombardCost = 600, kShotCost = 20;
 // his dodge costs nothing (a Jedi's block costs no Force either), one a kDodgeWaitMs at most, and no hit lands on him
 // while he rolls (kRollGuardMs: a roll in time beats a combo, as a block does)
 constexpr ULONGLONG kDodgeWaitMs = 700, kRollGuardMs = 650;
 constexpr ULONGLONG kPressKeepMs = 350;
-constexpr ULONGLONG kShotIntervalMs = 400;
+constexpr ULONGLONG kShotIntervalMs = 450;
 constexpr ULONGLONG kHelperLifeMs = 25000;
-constexpr ULONGLONG kComputerDodgeWaitMs = 1200; // the computer's Cody: one look for a dodge in this long
+// the computer's Cody up close: a look this often, a roll away about half the time, else often his rifle butt
+constexpr float kComputerCloseIn = 230, kComputerStrikeWithin = 130;
+constexpr ULONGLONG kComputerLookMs = 700;
 // a duel gives its fighters 1000 health (its bar a fixed scale): a blaster against a saber takes hits a third harder
 constexpr float kDamageTaken = 1.33f;
-constexpr uint32_t kCharacterInvincible = 0x5D6; // byte, "Invincible?"
+// A hit's reaction: ICharacter::Reaction_Call 0x159E20, thiscall on the one hit (bump, collision, &sequence) -> true
+// when dealt with; its own early ways out (the script's "no reactions" bit, a cutscene) return true with none
+constexpr uint32_t kReactionCall = 0x00159E20;
+constexpr uint8_t kReactionCallBytes[] = { 0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0 }; // push ebp; mov ebp, esp; and esp, -16
 constexpr float kHelperSide = 90;            // how far beside him they come down
 constexpr float kRappelHeight = 320;         // and from how high (indoor arenas have ceilings)
 constexpr ULONGLONG kHelperEngageMs = 2500;  // they turn on his opponent once down
@@ -106,6 +112,15 @@ const float* Position(uint8_t* character)
     return reinterpret_cast<const float*>(character + kCharacterTransform + 48);
 }
 
+uint32_t Dice()
+{
+    static uint32_t state = 0x9E3779B9u ^ uint32_t(GetTickCount64());
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return state;
+}
+
 bool IsCody(const uint8_t* character)
 {
     const CustomCharacter* custom = character ? CustomCharacterOf(character) : nullptr;
@@ -122,13 +137,14 @@ struct Kit {
     bool player = false;
     ULONGLONG lastShot = 0, lastFrame = 0, lastDodge = 0, rollUntil = 0;
     float rollDir[2] = {};         // the roll asked for: where the stick pointed (world x, z), 0 for none
-    bool guarded = false;          // made invincible for a roll (its own byte kept to give back)
-    uint8_t ownInvincible = 0;
     uint8_t* foe = nullptr;        // his opponent of the round
     uint32_t foeId = 0;
     bool summon = false;  // asked for, made in CodyFrame
     bool bombard = false; // likewise
-    int roll = 0;         // likewise: 1 left, 2 right, 3 the stick's side
+    bool roll = false;    // likewise, toward rollDir
+    bool melee = false;   // likewise (the computer's: his rifle butt)
+    uint8_t* scripts = nullptr; // his script's context (CanAct again when CodyFrame starts his moves)
+    ULONGLONG nextLook = 0; // the computer's: its next look for a dodge or a blow
     ULONGLONG summonAsked = 0, bombardAsked = 0, rollAsked = 0; // presses not done yet
 };
 std::unordered_map<uint8_t*, Kit> g_Kits;
@@ -273,7 +289,8 @@ struct OwnMove {
 OwnMove g_Moves[] = {
     { "Cody_RollLeft", "CTroop_Nav_RollOut_L", 1.7f, 0 }, // the roll out of cover, quicker: a dodge
     { "Cody_RollRight", "CTroop_Nav_RollOut_R", 1.7f, 0 },
-    { "Cody_SignalLeft", "ClnCom_Signal_Left", 1.0f, 0 }, // calling his clones in
+    { "Cody_SignalLeft", "ClnCom_Signal_Left", 1.6f, 0 },     // calling his clones in
+    { "Cody_SignalStrike", "ClnCom_Signal_Strike", 2.4f, 0 }, // calling the strike in (his intro's, quicker)
 };
 constexpr int kMoveCount = int(std::size(g_Moves));
 constexpr uint32_t kSetup = 0x006965D8;
@@ -308,6 +325,7 @@ int __cdecl MoveSequences(const char* shortName, ClassSequenceFn* fns, int max)
     fns[0] = &MoveFn<0>;
     fns[1] = &MoveFn<1>;
     fns[2] = &MoveFn<2>;
+    fns[3] = &MoveFn<3>;
     LOG_INFO("Cody: his rolls and signal added to the clone trooper's moves");
     return kMoveCount;
 }
@@ -657,15 +675,26 @@ bool BodyGenerator(const std::string& lowerName, std::vector<uint8_t>& data)
 // its name) is one it is caught in (a hit's reaction R1_.. to R4_.., a finisher's R_.., a fall, being gripped,
 // stunned or shocked, dying, cut) or one of his own (a roll, a signal, his intro or outro). (The record's +0x30 bit 1,
 // which the decision test 0x173D70 reads, is clear while running, strafing or idle and set in those: no help.)
-bool CanAct()
+uint8_t* ScriptContext()
 {
-    uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(kScriptCharacterContext));
+    return *reinterpret_cast<uint8_t**>(uintptr_t(kScriptCharacterContext));
+}
+
+// A character's current sequence by its script's context (kept from its turn, the context outlives it: +0x68 the
+// character, +0x70 its state, vfunc 1 its current record, +0xC the name).
+const char* CurrentSequence(uint8_t* scripts)
+{
     uint8_t* state = scripts ? At<uint8_t*>(scripts, 0x70) : nullptr;
     if (!state)
-        return true;
+        return nullptr;
     uint8_t* record = reinterpret_cast<uint8_t*(__fastcall*)(uint8_t*, void*)>(
         (*reinterpret_cast<void* const* const*>(state))[1])(state, nullptr);
-    const char* name = record ? At<const char*>(record, 0xC) : nullptr;
+    return record ? At<const char*>(record, 0xC) : nullptr;
+}
+
+bool CanAct(uint8_t* scripts)
+{
+    const char* name = CurrentSequence(scripts);
     if (!name)
         return true;
     if (name[0] == 'R' && ((name[1] >= '1' && name[1] <= '9' && name[2] == '_') || name[1] == '_'))
@@ -676,6 +705,18 @@ bool CanAct()
         if (std::strstr(name, part))
             return false;
     return true;
+}
+
+// No reaction to a hit while he rolls (CodyDamage takes its damage away): dealt with, as the game's own ways out.
+using ReactionCallFn = bool(__fastcall*)(uint8_t*, void*, void*, void*, void*);
+ReactionCallFn g_OriginalReactionCall = nullptr;
+
+bool __fastcall ReactionCallHook(uint8_t* character, void*, void* bump, void* collision, void* sequence)
+{
+    const auto kit = g_Kits.find(character);
+    if (kit != g_Kits.end() && GetTickCount64() < kit->second.rollUntil)
+        return true;
+    return g_OriginalReactionCall(character, nullptr, bump, collision, sequence);
 }
 
 } // namespace
@@ -691,6 +732,21 @@ void InstallCody()
     if (!FindCustomCharacter("ICody"))
         return;
     AddClassSequences(&MoveSequences);
+    if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kReactionCall)), kReactionCallBytes, sizeof kReactionCallBytes) == 0) {
+        // the stub lives in the port's memory and survives reboots; the jump goes into every new image
+        static uint8_t* stub = [] {
+            uint8_t* s = AllocStub(sizeof kReactionCallBytes + 5);
+            std::memcpy(s, kReactionCallBytes, sizeof kReactionCallBytes);
+            s[sizeof kReactionCallBytes] = 0xE9;
+            const int32_t rel = int32_t(kReactionCall + sizeof kReactionCallBytes) - int32_t(uintptr_t(s) + sizeof kReactionCallBytes + 5);
+            std::memcpy(s + sizeof kReactionCallBytes + 1, &rel, 4);
+            return s;
+        }();
+        g_OriginalReactionCall = reinterpret_cast<ReactionCallFn>(stub);
+        PatchJump(kReactionCall, reinterpret_cast<const void*>(&ReactionCallHook));
+    } else {
+        LOG_WARN("Cody: unexpected code at the hit reaction; his rolls do not dodge reactions");
+    }
     RegisterResourceGenerator(&BodyGenerator);
     RegisterResourceGenerator(&HelmetGenerator);
 }
@@ -723,15 +779,30 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         return;
     }
     // nothing new while he is gripped, down, hit, rolling or falling
-    const bool free = CanAct();
+    kit.scripts = ScriptContext();
+    const bool free = CanAct(kit.scripts);
     const bool squadOut = std::any_of(g_Helpers.begin(), g_Helpers.end(), [&](const Helper& h) { return h.master == character; });
-    if (!kit.player) { // shoots as any clone; his specials when his opponent is near
+    if (!kit.player) { // shoots as any clone; up close he rolls away or strikes; his specials when his opponent is near
         uint8_t* opponent = OpponentOf(character);
-        if (!opponent || !free || kit.summon || kit.bombard)
+        if (!opponent || !free || kit.summon || kit.bombard || kit.roll || kit.melee)
             return;
         const float* p = Position(character);
         const float* q = Position(opponent);
         const float apart = std::hypot(q[0] - p[0], q[2] - p[2]);
+        if (apart < kComputerCloseIn && now >= kit.nextLook && now - kit.lastDodge >= kDodgeWaitMs) {
+            kit.nextLook = now + kComputerLookMs;
+            const uint32_t dice = Dice() % 100;
+            if (dice < 45) { // away from the saber, a little aside
+                const float side = dice % 2 ? 0.6f : -0.6f;
+                kit.rollDir[0] = p[0] - q[0] + (q[2] - p[2]) * side;
+                kit.rollDir[1] = p[2] - q[2] - (q[0] - p[0]) * side;
+                kit.lastDodge = now;
+                kit.roll = true;
+            } else if (dice < 80 && apart < kComputerStrikeWithin) {
+                kit.melee = true;
+            }
+            return;
+        }
         if (apart < kComputerCallsWithin && !squadOut && meter >= kSummonCost) {
             meter -= kSummonCost;
             kit.summon = true;
@@ -781,13 +852,13 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         kit.bombard = true;
         Say(character, "TKE", "CMC915"); // "Concentrate fire on the target!"
     }
-    // the roll, the side nearer the stick once he has turned to his opponent (CodyFrame)
+    // the roll, where the stick pointed (CodyFrame)
     if (kit.rollAsked && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs && fresh(kit.rollAsked)) {
         kit.lastDodge = now;
-        kit.roll = 3;
+        kit.roll = true;
     }
     // the blaster
-    if (!Held(kButtonHeavy)) {
+    if (!Held(kButtonHeavy) || meter < kShotCost) {
         Layer(kit, false);
         return;
     }
@@ -797,31 +868,38 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     }
     if (now - kit.lastShot >= kShotIntervalMs) {
         kit.lastShot = now;
+        meter -= kShotCost;
         Fire(script, instance);
     }
 }
 
 namespace {
 
-// A roll: facing his opponent, aside, out of reach of any hit while it lasts (the character's "Invincible?" byte,
-// +0x5D6, as Heroes vs Villains' respawns; given back after).
-void Roll(uint8_t* cody, Kit& kit, int side, ULONGLONG now)
+// A roll: the way the stick points on the screen, else away from his opponent. He is turned for the clone's roll out
+// of cover to go there (his placement, vfunc +0x1F4: rows right, up, forward, position; measured: the roll goes along
+// his forward row). While it lasts no hit lands on him (ReactionCallHook and CodyDamage).
+void Roll(uint8_t* cody, Kit& kit, float dx, float dz, ULONGLONG now)
 {
-    FaceToward(cody, OpponentOf(cody));
-    if (side == 3) { // the stick's side: by his right as he now stands (his placement's first row)
-        const float* right = reinterpret_cast<const float*>(cody + kCharacterTransform);
-        const float along = kit.rollDir[0] * right[0] + kit.rollDir[1] * right[2];
-        side = along < 0 ? 1 : 2;
+    if (std::hypot(dx, dz) < 0.01f)
+        if (uint8_t* opponent = OpponentOf(cody)) {
+            const float* p = Position(cody);
+            const float* q = Position(opponent);
+            dx = p[0] - q[0];
+            dz = p[2] - q[2];
+        }
+    const float length = std::hypot(dx, dz);
+    if (length > 0.01f) {
+        dx /= length;
+        dz /= length;
+        const float* p = Position(cody);
+        const float m[16] = { dz, 0, -dx, 0, 0, 1, 0, 0, dx, 0, dz, 0, p[0], p[1], p[2], 1 };
+        reinterpret_cast<void(__fastcall*)(uint8_t*, void*, const float*)>(
+            (*reinterpret_cast<void* const* const*>(cody))[0x1F4 / 4])(cody, nullptr, m);
     }
-    if (!PlaySequence(cody, side == 1 ? "Cody_RollLeft" : "Cody_RollRight"))
+    if (!PlaySequence(cody, "Cody_RollRight"))
         return;
-    LOG_INFO("Cody: rolls %s", side == 1 ? "left" : "right");
-    if (!kit.guarded) {
-        kit.ownInvincible = At<uint8_t>(cody, kCharacterInvincible);
-        kit.guarded = true;
-    }
-    At<uint8_t>(cody, kCharacterInvincible) = 1;
     kit.rollUntil = now + kRollGuardMs;
+    LOG_INFO("Cody: rolls (%.2f, %.2f)", dx, dz);
 }
 
 // The round is over when his opponent of the round fell (a duel brings both back for the next).
@@ -888,42 +966,34 @@ void CodyFrame()
                 kit.foe = foe;
                 kit.foeId = At<uint32_t>(foe, 4);
             }
-        // the roll's guard over
-        if (kit.guarded && now >= kit.rollUntil) {
-            At<uint8_t>(cody, kCharacterInvincible) = kit.ownInvincible;
-            kit.guarded = false;
-        }
+        // what he asked for in his script's turn, if he still can (a grab or a hit may have come in between)
+        const bool canAct = standing && kit.scripts && At<uint8_t*>(kit.scripts, 0x68) == cody && CanAct(kit.scripts);
         if (kit.summon) {
             kit.summon = false;
-            if (standing) {
+            if (canAct) {
                 PlaySequence(cody, "Cody_SignalLeft"); // he waves them in
                 CallSquad(cody, !kit.player, now);
             }
         }
         if (kit.bombard) {
             kit.bombard = false;
-            if (uint8_t* target = standing ? OpponentOf(cody) : nullptr) {
-                PlaySequence(cody, "Cody_Intro"); // the strike signal
+            if (uint8_t* target = canAct ? OpponentOf(cody) : nullptr) {
+                PlaySequence(cody, "Cody_SignalStrike"); // the strike signal
                 for (int i = 0; i < kShells; ++i)
                     g_Shells.push_back({ cody, kit.id, target, now + kFirstShellMs + ULONGLONG(i) * kShellGapMs });
                 LOG_INFO("Cody: bombardment on %p", target);
             }
         }
         if (kit.roll) {
-            if (standing)
-                Roll(cody, kit, kit.roll, now);
-            kit.roll = 0;
+            if (canAct)
+                Roll(cody, kit, kit.rollDir[0], kit.rollDir[1], now);
+            kit.roll = false;
         }
-        // the computer's Cody rolls away from his opponent's saber when it comes close, as a Jedi blocks
-        if (standing && !kit.player && now >= kit.armedAt && now - kit.lastDodge > kComputerDodgeWaitMs) {
-            if (uint8_t* opponent = OpponentOf(cody)) {
-                const float* p = Position(cody);
-                const float* q = Position(opponent);
-                kit.lastDodge = now; // looked once a wait: a roll half the time
-                if (std::hypot(q[0] - p[0], q[2] - p[2]) < 200.0f && (now / 7) % 2 == 0) {
-                    Roll(cody, kit, (now / 13) % 2 ? 1 : 2, now);
-                    LOG_INFO("Cody: the computer's Cody rolls aside");
-                }
+        if (kit.melee) { // the clone's own rifle butt, at his opponent
+            kit.melee = false;
+            if (canAct) {
+                FaceToward(cody, OpponentOf(cody));
+                PlaySequence(cody, "ctroop_atk_riflebutt");
             }
         }
         ++it;
