@@ -39,6 +39,7 @@ constexpr uint32_t kCreateSlot = 0x30 / 4;
 constexpr size_t kInfoCopy = 0x200;     // bytes of the base's class info copied (it is smaller; reads only)
 constexpr size_t kVtableCopy = 96;      // slots of its vtable copied
 constexpr uint32_t kCharacterSaberColor = 0xF20;
+constexpr uint32_t kCharacterTextureSet = 0x1EC; // its texture set, 1-based (0: the plain one)
 
 // A custom character's saber colour now: the one its pointer (+0xF20) gives when something chose one for it (a Versus
 // mirror's player 2: Saber2=, the duel's colour table), else its own.
@@ -74,6 +75,7 @@ struct Proxy {
     std::vector<uint8_t> list;           // the costume list: the custom costume, then the base's
     std::string costumeName, costumeMesh, costumeCode;
     const uint8_t* baseList = nullptr;   // the base's list the copy was made from
+    int textureSet = 0;                  // its own texture set's number (1-based, character +0x1EC), 0 none
 };
 std::vector<std::unique_ptr<Proxy>> g_Proxies;
 
@@ -101,6 +103,16 @@ void BuildList(Proxy& p, const uint8_t* baseList)
         std::memcpy(p.list.data(), baseList, kVariantRecords);
         std::memcpy(p.list.data() + kVariantRecords + kVariantRecordSize, baseList + kVariantRecords,
             size_t(count) * kVariantRecordSize);
+    }
+    // its own texture set: the header's first free suffix (+0x14, up to six; the set's number is its place + 1)
+    p.textureSet = 0;
+    for (int i = 0; i < 6 && !p.custom->textureSet.empty() && baseList; ++i) {
+        const char*& suffix = *reinterpret_cast<const char**>(p.list.data() + 0x14 + i * 4);
+        if (!suffix) {
+            suffix = p.custom->textureSet.c_str();
+            p.textureSet = i + 1;
+            break;
+        }
     }
     uint8_t* first = p.list.data() + kVariantRecords;
     *reinterpret_cast<const char**>(first) = p.costumeName.c_str();
@@ -285,7 +297,7 @@ int __cdecl SayEventHook(const char* event, const char* context, int a, int b, i
     g_DuelLine = { character, intro ? "TNT" : "KIL", intro ? "INT" : "WIN", GetTickCount64() + 4000 };
     // a borrowed or own intro (Intro=, IntroAnimation=): its speaker has no Versus lines of its own (the base never
     // dueled), so the line is asked without the context
-    const bool ownIntro = custom->intro >= 0 || !custom->introAnimation.empty();
+    const bool ownIntro = custom->intro >= 0 || !custom->introAnimation.empty() || !custom->outroAnimation.empty();
     return g_SayEvent(event, ownIntro ? "" : context, a, b, c);
 }
 
@@ -703,13 +715,15 @@ template <int... K> constexpr std::array<ClassSequenceFn, sizeof...(K)> IntroFns
 }
 constexpr auto kIntroFns = IntroFns(std::make_integer_sequence<int, kMaxIntroFns>());
 
-// A custom character's own intro (IntroAnimation=): a sequence "<costume>_Intro" playing one of its base's animations
-// the way a duelist's intro does (Vader_Intro, 0x48A990: optional, required on duel maps ("DuelMap"); at its first
-// frame 0x38A140 (instance, class object, 2, 2)), its line said as it starts. Nothing else: an attack's animation
+// A custom character's own intro and outro (IntroAnimation=, OutroAnimation=): a sequence "<costume>_Intro" or
+// "<costume>_Outro" playing one of its base's animations the way a duelist's does (Vader_Intro, 0x48A990: optional,
+// required on duel maps ("DuelMap"); at its first frame 0x38A140 (instance, class object, 2, 2)), its line said as it
+// starts (a taunt, a kill line: its own IntroLine= / OutroLine= when it has one). Nothing else: an attack's animation
 // played so is no attack (no attack-table row, no hit).
 struct OwnIntro {
-    std::string name, animation;
+    std::string name, animation, line;
     float speed = 1.0f;
+    bool outro = false;
     uint16_t handle = 0;
 };
 constexpr int kMaxOwnIntros = 8;
@@ -730,7 +744,14 @@ template <int K> bool __fastcall OwnIntroFn(uint8_t* self, void*, uint32_t, uint
     if (reinterpret_cast<bool(__fastcall*)(uint8_t*, void*)>(uintptr_t(0x001F62D0))(setup, nullptr)) { // first frame
         uint8_t* instance = *reinterpret_cast<uint8_t**>(uintptr_t(0x006964C0));
         reinterpret_cast<void(__cdecl*)(uint8_t*, uint8_t*, int, int)>(uintptr_t(0x0038A140))(instance, self, 2, 2);
-        reinterpret_cast<int(__cdecl*)(const char*, const char*, int, int, int)>(uintptr_t(kSayEvent))("TNT", "Versus", 1, 0, 0);
+        const char* event = own.outro ? "KIL" : "TNT";
+        LOG_INFO("Custom characters: %s plays", own.name.c_str());
+        if (!own.line.empty()) {
+            uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(0x006943CC));
+            if (uint8_t* character = scripts ? *reinterpret_cast<uint8_t**>(scripts + 0x68) : nullptr)
+                ForceNextLine(character, event, own.line.c_str());
+        }
+        reinterpret_cast<int(__cdecl*)(const char*, const char*, int, int, int)>(uintptr_t(kSayEvent))(event, "Versus", 1, 0, 0);
     }
     return reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, const char*, uint32_t)>(uintptr_t(0x001F6C00))(
         setup, nullptr, reinterpret_cast<const char*>(uintptr_t(0x0059C07C)), 0x7E00 + K);
@@ -756,30 +777,36 @@ int __cdecl IntroSequences(const char* shortName, ClassSequenceFn* fns, int max)
     int count = 0, owns = 0;
     bool added[std::size(kDuelists)][2] = {};
     for (const CustomCharacter& c : g_Customs) {
-        if ((c.intro < 0 && c.introAnimation.empty()) || c.base.size() < 2 || _stricmp(c.base.c_str() + 1, shortName) != 0)
+        if ((c.intro < 0 && c.introAnimation.empty() && c.outroAnimation.empty()) || c.base.size() < 2 ||
+            _stricmp(c.base.c_str() + 1, shortName) != 0)
             continue;
-        if (!c.introAnimation.empty() && owns < kMaxOwnIntros && count < max) {
+        for (int outro = 0; outro < 2; ++outro) {
+            const std::string& animation = outro ? c.outroAnimation : c.introAnimation;
+            if (animation.empty() || owns >= kMaxOwnIntros || count >= max)
+                continue;
             OwnIntro& own = g_OwnIntros[owns];
-            own.name = IntroPrefix(c) + "_Intro";
-            own.animation = c.introAnimation;
-            own.speed = c.introSpeed;
+            own.name = IntroPrefix(c) + (outro ? "_Outro" : "_Intro");
+            own.animation = animation;
+            own.speed = outro ? c.outroSpeed : c.introSpeed;
+            own.line = outro ? c.outroLine : c.introLine;
+            own.outro = outro != 0;
             own.handle = 0;
             fns[count++] = kOwnIntroFns[size_t(owns++)];
-            LOG_INFO("Custom characters: %s's duel intro is %s", c.className.c_str(), c.introAnimation.c_str());
+            LOG_INFO("Custom characters: %s's duel %s is %s", c.className.c_str(), outro ? "outro" : "intro", animation.c_str());
         }
         if (c.intro < 0)
             continue;
         const Duelist& d = kDuelists[c.intro];
-        for (int outro = c.introAnimation.empty() ? 0 : 1; outro < 2; ++outro) {
-            if (added[c.intro][outro] || count >= max || count >= kMaxIntroFns)
+        for (int outro = 0; outro < 2; ++outro) {
+            if ((outro ? !c.outroAnimation.empty() : !c.introAnimation.empty()) || added[c.intro][outro] || count >= max ||
+                count >= kMaxIntroFns)
                 continue;
             added[c.intro][outro] = true;
             g_IntroTargets[count] = outro ? d.outro : d.intro;
             fns[count] = kIntroFns[size_t(count)];
             ++count;
+            LOG_INFO("Custom characters: %s plays %s's duel %s", c.className.c_str(), d.className, outro ? "outro" : "intro");
         }
-        LOG_INFO("Custom characters: %s plays %s's duel %s", c.className.c_str(), d.className,
-            c.introAnimation.empty() ? "intro and outro" : "outro");
     }
     return count;
 }
@@ -793,7 +820,8 @@ const char* __stdcall IntroName(const uint8_t* character, const char* name, cons
     const CustomCharacter* custom = CustomCharacterOf(character);
     if (!custom)
         return name;
-    if (!custom->introAnimation.empty() && kind && _stricmp(kind, "Intro") == 0)
+    const bool outro = kind && _stricmp(kind, "Outro") == 0;
+    if (!(outro ? custom->outroAnimation : custom->introAnimation).empty()) // its own
         if (const char* own = PooledString(IntroPrefix(*custom)))
             return own;
     return custom->intro >= 0 ? kDuelists[custom->intro].prefix : name;
@@ -907,6 +935,11 @@ uint8_t* __fastcall CreateCustom(uint8_t* info, void*)
         (*reinterpret_cast<void* const* const*>(character))[1]);
     if (p->custom->hasSaber && isA(character, nullptr, 0x00249950))
         *reinterpret_cast<const float**>(character + kCharacterSaberColor) = p->custom->saber;
+    if (p->textureSet) { // its own texture set
+        *reinterpret_cast<int*>(character + kCharacterTextureSet) = p->textureSet;
+        if (!p->custom->textureSetFile.empty())
+            DeclareGeneratedResource(p->custom->textureSetFile, 0);
+    }
     g_Made.push_back(character);
     return character;
 }
@@ -1051,6 +1084,11 @@ void ReadCharacters(const std::wstring& mods)
         c.introAnimation = Profile(file, L"IntroAnimation");
         if (const std::string speed = Profile(file, L"IntroSpeed"); !speed.empty() && std::atof(speed.c_str()) > 0)
             c.introSpeed = float(std::atof(speed.c_str()));
+        c.outroAnimation = Profile(file, L"OutroAnimation");
+        if (const std::string speed = Profile(file, L"OutroSpeed"); !speed.empty() && std::atof(speed.c_str()) > 0)
+            c.outroSpeed = float(std::atof(speed.c_str()));
+        c.introLine = Upper(Profile(file, L"IntroLine"));
+        c.outroLine = Upper(Profile(file, L"OutroLine"));
         if (const std::string intro = Profile(file, L"Intro"); !intro.empty()) {
             for (size_t i = 0; i < std::size(kDuelists); ++i)
                 if (_stricmp(intro.c_str(), kDuelists[i].className) == 0 && _stricmp(intro.c_str(), c.base.c_str()) != 0)
@@ -1168,6 +1206,11 @@ void AddBuiltInCharacters()
     c.force = 1000;
     c.side = 0;
     c.introAnimation = "ClnCom_Signal_Strike";
+    c.introLine = "CMC951";              // "Ready weapons."
+    c.outroAnimation = "ClnCom_Signal_Right";
+    c.outroLine = "CMC967";              // "Target eliminated."
+    c.textureSet = "_cody";              // his helmet's markings (cody.cpp)
+    c.textureSetFile = "meshes\\chars\\clonetrooper\\hordetrooper_cody.stx";
     c.selectBust = "s_selduel_codybust";
     c.face = c.hudFace = "interfc\\hud_b\\hud_face_codyport01";
     c.source = "(built in)";
@@ -1447,7 +1490,7 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         PatchJump(kJediSetup, reinterpret_cast<const void*>(&JediSetupHook));
     }
     if (std::any_of(g_Customs.begin(), g_Customs.end(),
-            [](const CustomCharacter& c) { return c.intro >= 0 || !c.introAnimation.empty(); })) {
+            [](const CustomCharacter& c) { return c.intro >= 0 || !c.introAnimation.empty() || !c.outroAnimation.empty(); })) {
         if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kIntroName)), kIntroNameBytes, sizeof kIntroNameBytes) == 0) {
             AddClassSequences(&IntroSequences);
             PatchJump(kIntroName, reinterpret_cast<const void*>(&IntroNameEntry));

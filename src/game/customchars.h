@@ -45,6 +45,9 @@ struct CustomCharacter {
                              // cameras), an index into the port's duelists; -1 the base's own
     std::string introAnimation; // its intro is this animation of its base's instead (IntroAnimation=, e.g. the Jedi
     float introSpeed = 1.0f;    // Brute's twirl), played as a duelist's intro is (no attack), at this speed
+    std::string outroAnimation; // its outro (a round won) likewise (OutroAnimation=, OutroSpeed=)
+    float outroSpeed = 1.0f;
+    std::string introLine, outroLine; // the line said in them (IntroLine=, OutroLine=: a dialogue line id, e.g. CMC951)
     int side = 0;            // 0 hero, 1 villain (Heroes vs Villains' default side)
     std::string hudFace;     // the HUD portrait shown for it (a donor's path, its picture served: see customchars.cpp)
     std::string face;        // its HUD portrait's path (interfc\hud_b\hud_face_<costume>01), when the mod has one
@@ -53,6 +56,11 @@ struct CustomCharacter {
     // disc's (selectBust, a picture the menus' PAK has) and copies of disc pictures the port writes (generated)
     bool builtIn = false;
     std::string selectBust;  // e.g. "s_selduel_codybust"
+    // a texture set of its own (the costume list header's suffixes, +0x14.., one picked by character +0x1EC): its body's
+    // textures are asked for with this suffix (e.g. "_cody": hordetrooper_cody.stx), made by a generator; the one named
+    // here is declared to the level when it is created (the body's load asks only for declared ones)
+    std::string textureSet;
+    std::string textureSetFile;
 };
 
 // Each start of the game image, before the classes are first looked up: reads mods\characters\*.ini and hooks the

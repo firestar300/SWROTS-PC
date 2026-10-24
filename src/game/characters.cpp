@@ -22,6 +22,7 @@
 #include "game/coop.h"
 #include "game/customchars.h"
 #include "game/game.h"
+#include "game/hvv.h"
 #include "game/resources.h"
 #include "kernel/kernel.h"
 
@@ -813,9 +814,33 @@ const uint8_t* g_FriendlyFireA = nullptr;
 const uint8_t* g_FriendlyFireB = nullptr;
 constexpr uintptr_t kHitCallers[] = { 0x0015A396, 0x0014FE50, 0x00156142, 0x0015673E, 0x002675F3 };
 
+// Helpers (SpawnHelper) and whose: a helper is on its master's side, whatever teams the level gives (a duel gives its
+// player every team but the opponent's, so a helper with its master's teams was still taken for the player's enemy).
+struct HelperOf {
+    uint32_t id;
+    const uint8_t* master;
+};
+std::unordered_map<const uint8_t*, HelperOf> g_HelperMasters;
+
+const uint8_t* HelperMaster(const uint8_t* character)
+{
+    const auto it = g_HelperMasters.find(character);
+    return it != g_HelperMasters.end() && *reinterpret_cast<const uint32_t*>(character + 4) == it->second.id ?
+        it->second.master : nullptr;
+}
+
 bool __fastcall IsEnemyHook(uint8_t* brain, void* edx, uint8_t* other, int flag)
 {
     const uint8_t* self = brain ? *reinterpret_cast<uint8_t* const*>(brain + 0x10) : nullptr;
+    if (self && other && self != other && !g_HelperMasters.empty()) {
+        const uint8_t* selfMaster = HelperMaster(self);
+        const uint8_t* otherMaster = HelperMaster(other);
+        if (selfMaster || otherMaster) {
+            const uint8_t* a = selfMaster ? selfMaster : self;
+            const uint8_t* b = otherMaster ? otherMaster : other;
+            return a != b && !HvvSameSide(a, b);
+        }
+    }
     if (g_FriendlyFireA && self && other &&
         ((self == g_FriendlyFireA && other == g_FriendlyFireB) || (self == g_FriendlyFireB && other == g_FriendlyFireA))) {
         const uintptr_t caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
@@ -854,6 +879,7 @@ std::vector<NeutralSpawn> g_Neutrals;
 void InstallCharacters()
 {
     g_Neutrals.clear();
+    g_HelperMasters.clear();
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kIsEnemy)), kIsEnemyPrologue, sizeof(kIsEnemyPrologue)) == 0) {
         uint8_t* stub = AllocStub(16);
         std::memcpy(stub, kIsEnemyPrologue, sizeof(kIsEnemyPrologue));
@@ -1824,6 +1850,7 @@ uint8_t* SpawnHelper(const char* className, const std::string& skin, uint8_t* ma
         ai[kAIHasSide] = 1;
         ai[kAITargetPlayer] = againstPlayer ? 1 : 0;
     }
+    g_HelperMasters[object] = { *reinterpret_cast<uint32_t*>(object + 4), master }; // its side (IsEnemyHook)
     LOG_INFO("Characters: %s for %p at %.0f %.0f %.0f", who, master, place[12], place[13], place[14]);
     ++g_SpawnedInLevel;
     g_SpawnedCharacters.push_back({ object, *reinterpret_cast<uint32_t*>(object + 4) });

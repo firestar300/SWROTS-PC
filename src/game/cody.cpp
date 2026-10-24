@@ -44,7 +44,8 @@ namespace {
 constexpr uint32_t kHeldFrames = 0x00177FF0;             // cdecl int (button, 0), in a script's turn
 constexpr uint32_t kPressed = 0x00178070;                // cdecl bool (button, 1, 0, 2)
 constexpr uint32_t kButtonHeavy = 0x006964DC, kButtonCritical = 0x006964EC; // the script's button ids (Y, B)
-constexpr uint32_t kButtonBlock = 0x006964E4, kButtonPush = 0x006964E8;     // (LT, RT)
+constexpr uint32_t kButtonPush = 0x006964E8;     // (RT: F)
+constexpr uint32_t kButtonDodge = 0x00696500;    // White (L1: Q; the Jedi's saber throw): LT is the lock-on's
 constexpr uint32_t kSayEvent = 0x0017ACC0;               // cdecl (event, context, 1, 0, 0): the script character says
 constexpr uint32_t kScriptHasTarget = 0x00176FF0;   // cdecl bool ()
 constexpr uint32_t kScriptPlayLayer = 0x00173B40;   // cdecl (animation, ...): an animation layer
@@ -219,6 +220,24 @@ uint8_t* OpponentOf(uint8_t* character)
     return best;
 }
 
+// Turns a character to face another where it stands (its placement, vfunc +0x1F4: rows right, up, forward, position).
+void FaceToward(uint8_t* character, uint8_t* other)
+{
+    if (!other)
+        return;
+    const float* p = Position(character);
+    const float* q = Position(other);
+    float f[3] = { q[0] - p[0], 0, q[2] - p[2] };
+    const float length = std::hypot(f[0], f[2]);
+    if (length < 1)
+        return;
+    f[0] /= length;
+    f[2] /= length;
+    const float m[16] = { f[2], 0, -f[0], 0, 0, 1, 0, 0, f[0], 0, f[2], 0, p[0], p[1], p[2], 1 };
+    reinterpret_cast<void(__fastcall*)(uint8_t*, void*, const float*)>(
+        (*reinterpret_cast<void* const* const*>(character))[0x1F4 / 4])(character, nullptr, m);
+}
+
 // Plays one of a character's sequences by name, as the duel plays an intro; false without it.
 bool PlaySequence(uint8_t* character, const char* name)
 {
@@ -231,26 +250,35 @@ bool PlaySequence(uint8_t* character, const char* name)
 struct OwnMove {
     const char* name;
     const char* animation;
+    float speed;
     uint16_t handle;
 };
 OwnMove g_Moves[] = {
-    { "Cody_RollLeft", "CTroop_Nav_RollOut_L", 0 },
-    { "Cody_RollRight", "CTroop_Nav_RollOut_R", 0 },
-    { "Cody_SignalLeft", "ClnCom_Signal_Left", 0 }, // calling his clones in
+    { "Cody_RollLeft", "CTroop_Nav_RollOut_L", 1.7f, 0 }, // the roll out of cover, quicker: a dodge
+    { "Cody_RollRight", "CTroop_Nav_RollOut_R", 1.7f, 0 },
+    { "Cody_SignalLeft", "ClnCom_Signal_Left", 1.0f, 0 }, // calling his clones in
 };
 constexpr int kMoveCount = int(std::size(g_Moves));
 constexpr uint32_t kSetup = 0x006965D8;
 const char kDuelMapTag[] = "DuelMap";
 
-template <int K> bool __fastcall MoveFn(uint8_t*, void*, uint32_t, uint32_t)
+// As the clone's own roll (CTroop_Nav_RollOut_L, 0x3575B0): optional (and its flag 0x696537); at its first frame
+// 0x38A140 (instance, class object, -1, -1), which hands the character back to its state machine when the move ends
+// (without it the move played on and on).
+template <int K> bool __fastcall MoveFn(uint8_t* self, void*, uint32_t, uint32_t)
 {
     auto* setup = reinterpret_cast<uint8_t*>(uintptr_t(kSetup));
     OwnMove& move = g_Moves[K];
     const bool declared = reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint16_t*, const char*, const char*, float, uint32_t)>(
-        uintptr_t(0x001F5B20))(setup, nullptr, &move.handle, move.name, move.animation, 1.0f, 0x0055FB60);
+        uintptr_t(0x001F5B20))(setup, nullptr, &move.handle, move.name, move.animation, move.speed, 0x0055FB60);
     if (declared) { // optional, required on duel maps (as Vader_Intro)
         *reinterpret_cast<uint8_t*>(uintptr_t(0x00696531)) = 1;
+        *reinterpret_cast<uint8_t*>(uintptr_t(0x00696537)) = 1;
         *reinterpret_cast<const char**>(uintptr_t(0x006964B8)) = kDuelMapTag;
+    }
+    if (reinterpret_cast<bool(__fastcall*)(uint8_t*, void*)>(uintptr_t(0x001F62D0))(setup, nullptr)) { // first frame
+        uint8_t* instance = *reinterpret_cast<uint8_t**>(uintptr_t(0x006964C0));
+        reinterpret_cast<void(__cdecl*)(uint8_t*, uint8_t*, int, int)>(uintptr_t(0x0038A140))(instance, self, -1, -1);
     }
     return reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, const char*, uint32_t)>(uintptr_t(0x001F6C00))(
         setup, nullptr, reinterpret_cast<const char*>(uintptr_t(0x0059C07C)), 0x7D00 + K);
@@ -409,9 +437,187 @@ void FireShell(uint8_t* cody, uint8_t* target)
 constexpr const char* kBodySource = "meshes\\chars\\clonetrooper\\hordetrooper.msh";
 constexpr const char* kBody = "meshes\\chars\\clonetrooper\\hordetrooper_cody.msh";
 const std::vector<MeshBox> kRangefinder = {
-    { { 3.9f, 67.0f, -0.4f }, { 5.0f, 69.4f, 1.5f }, { 30.5f, 109.5f } },   // the housing over the ear
-    { { 4.6f, 69.2f, 0.25f }, { 4.95f, 75.6f, 0.65f }, { 24.5f, 97.5f } },  // the stalk
+    { { 3.7f, 70.3f, -0.6f }, { 4.9f, 72.6f, 1.6f }, { 30.5f, 109.5f } },   // the housing on the dome's side, high
+    { { 4.2f, 71.5f, -0.9f }, { 4.55f, 77.2f, -0.5f }, { 24.5f, 97.5f } },  // the antenna rising past the top
 };
+
+// His markings: the 212th's helmet (one 128x128 DXT1 texture for the whole body, the helmet unwrapped once and mirrored
+// on both sides, u 0 the front's middle) gets an orange brow over the visor wrapping round the dome, and an orange
+// panel by each end of the visor's top: in the 212th's own orange (its dome ring's), shaded by the plate's own
+// brightness (its scratches kept), with a soft edge. Only the blocks they touch are decoded, painted and encoded
+// again. Served as the texture set "_cody" of his costume (customchars.cpp), so the clones keep theirs.
+constexpr const char* kHelmetSource = "meshes\\chars\\clonetrooper\\hordetrooper.stx";
+constexpr const char* kHelmetTexture = "meshes\\chars\\clonetrooper\\hordetrooper_cody.stx";
+constexpr const char kHelmetName[] = "hordeTrooper_cody";
+constexpr size_t kStxPixels = 0x184, kStxNameAt = 0x40;
+constexpr int kTextureSize = 128;
+
+struct Point {
+    float x, y;
+};
+const std::vector<std::vector<Point>> kMarkings = { // polygons in texels
+    { { 0, 89 }, { 16, 89.5f }, { 16, 94 }, { 14, 99.5f }, { 0, 99.5f } },                                  // brow
+    { { 16, 89.5f }, { 26, 90 }, { 33, 91 }, { 35, 92.5f }, { 32, 94 }, { 16, 94 } },                       // its wing
+    { { 13, 99.5f }, { 16, 94 }, { 22, 94 }, { 22, 100 }, { 20, 106 }, { 17, 111 }, { 14, 110 }, { 13, 103 } }, // cheek
+};
+
+bool Inside(const std::vector<Point>& p, float x, float y)
+{
+    bool in = false;
+    for (size_t i = 0, j = p.size() - 1; i < p.size(); j = i++)
+        if ((p[i].y > y) != (p[j].y > y) && x < (p[j].x - p[i].x) * (y - p[i].y) / (p[j].y - p[i].y) + p[i].x)
+            in = !in;
+    return in;
+}
+
+void Colour565(uint16_t c, float rgb[3])
+{
+    rgb[0] = float((c >> 11) & 31) * 255.0f / 31.0f;
+    rgb[1] = float((c >> 5) & 63) * 255.0f / 63.0f;
+    rgb[2] = float(c & 31) * 255.0f / 31.0f;
+}
+
+uint16_t To565(const float rgb[3])
+{
+    const auto q = [](float v, int bits) { return std::clamp(int(v * float((1 << bits) - 1) / 255.0f + 0.5f), 0, (1 << bits) - 1); };
+    return uint16_t(q(rgb[0], 5) << 11 | q(rgb[1], 6) << 5 | q(rgb[2], 5));
+}
+
+void DecodeBlock(const uint8_t* block, float texels[16][3])
+{
+    const uint16_t c0 = uint16_t(block[0] | block[1] << 8), c1 = uint16_t(block[2] | block[3] << 8);
+    float palette[4][3];
+    Colour565(c0, palette[0]);
+    Colour565(c1, palette[1]);
+    for (int k = 0; k < 3; ++k) {
+        palette[2][k] = c0 > c1 ? (2 * palette[0][k] + palette[1][k]) / 3 : (palette[0][k] + palette[1][k]) / 2;
+        palette[3][k] = c0 > c1 ? (palette[0][k] + 2 * palette[1][k]) / 3 : 0;
+    }
+    for (int i = 0; i < 16; ++i)
+        std::memcpy(texels[i], palette[(block[4 + i / 4] >> (2 * (i % 4))) & 3], sizeof texels[i]);
+}
+
+// A plain encoder: the block's darkest and brightest texels as the ends, each texel the nearest of the four.
+void EncodeBlock(const float texels[16][3], uint8_t* block)
+{
+    const auto luma = [](const float* c) { return 0.299f * c[0] + 0.587f * c[1] + 0.114f * c[2]; };
+    int lo = 0, hi = 0;
+    for (int i = 1; i < 16; ++i) {
+        lo = luma(texels[i]) < luma(texels[lo]) ? i : lo;
+        hi = luma(texels[i]) > luma(texels[hi]) ? i : hi;
+    }
+    uint16_t c0 = To565(texels[hi]), c1 = To565(texels[lo]);
+    if (c0 < c1)
+        std::swap(c0, c1);
+    float palette[4][3];
+    Colour565(c0, palette[0]);
+    Colour565(c1, palette[1]);
+    for (int k = 0; k < 3; ++k) {
+        palette[2][k] = (2 * palette[0][k] + palette[1][k]) / 3;
+        palette[3][k] = (palette[0][k] + 2 * palette[1][k]) / 3;
+    }
+    block[0] = uint8_t(c0);
+    block[1] = uint8_t(c0 >> 8);
+    block[2] = uint8_t(c1);
+    block[3] = uint8_t(c1 >> 8);
+    for (int row = 0; row < 4; ++row) {
+        uint8_t bits = 0;
+        for (int col = 0; col < 4; ++col) {
+            const float* t = texels[row * 4 + col];
+            int best = 0;
+            float bestDistance = 1e30f;
+            for (int p = 0; p < (c0 == c1 ? 1 : 4); ++p) {
+                float d = 0;
+                for (int k = 0; k < 3; ++k)
+                    d += (t[k] - palette[p][k]) * (t[k] - palette[p][k]);
+                if (d < bestDistance) {
+                    bestDistance = d;
+                    best = p;
+                }
+            }
+            bits = uint8_t(bits | best << (2 * col));
+        }
+        block[4 + row] = bits;
+    }
+}
+
+bool PaintHelmet(std::vector<uint8_t>& data)
+{
+    constexpr int blocks = kTextureSize / 4;
+    if (data.size() < kStxPixels + size_t(blocks * blocks * 8) || std::memcmp(data.data(), "STX", 4) != 0 || data[8] != 3)
+        return false;
+    std::vector<float> image(size_t(kTextureSize * kTextureSize * 3));
+    const auto at = [&](int x, int y) { return &image[size_t((y * kTextureSize + x) * 3)]; };
+    for (int b = 0; b < blocks * blocks; ++b) {
+        float texels[16][3];
+        DecodeBlock(&data[kStxPixels + size_t(b) * 8], texels);
+        for (int i = 0; i < 16; ++i)
+            std::memcpy(at((b % blocks) * 4 + i % 4, (b / blocks) * 4 + i / 4), texels[i], sizeof texels[i]);
+    }
+    const auto luma = [](const float* c) { return 0.299f * c[0] + 0.587f * c[1] + 0.114f * c[2]; };
+    float orange[3] = {}, white = 0;
+    int oranges = 0, whites = 0;
+    for (int y = 79; y <= 84; ++y) // the dome's ring
+        for (int x = 8; x <= 36; ++x) {
+            const float* c = at(x, y);
+            if (c[0] > 170 && c[1] > 95 && c[1] < 190 && c[2] < 110) {
+                for (int k = 0; k < 3; ++k)
+                    orange[k] += c[k];
+                ++oranges;
+            }
+        }
+    for (int y = 87; y <= 93; ++y) // the dome's plate
+        for (int x = 16; x <= 36; ++x, ++whites)
+            white += luma(at(x, y));
+    if (!oranges || !whites)
+        return false;
+    for (float& o : orange)
+        o /= float(oranges);
+    white /= float(whites);
+    std::vector<uint8_t> mark(size_t(kTextureSize * kTextureSize), 0); // 2 painted, 1 its edge
+    for (int y = 0; y < kTextureSize; ++y)
+        for (int x = 0; x < kTextureSize; ++x)
+            for (const auto& p : kMarkings)
+                if (Inside(p, float(x) + 0.5f, float(y) + 0.5f))
+                    mark[size_t(y * kTextureSize + x)] = 2;
+    const auto painted = [&](int x, int y) {
+        return x >= 0 && y >= 0 && x < kTextureSize && y < kTextureSize && mark[size_t(y * kTextureSize + x)] == 2;
+    };
+    for (int y = 0; y < kTextureSize; ++y)
+        for (int x = 0; x < kTextureSize; ++x)
+            if (!mark[size_t(y * kTextureSize + x)] && (painted(x - 1, y) || painted(x + 1, y) || painted(x, y - 1) || painted(x, y + 1)))
+                mark[size_t(y * kTextureSize + x)] = 1;
+    std::vector<bool> touched(size_t(blocks * blocks), false);
+    for (int y = 0; y < kTextureSize; ++y)
+        for (int x = 0; x < kTextureSize; ++x) {
+            const uint8_t m = mark[size_t(y * kTextureSize + x)];
+            if (!m)
+                continue;
+            float* c = at(x, y);
+            const float shade = std::clamp(luma(c) / white, 0.0f, 1.15f);
+            for (int k = 0; k < 3; ++k) {
+                const float paint = std::min(255.0f, orange[k] * shade);
+                c[k] = m == 2 ? paint : (c[k] + paint) / 2;
+            }
+            touched[size_t((y / 4) * blocks + x / 4)] = true;
+        }
+    for (int b = 0; b < blocks * blocks; ++b) {
+        if (!touched[size_t(b)])
+            continue;
+        float texels[16][3];
+        for (int i = 0; i < 16; ++i)
+            std::memcpy(texels[i], at((b % blocks) * 4 + i % 4, (b / blocks) * 4 + i / 4), sizeof texels[i]);
+        EncodeBlock(texels, &data[kStxPixels + size_t(b) * 8]);
+    }
+    std::memset(&data[kStxNameAt], 0, 32);
+    std::memcpy(&data[kStxNameAt], kHelmetName, sizeof kHelmetName - 1);
+    return true;
+}
+
+bool HelmetGenerator(const std::string& lowerName, std::vector<uint8_t>& data)
+{
+    return lowerName == kHelmetTexture && ReadDiscResource(kHelmetSource, data) && PaintHelmet(data);
+}
 
 bool BodyGenerator(const std::string& lowerName, std::vector<uint8_t>& data)
 {
@@ -440,6 +646,7 @@ void InstallCody()
         return;
     AddClassSequences(&MoveSequences);
     RegisterResourceGenerator(&BodyGenerator);
+    RegisterResourceGenerator(&HelmetGenerator);
 }
 
 void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
@@ -500,7 +707,7 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         Say(character, "TKE", "CMC915"); // "Concentrate fire on the target!"
     }
     // the roll: on the press of block, to the stick's side (the left without one)
-    const bool block = Held(kButtonBlock);
+    const bool block = Held(kButtonDodge);
     if (block && !kit.lastBlock && !kit.roll && meter >= kDodgeCost) {
         meter -= kDodgeCost;
         kit.roll = Direction(0x001F54C0, instance) ? 2 : 1;
@@ -588,9 +795,11 @@ void CodyFrame()
             }
         }
         if (kit.roll) {
-            if (standing)
+            if (standing) { // facing his opponent, aside
+                FaceToward(cody, OpponentOf(cody));
                 LOG_INFO("Cody: rolls %s%s", kit.roll == 1 ? "left" : "right",
                     PlaySequence(cody, kit.roll == 1 ? "Cody_RollLeft" : "Cody_RollRight") ? "" : " (refused)");
+            }
             kit.roll = 0;
         }
         // the computer's Cody rolls aside now and then when his opponent comes close
@@ -601,7 +810,7 @@ void CodyFrame()
                 const float* p = Position(cody);
                 const float* q = Position(opponent);
                 kit.lastDodge = now; // looked once a wait: a roll a third of the time
-                if (std::hypot(q[0] - p[0], q[2] - p[2]) < 170.0f && (now / 7) % 3 == 0 &&
+                if (std::hypot(q[0] - p[0], q[2] - p[2]) < 170.0f && (now / 7) % 3 == 0 && (FaceToward(cody, opponent), true) &&
                     PlaySequence(cody, (now / 13) % 2 ? "Cody_RollLeft" : "Cody_RollRight")) {
                     meter -= kDodgeCost;
                     LOG_INFO("Cody: the computer's Cody rolls aside");
