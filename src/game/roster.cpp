@@ -724,6 +724,8 @@ void BuildExtras()
         for (int player = 0; player < 2; ++player)
             for (int k = 0; k < 3 && custom.hasSaber; ++k)
                 extra.sabers[player][k] = custom.saber[k];
+        for (int k = 0; k < 3 && custom.hasSaber2; ++k) // a mirror's player 2
+            extra.sabers[1][k] = custom.saber2[k];
         extra.meshes = nullptr;
         g_Extras.push_back(extra);
         LOG_INFO("Roster: %s on the Versus select screen (slot %d)", custom.className.c_str(),

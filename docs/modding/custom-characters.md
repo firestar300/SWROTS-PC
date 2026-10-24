@@ -38,6 +38,7 @@ Base=IAnakin             ; the class whose moves, AI and sounds it has
 Costume=Luke             ; its costume's name
 Mesh=luke\luke           ; its body, under meshes\chars, without .msh
 Saber=0 255 0            ; its saber's colour, 0-255 each (optional; 0 255 0 is the game's own green)
+Saber2=255 0 0           ; player 2's when both Versus players pick it (optional; as the game's dark Anakin)
 Blades=single            ; its saber: single, double (double-bladed) or dual (two sabers) (optional; the base's)
 Hilt=LsaberObi\LsaberObi ; its hilt, a weapon mesh under meshes\weapons, without .msh (optional; the base's)
 Scale=1                  ; its size (optional; 0.86 makes a Jedi Brute body about as tall as Vader)

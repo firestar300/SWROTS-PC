@@ -40,6 +40,16 @@ constexpr size_t kInfoCopy = 0x200;     // bytes of the base's class info copied
 constexpr size_t kVtableCopy = 96;      // slots of its vtable copied
 constexpr uint32_t kCharacterSaberColor = 0xF20;
 
+// A custom character's saber colour now: the one its pointer (+0xF20) gives when something chose one for it (a Versus
+// mirror's player 2: Saber2=, the duel's colour table), else its own.
+const float* SaberColourOf(const uint8_t* character, const CustomCharacter& custom)
+{
+    const float* chosen = *reinterpret_cast<const float* const*>(character + kCharacterSaberColor);
+    if (chosen && chosen != custom.saber && (chosen[0] != 0 || chosen[1] != 0 || chosen[2] != 0))
+        return chosen;
+    return custom.saber;
+}
+
 // A Jedi's sabers: the class's Init fills up to 4 weapon records (+0x1064, 0x20 bytes each: +0 double-bladed flag, +4
 // the hilt mesh (a TString), +8 its colour) before the Jedi's weapon setup (0x2814C0) makes a saber of each record
 // with a mesh (0x280480: the double-bladed class for a flagged one). The Jedi Brute's is double-bladed (Lsaberjdbrute,
@@ -282,7 +292,7 @@ void __cdecl ApplyBlades(uint8_t* character)
     // which the +0xF20 override does not cover (the Jedi Brute's is the green key colour)
     if (custom->hasSaber)
         for (int i = 0; i < 2; ++i)
-            std::memcpy(first + i * kWeaponRecordSize + 8, custom->saber, sizeof custom->saber);
+            std::memcpy(first + i * kWeaponRecordSize + 8, SaberColourOf(character, *custom), sizeof custom->saber);
     // its own hilt (a single blade's: a double-bladed one keeps the double hilt the blades need)
     if (!custom->hilt.empty() && custom->blades != 2 && !first[0])
         AssignString(first + 4, custom->hilt.c_str());
@@ -351,12 +361,13 @@ void __fastcall ChargeupPickHook(void* self, void*, uint8_t* instance, void* a, 
     if (!custom || !custom->hasSaber || !instance)
         return g_ChargeupPick(self, nullptr, instance, a, b, c, d);
     static const float kColours[4][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { 1, 0, 1 } };
+    const float* saber = SaberColourOf(character, *custom);
     int best = 0;
     float bestDistance = 1e9f;
     for (int i = 0; i < 4; ++i) {
         float distance = 0;
         for (int k = 0; k < 3; ++k)
-            distance += (custom->saber[k] - kColours[i][k]) * (custom->saber[k] - kColours[i][k]);
+            distance += (saber[k] - kColours[i][k]) * (saber[k] - kColours[i][k]);
         if (distance < bestDistance) {
             bestDistance = distance;
             best = i;
@@ -815,7 +826,7 @@ const float* OwnColour(uint8_t* weapon)
                 continue;
             for (int i = 0; i < 4; ++i)
                 if (*reinterpret_cast<uint8_t**>(c + kCharacterWeapons + i * 0x20) == weapon)
-                    return custom->saber;
+                    return SaberColourOf(c, *custom);
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
@@ -967,6 +978,12 @@ void ReadCharacters(const std::wstring& mods)
             c.saber[0] = r / 255.0f;
             c.saber[1] = g / 255.0f;
             c.saber[2] = b / 255.0f;
+        }
+        if (std::sscanf(Profile(file, L"Saber2").c_str(), "%d %d %d", &r, &g, &b) == 3) {
+            c.hasSaber2 = true;
+            c.saber2[0] = r / 255.0f;
+            c.saber2[1] = g / 255.0f;
+            c.saber2[2] = b / 255.0f;
         }
         c.side = _stricmp(Profile(file, L"Side", L"Hero").c_str(), "villain") == 0 ? 1 : 0;
         c.scale = std::clamp(float(atof(Profile(file, L"Scale", L"1").c_str())), 0.5f, 2.0f);
