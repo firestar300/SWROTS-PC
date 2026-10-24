@@ -741,9 +741,13 @@ template <int K> bool __fastcall OwnIntroFn(uint8_t* self, void*, uint32_t, uint
         *reinterpret_cast<uint8_t*>(uintptr_t(0x00696531)) = 1;
         *reinterpret_cast<const char**>(uintptr_t(0x006964B8)) = kDuelMapTag;
     }
-    if (reinterpret_cast<bool(__fastcall*)(uint8_t*, void*)>(uintptr_t(0x001F62D0))(setup, nullptr)) { // first frame
+    if (reinterpret_cast<bool(__fastcall*)(uint8_t*, void*)>(uintptr_t(0x001F62D0))(setup, nullptr)) { // as Vader's
         uint8_t* instance = *reinterpret_cast<uint8_t**>(uintptr_t(0x006964C0));
         reinterpret_cast<void(__cdecl*)(uint8_t*, uint8_t*, int, int)>(uintptr_t(0x0038A140))(instance, self, 2, 2);
+    }
+    // its line as it starts (0x1F6310: the event the Jedi Brute's twirl turns its spinning saber on at; 0x1F62D0's
+    // came as the intro ended)
+    if (reinterpret_cast<bool(__fastcall*)(uint8_t*, void*)>(uintptr_t(0x001F6310))(setup, nullptr)) {
         const char* event = own.outro ? "KIL" : "TNT";
         LOG_INFO("Custom characters: %s plays", own.name.c_str());
         if (!own.line.empty()) {

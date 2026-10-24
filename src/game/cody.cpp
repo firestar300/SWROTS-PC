@@ -5,7 +5,7 @@
 // playable Cody (ICommanderCody, whose script survives, rules 0x360D00) had his own: a shot on fast attack and a burst
 // on heavy attack for 250 of his meter. Here his meter (Force +0xA40, which the clone has; refilled here) pays for all
 // he does beyond the rifle butt, for the player's Cody and the computer's alike:
-//   - heavy attack (Y) held: the shooting layer and a bolt every kShotIntervalMs, kShotCost each (in the clone's
+//   - heavy attack (Y) held: the shooting layer and a bolt every kShotIntervalMs (in the clone's
 //     script's turn: its StateManager, called for every clone every frame, the input functions reading the script's
 //     character's own controller);
 //   - block (LT): a roll aside (left or right with the stick), the clone's roll out of cover (CTroop_Nav_RollOut_L/R)
@@ -66,7 +66,10 @@ constexpr uintptr_t kFindSequence = 0x150D60;  // ICharacter, thiscall (name) ->
 
 // his meter
 constexpr float kMeterPerSecond = 35;
-constexpr float kShotCost = 15, kSummonCost = 500, kBombardCost = 400, kDodgeCost = 150;
+constexpr float kSummonCost = 500, kBombardCost = 400;
+// his dodge costs nothing (a Jedi's block costs no Force either), one a kDodgeWaitMs at most, and no hit lands on him
+// while he rolls (kRollGuardMs: a roll in time beats a combo, as a block does)
+constexpr ULONGLONG kDodgeWaitMs = 700, kRollGuardMs = 650;
 constexpr ULONGLONG kShotIntervalMs = 400;
 constexpr ULONGLONG kHelperLifeMs = 25000;
 constexpr ULONGLONG kComputerDodgeWaitMs = 2500; // the computer's Cody: one dodge in this long at most
@@ -109,7 +112,7 @@ struct Kit {
     // a player's Cody: he had a controller (+0x43C, -1 for none) once since he came. The game's own test (0x1545A0)
     // also counts a player's character as the computer's while its AI drives it (the duel's intro), so it is not asked
     bool player = false;
-    ULONGLONG lastShot = 0, lastFrame = 0, lastDodge = 0;
+    ULONGLONG lastShot = 0, lastFrame = 0, lastDodge = 0, rollUntil = 0;
     bool summon = false;  // asked for, made in CodyFrame
     bool bombard = false; // likewise
     int roll = 0;         // likewise: 1 left, 2 right
@@ -437,8 +440,9 @@ void FireShell(uint8_t* cody, uint8_t* target)
 constexpr const char* kBodySource = "meshes\\chars\\clonetrooper\\hordetrooper.msh";
 constexpr const char* kBody = "meshes\\chars\\clonetrooper\\hordetrooper_cody.msh";
 const std::vector<MeshBox> kRangefinder = {
-    { { 3.7f, 70.3f, -0.6f }, { 4.9f, 72.6f, 1.6f }, { 30.5f, 109.5f } },   // the housing on the dome's side, high
-    { { 4.2f, 71.5f, -0.9f }, { 4.55f, 77.2f, -0.5f }, { 24.5f, 97.5f } },  // the antenna rising past the top
+    { { 3.8f, 68.8f, 0.2f }, { 4.7f, 74.4f, 1.8f }, { 24.0f, 88.0f } },     // the unit: a tall flat panel on the side,
+                                                                          // just behind the visor, white as the dome
+    { { 4.05f, 74.4f, 0.75f }, { 4.4f, 76.4f, 1.1f }, { 24.5f, 97.5f } },  // its short dark antenna on top
 };
 
 // His markings: the 212th's helmet (one 128x128 DXT1 texture for the whole body, the helmet unwrapped once and mirrored
@@ -684,11 +688,11 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         const float* p = Position(character);
         const float* q = Position(opponent);
         const float apart = std::hypot(q[0] - p[0], q[2] - p[2]);
-        if (apart < kComputerCallsWithin && !squadOut && meter >= kSummonCost + kDodgeCost) {
+        if (apart < kComputerCallsWithin && !squadOut && meter >= kSummonCost) {
             meter -= kSummonCost;
             kit.summon = true;
             Say(character, "TKE", "CLC013");
-        } else if (apart > 250 && apart < kComputerCallsWithin && meter >= kBombardCost + kDodgeCost + 100) {
+        } else if (apart > 250 && apart < kComputerCallsWithin && meter >= kBombardCost + 100) {
             meter -= kBombardCost;
             kit.bombard = true;
             Say(character, "TKE", "CMC915");
@@ -708,13 +712,13 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     }
     // the roll: on the press of block, to the stick's side (the left without one)
     const bool block = Held(kButtonDodge);
-    if (block && !kit.lastBlock && !kit.roll && meter >= kDodgeCost) {
-        meter -= kDodgeCost;
+    if (block && !kit.lastBlock && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs) {
+        kit.lastDodge = now;
         kit.roll = Direction(0x001F54C0, instance) ? 2 : 1;
     }
     kit.lastBlock = block;
     // the blaster
-    if (!Held(kButtonHeavy) || meter < kShotCost) {
+    if (!Held(kButtonHeavy)) {
         Layer(kit, false);
         return;
     }
@@ -724,7 +728,6 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     }
     if (now - kit.lastShot >= kShotIntervalMs) {
         kit.lastShot = now;
-        meter -= kShotCost;
         Fire(script, instance);
     }
 }
@@ -797,6 +800,7 @@ void CodyFrame()
         if (kit.roll) {
             if (standing) { // facing his opponent, aside
                 FaceToward(cody, OpponentOf(cody));
+                kit.rollUntil = now + kRollGuardMs;
                 LOG_INFO("Cody: rolls %s%s", kit.roll == 1 ? "left" : "right",
                     PlaySequence(cody, kit.roll == 1 ? "Cody_RollLeft" : "Cody_RollRight") ? "" : " (refused)");
             }
@@ -804,15 +808,14 @@ void CodyFrame()
         }
         // the computer's Cody rolls aside now and then when his opponent comes close
         if (standing && !kit.player && now - kit.lastDodge > kComputerDodgeWaitMs) {
-            float& meter = At<float>(cody, kCharacterMeter);
             uint8_t* opponent = OpponentOf(cody);
-            if (opponent && meter >= kDodgeCost) {
+            if (opponent) {
                 const float* p = Position(cody);
                 const float* q = Position(opponent);
                 kit.lastDodge = now; // looked once a wait: a roll a third of the time
                 if (std::hypot(q[0] - p[0], q[2] - p[2]) < 170.0f && (now / 7) % 3 == 0 && (FaceToward(cody, opponent), true) &&
                     PlaySequence(cody, (now / 13) % 2 ? "Cody_RollLeft" : "Cody_RollRight")) {
-                    meter -= kDodgeCost;
+                    kit.rollUntil = now + kRollGuardMs;
                     LOG_INFO("Cody: the computer's Cody rolls aside");
                 }
             }
@@ -832,6 +835,18 @@ std::vector<CodyHelper> CodyHelpers()
     for (const Helper& h : g_Helpers)
         out.push_back({ h.object, h.master, h.enemy });
     return out;
+}
+
+} // namespace swrots::game
+
+namespace swrots::game {
+
+float CodyDamage(uint8_t* character, float change)
+{
+    const auto kit = g_Kits.find(character);
+    if (change < 0 && kit != g_Kits.end() && GetTickCount64() < kit->second.rollUntil)
+        return 0; // rolling: out of the way
+    return change;
 }
 
 } // namespace swrots::game

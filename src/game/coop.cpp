@@ -596,6 +596,7 @@ DamageFilter g_DamageFilter = nullptr;
 
 void __fastcall ChangeHealthHook(uint8_t* character, void*, float change, uint32_t a, uint32_t b)
 {
+    change = CodyDamage(character, change); // Commander Cody rolling
     if (g_DamageFilter)
         change = g_DamageFilter(character, change);
     g_OriginalChangeHealth(character, nullptr, change, a, b);

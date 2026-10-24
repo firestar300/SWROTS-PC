@@ -77,13 +77,13 @@ its place, and puts the caps into the tips' icon table (0x7F0608, whose sizes th
 ## Commander Cody
 
 Cody (Versus and Heroes vs Villains) has a blaster, not a saber, and a meter where a Jedi's Force bar is. It fills
-again over time (about 35 a second, 1000 when full) and pays for everything beyond the rifle butt:
+again over time (about 35 a second, 1000 when full) and pays for his squad and his bombardment:
 
 | Pad (PlayStation) | Keyboard and mouse (default) | What he does | Meter |
 |---|---|---|---|
-| Y (Triangle), held | Mouse 2, held | fires his blaster | 15 a shot |
+| Y (Triangle), held | Mouse 2, held | fires his blaster | - |
 | X (Square) | Mouse 1 | rifle butt | - |
-| White (L1), with the stick left or right | Q | rolls aside, turned to his opponent (a clone cannot block) | 150 |
+| White (L1), with the stick left or right | Q | rolls aside, turned to his opponent, untouchable while he rolls (a clone cannot block); one every 0.7 s | - |
 | RT (R2) | F | calls two of his clones: they rappel down beside him and fight for 25 seconds, marked "CODY'S CLONE" (blue when they are yours, red when they are against you); one squad at a time | 500 |
 | B (Circle) | E | a bombardment: four shells fall around his opponent, knocking down and hurting his enemies only | 400 |
 
