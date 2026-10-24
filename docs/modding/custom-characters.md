@@ -217,6 +217,9 @@ lookup 0x27B740 called at 0x25EADD with the character in `esi`); for a custom ch
 custom face instead, loaded from its file (the texture loader's direct path: the resources' path decodes a texture no
 PAK has to nothing).
 
+The pause screen's combat chart shows the player's head picture (the same lookup with "head", 0x2B2A91): a custom
+character's is its select-screen head (`s_selduel_<costume>head.stx`).
+
 ## Its voice
 
 A character's voice lines are the dialogue engine's (`TDialogueEngine`), not its class's sound set (sabers,
