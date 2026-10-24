@@ -893,8 +893,14 @@ bool IsLiveObject(uint8_t* object);
 // A second saber of its own colour (SaberLeft=): the equip gives both sabers the character's colour (+0xF20), and a
 // Versus intro shows them before its script first runs, so each frame its left one (the second weapon, +0x10A0) is
 // given its own colour when it has another (SetColor, vfunc +0x604, stores it at +0x814).
+void PruneMade()
+{
+    g_Made.erase(std::remove_if(g_Made.begin(), g_Made.end(), [](uint8_t* c) { return !IsLiveObject(c); }), g_Made.end());
+}
+
 void CustomCharactersFrame()
 {
+    PruneMade(); // those taken away (a match's fighters after a respawn) out
     __try {
         for (uint8_t* c : g_Made) {
             if (!IsLiveObject(c))
@@ -915,8 +921,12 @@ namespace {
 
 bool IsLiveObject(uint8_t* object)
 {
-    // an object still in the level: the instance id at +4 finds it again (0xA31F0)
-    return reinterpret_cast<uint8_t*(__cdecl*)(uint32_t)>(uintptr_t(0x000A31F0))(*reinterpret_cast<uint32_t*>(object + 4)) == object;
+    // an object still in the level: the instance id at +4 finds it again (0xA31F0); a removed one's memory may be gone
+    __try {
+        return reinterpret_cast<uint8_t*(__cdecl*)(uint32_t)>(uintptr_t(0x000A31F0))(*reinterpret_cast<uint32_t*>(object + 4)) == object;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 
 // A saber's colour is set through its class's SetColor (vtable +0x604: 0x286180 for the single-bladed classes,

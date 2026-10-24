@@ -356,6 +356,11 @@ int AttackerOf(uint8_t* attacker)
         uint8_t* f = g_Fighters[i].object;
         if (f == attacker || Field<uint8_t*>(f, kCharacterScript) == attacker)
             return i;
+        // its sabers: only a Jedi has the weapon slots (IsA, vfunc +4, the IJedi type 0x249950); a clone's or a battle
+        // droid's object ends before them (0xEE0 bytes)
+        const auto isA = reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint32_t)>((*reinterpret_cast<void* const* const*>(f))[1]);
+        if (!isA(f, nullptr, 0x00249950))
+            continue;
         for (uint32_t at = kWeaponsFrom; at < kWeaponsTo; at += 4)
             if (Field<uint8_t*>(f, at) == attacker)
                 return i;

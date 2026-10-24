@@ -149,6 +149,7 @@ struct Strike {
     uint8_t* owner;
     uint32_t ownerId;
     uint8_t* target;
+    uint32_t targetId;
     ULONGLONG at;
     int step = 0;
     float where[3] = {};
@@ -538,7 +539,10 @@ void RevanFrame()
             NearestEnemy(character, kStormRange * 1.5f, &nearby);
             if (At<float>(character, kCharacterHealth) > 0 && !nearby.empty() && PlaySequence(character, "Revan_ForceStorm")) {
                 for (int i = 0; i < kStrikes; ++i)
-                    g_Strikes.push_back({ character, f.id, nearby[size_t(i) % nearby.size()], now + kFirstStrikeMs + ULONGLONG(i) * kStrikeGapMs });
+                {
+                    uint8_t* target = nearby[size_t(i) % nearby.size()];
+                    g_Strikes.push_back({ character, f.id, target, At<uint32_t>(target, 4), now + kFirstStrikeMs + ULONGLONG(i) * kStrikeGapMs });
+                }
                 LOG_INFO("Revan: Force Storm on %zu enemies", nearby.size());
             }
         }
@@ -549,7 +553,7 @@ void RevanFrame()
             ++it;
             continue;
         }
-        if (!Live(it->owner, it->ownerId) || At<float>(it->owner, kCharacterHealth) <= 0 || !it->target ||
+        if (!Live(it->owner, it->ownerId) || At<float>(it->owner, kCharacterHealth) <= 0 || !Live(it->target, it->targetId) ||
             At<float>(it->target, kCharacterHealth) <= 0) {
             it = g_Strikes.erase(it);
             continue;

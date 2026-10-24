@@ -217,6 +217,7 @@ struct Shell {
     uint8_t* cody;
     uint32_t codyId;
     uint8_t* target;
+    uint32_t targetId; // (a fighter taken away meanwhile: a match's respawn)
     ULONGLONG at;
 };
 std::vector<Shell> g_Shells;
@@ -1181,7 +1182,7 @@ void CodyFrame()
             ++it;
             continue;
         }
-        if (Live(it->cody, it->codyId) && it->target && At<float>(it->target, kCharacterHealth) > 0)
+        if (Live(it->cody, it->codyId) && Live(it->target, it->targetId) && At<float>(it->target, kCharacterHealth) > 0)
             FireShell(it->cody, it->target);
         it = g_Shells.erase(it);
     }
@@ -1220,7 +1221,7 @@ void CodyFrame()
             if (uint8_t* target = canAct ? OpponentOf(cody) : nullptr) {
                 PlaySequence(cody, kit.kind->strike); // the strike signal
                 for (int i = 0; i < kShells; ++i)
-                    g_Shells.push_back({ cody, kit.id, target, now + kFirstShellMs + ULONGLONG(i) * kShellGapMs });
+                    g_Shells.push_back({ cody, kit.id, target, At<uint32_t>(target, 4), now + kFirstShellMs + ULONGLONG(i) * kShellGapMs });
                 LOG_INFO("Cody: bombardment on %p", target);
             }
         }

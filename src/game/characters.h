@@ -102,6 +102,8 @@ struct PlayerInfo {
 PlayerInfo CurrentPlayer();
 // Every character in the running level (the player, the level's, spawned ones), alive or dead.
 std::vector<uint8_t*> LevelCharacters();
+// The next LevelCharacters scans again (a character made or taken away).
+void InvalidateLevelCharacters();
 // A character's size: the object's "Uniform scale" (1 is its own). False when it is not there.
 bool CharacterScale(const uint8_t* character, float& scale);
 bool SetCharacterScale(uint8_t* character, float scale);

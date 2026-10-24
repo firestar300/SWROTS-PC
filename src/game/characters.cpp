@@ -471,6 +471,7 @@ void DestroyObject(uint8_t* object)
 uint8_t* CreateCharacter(const char* name, const std::string& costume, const std::string& skin,
     const std::string& mesh, const char* who, std::string& error)
 {
+    InvalidateLevelCharacters();
     void* info = reinterpret_cast<void*(__cdecl*)(const char*)>(uintptr_t(kClassLookup))(name);
     auto* object = info ? reinterpret_cast<uint8_t*(__cdecl*)(void*)>(uintptr_t(kCreateInstance))(info) : nullptr;
     if (!object) {
@@ -1378,7 +1379,43 @@ size_t CollectCandidates(uintptr_t base, size_t size, uint32_t lo, uint32_t span
 constexpr uint32_t kAIDataMarker = 0x00591C38;
 constexpr uint32_t kObjectById = 0x000A31F0;
 
+// The scan below reads all of the game's memory: callers that ask every frame (the fighters' kits, the specials, a
+// match's rules) share one scan for kLevelCharactersKeepMs, those still in the level then (ObjectById) returned.
+constexpr ULONGLONG kLevelCharactersKeepMs = 200;
+ULONGLONG g_LevelCharactersAt = 0; // 0: scan at the next ask (a character made or taken away since)
+
+void InvalidateLevelCharacters()
+{
+    g_LevelCharactersAt = 0;
+}
+
+std::vector<uint8_t*> ScanLevelCharacters();
+
 std::vector<uint8_t*> LevelCharacters()
+{
+    static std::vector<uint8_t*> kept;
+    static uint8_t* keptScene = nullptr;
+    ULONGLONG& keptAt = g_LevelCharactersAt;
+    const ULONGLONG now = GetTickCount64();
+    uint8_t* scene = *reinterpret_cast<uint8_t**>(uintptr_t(0x0068D944)); // the game's services: a new boot, a new list
+    if (keptAt && now - keptAt < kLevelCharactersKeepMs && scene == keptScene) {
+        std::vector<uint8_t*> still;
+        still.reserve(kept.size());
+        for (uint8_t* c : kept) {
+            uint32_t id = 0;
+            if (ReadGameDword(uintptr_t(c) + 4, id) &&
+                reinterpret_cast<uint8_t*(__cdecl*)(uint32_t)>(uintptr_t(kObjectById))(id) == c)
+                still.push_back(c);
+        }
+        return still;
+    }
+    kept = ScanLevelCharacters();
+    keptAt = now;
+    keptScene = scene;
+    return kept;
+}
+
+std::vector<uint8_t*> ScanLevelCharacters()
 {
     std::vector<uint8_t*> characters;
     std::vector<uintptr_t> found(4096);
@@ -1854,6 +1891,7 @@ uint8_t* SpawnHelper(const char* className, const std::string& skin, uint8_t* ma
     LOG_INFO("Characters: %s for %p at %.0f %.0f %.0f", who, master, place[12], place[13], place[14]);
     ++g_SpawnedInLevel;
     g_SpawnedCharacters.push_back({ object, *reinterpret_cast<uint32_t*>(object + 4) });
+    InvalidateLevelCharacters(); // placed: in the next scan
     return object;
 }
 
@@ -1913,6 +1951,7 @@ uint8_t* SpawnCharacterAt(const char* className, const std::string& costume, con
     ++g_SpawnedInLevel;
     g_LastSpawned = object;
     g_SpawnedCharacters.push_back({ object, *reinterpret_cast<uint32_t*>(object + 4) });
+    InvalidateLevelCharacters(); // placed: in the next scan
     return object;
 }
 
@@ -2066,6 +2105,7 @@ int SpawnedCount()
 // Removes spawned characters (those of `which` still there; all with null), as the game removes its own.
 int RemoveSpawnedCharacters(const uint8_t* which)
 {
+    InvalidateLevelCharacters();
     std::vector<uint8_t*> live;
     for (const SpawnedCharacter& spawned : g_SpawnedCharacters) {
         // Still there: the object manager finds it by its id (ObjectById).
