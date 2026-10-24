@@ -755,7 +755,11 @@ void BuildExtras()
                 extra.sabers[player][k] = custom.saber[k];
         for (int k = 0; k < 3 && custom.hasSaber2; ++k) // a mirror's player 2
             extra.sabers[1][k] = custom.saber2[k];
-        extra.meshes = nullptr;
+        if (custom.hasSaber && !custom.hasSaber2) { // else the other side's: a hero's red, a villain's blue
+            static const float kRed[3] = { 1.0f, 0.0f, 0.0f }, kBlue[3] = { 0.0f, 0.35f, 1.0f };
+            std::memcpy(extra.sabers[1], custom.side ? kBlue : kRed, sizeof kRed);
+        }
+        extra.meshes = nullptr; // a custom character's player 2 look: its pack's own <texture>_duel.stx files
         g_Extras.push_back(extra);
         LOG_INFO("Roster: %s on the Versus select screen (slot %d)", custom.className.c_str(),
             kFirstExtraSlot + int(g_Extras.size()) - 1);

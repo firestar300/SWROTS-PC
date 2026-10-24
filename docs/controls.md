@@ -77,7 +77,7 @@ its place, and puts the caps into the tips' icon table (0x7F0608, whose sizes th
 ## Commander Cody
 
 Cody (Versus and Heroes vs Villains) has a blaster, not a saber, and a meter where a Jedi's Force bar is. It starts
-each round empty, fills over time (about 35 a second, 1000 when full) and pays for his shots, rolls, squad and
+each round full, fills over time (about 35 a second, 1000 when full) and pays for his shots, rolls, squad and
 bombardment:
 
 | Pad (PlayStation) | Keyboard and mouse (default) | What he does | Meter |

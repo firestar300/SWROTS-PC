@@ -84,6 +84,9 @@ const CustomCharacter* FindCustomCharacter(const char* className);
 // game on (before the resource hooks are installed).
 bool ModFileExists(const std::string& relative);
 
+// Each frame: what custom characters keep up (their second saber's own colour, SaberLeft=).
+void CustomCharactersFrame();
+
 // The custom character a character is (recognised by its costume list, the port's own), or null.
 const CustomCharacter* CustomCharacterOf(const uint8_t* character);
 // The next line `speaker` starts for `event` (three letters, e.g. "TKE": an event its speaker code has entries for)

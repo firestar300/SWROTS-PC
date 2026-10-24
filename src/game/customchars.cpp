@@ -886,6 +886,33 @@ __declspec(naked) void SpeakerNameStore()
 // The custom characters made this start (to find a saber's owner; a removed one no longer has a custom list).
 std::vector<uint8_t*> g_Made;
 
+bool IsLiveObject(uint8_t* object);
+
+} // namespace
+
+// A second saber of its own colour (SaberLeft=): the equip gives both sabers the character's colour (+0xF20), and a
+// Versus intro shows them before its script first runs, so each frame its left one (the second weapon, +0x10A0) is
+// given its own colour when it has another (SetColor, vfunc +0x604, stores it at +0x814).
+void CustomCharactersFrame()
+{
+    __try {
+        for (uint8_t* c : g_Made) {
+            if (!IsLiveObject(c))
+                continue;
+            const CustomCharacter* custom = CustomCharacterOf(c);
+            if (!custom || !custom->hasSaberLeft)
+                continue;
+            uint8_t* left = *reinterpret_cast<uint8_t**>(c + 0x1080 + 0x20);
+            if (left && std::memcmp(left + 0x814, custom->saberLeft, sizeof custom->saberLeft) != 0)
+                reinterpret_cast<void(__fastcall*)(uint8_t*, void*, const float*)>(
+                    (*reinterpret_cast<void* const* const*>(left))[0x604 / 4])(left, nullptr, custom->saberLeft);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+namespace {
+
 bool IsLiveObject(uint8_t* object)
 {
     // an object still in the level: the instance id at +4 finds it again (0xA31F0)
@@ -1212,8 +1239,8 @@ bool CopyPicture(const std::string& lowerName, std::vector<uint8_t>& data)
 // (hordeBattleDroidCaptain, list index 5: the rapid blaster and the captain's pulse bolt) with the yellow markings
 // (texture set _var01), its speaker code BDD (the captain's BDC has no lines), 1000 health and a 1000 meter as Cody's.
 // Its kit is Cody's (cody.cpp). Pictures: none of a B1 on the disc; the random bust and head stand in
-// unless a mod gives its own (interfc\front_end\s_selduel_droidbust.stx / s_selduel_droidhead.stx,
-// interfc\hud_b\hud_face_droidport01.stx).
+// unless a mod gives its own (by its costume's name: interfc\front_end\s_selduel_hordebattledroidcaptainhead.stx /
+// ...bust.stx, s_selduel_fb_hordebattledroidcaptain_v1/_v2.stx; interfc\hud_b\hud_face_droidport01.stx).
 void AddDroidCommander()
 {
     if (FindCustomCharacter("IDroidCommander"))
@@ -1238,11 +1265,14 @@ void AddDroidCommander()
     c.outroLine = "BDD963";              // "Jedi down. Situation normal."
     c.textureSet = "_var01";             // the yellow markings
     c.textureSetFile = "meshes\\chars\\battledroid\\hordebattledroid_var01.stx";
-    c.selectBust = ModFileExists("interfc\\front_end\\s_selduel_droidbust.stx") ? "s_selduel_droidbust" : "s_selduel_randombust";
+    // its bust: a mod's own (drawn in the stand-in's place, as a custom character's), else the disc's random one
+    if (!ModFileExists("interfc\\front_end\\s_selduel_hordebattledroidcaptainbust.stx"))
+        c.selectBust = "s_selduel_randombust";
     c.face = c.hudFace = "interfc\\hud_b\\hud_face_droidport01";
     c.source = "(built in)";
-    if (!ModFileExists("interfc\\front_end\\s_selduel_droidhead.stx"))
-        g_PictureCopies.push_back({ "interfc\\front_end\\s_selduel_droidhead.stx", "interfc\\front_end\\s_selduel_randomhead.stx" });
+    if (!ModFileExists("interfc\\front_end\\s_selduel_hordebattledroidcaptainhead.stx"))
+        g_PictureCopies.push_back({ "interfc\\front_end\\s_selduel_hordebattledroidcaptainhead.stx",
+            "interfc\\front_end\\s_selduel_randomhead.stx" });
     if (!ModFileExists("interfc\\hud_b\\hud_face_droidport01.stx"))
         g_PictureCopies.push_back({ "interfc\\hud_b\\hud_face_droidport01.stx", "interfc\\front_end\\s_selduel_randomhead.stx" });
     g_Customs.push_back(c);

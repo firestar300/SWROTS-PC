@@ -346,6 +346,10 @@ int AttackerOf(uint8_t* attacker)
         return -1;
     if (uint8_t* owner = BlastOwner(attacker); owner && FighterOf(attacker) < 0) // a blast of a special's (Cody's shells, Force Storm)
         attacker = owner;
+    else if (uint8_t* master = HelperMasterOf(attacker)) // a reinforcement's blow counts for its master
+        attacker = master;
+    else if (uint8_t* shooter = FighterOf(attacker) < 0 ? ShooterOf(attacker) : nullptr) // a kit fighter's bolt
+        attacker = shooter;
     for (int i = 0; i < g_Count; ++i) {
         if (!Placed(g_Fighters[i])) // a body taken away (a fighter's old one after a respawn)
             continue;
@@ -645,8 +649,8 @@ void Damaged(uint8_t* character, float change, uint32_t, uint8_t* attacker)
     Fighter& k = g_Fighters[by];
     k.damage += -change * float(g_Health) / kHealthScale; // in the mode's health
     k.score = int(k.damage) + k.defeats * kDefeatPoints + k.assists * kAssistPoints; // damage counts as it comes
-    v.hits.push_back({ by, GetTickCount64() });
-    v.lastBlow = k.lastBlow = GetTickCount64();
+    v.hits.push_back({ by, GameTime() });
+    v.lastBlow = k.lastBlow = GameTime();
     while (v.hits.size() > 32)
         v.hits.pop_front();
 }
@@ -669,7 +673,7 @@ bool PlayerFatalHit(uint8_t* character)
         return true;
     if (!g_PlayerFell) {
         g_PlayerFell = true;
-        g_PlayerDownAt = GetTickCount64();
+        g_PlayerDownAt = GameTime();
         g_Swapped = false;
         g_KillEye = -1;
         float fov = 0; // the camera as the hit lands (the kill camera starts there)
@@ -1020,7 +1024,7 @@ void PodiumPlace(int rank, float (&m)[16])
 void EndCamera(float m[16])
 {
     const float back = std::min(290.0f, g_LinesApart - kPodium[4][1] - 30); // short of the villains' line
-    const float a = Smooth(float(GetTickCount64() - g_EndAt) / 4000.0f);
+    const float a = Smooth(float(GameTime() - g_EndAt) / 4000.0f);
     const float eye[3] = { kDevMapMiddleX, kDevMapFloorY + 75 - 10 * a, PodiumZ() + back - 40 * a };
     const float target[3] = { kDevMapMiddleX, kDevMapFloorY + 55, PodiumZ() - 30 };
     LookAt(eye, target, m);
@@ -1129,7 +1133,7 @@ bool HvvCamera(float m[16], float)
         return true;
     }
     if (g_Phase == Phase::Fight) {
-        const ULONGLONG now = GetTickCount64();
+        const ULONGLONG now = GameTime();
         if (g_PlayerFell || g_Fighters[g_Player].out) {
             if (!g_DeathViewSet) {
                 std::copy(m, m + 16, g_DeathView);
@@ -1150,7 +1154,7 @@ bool HvvCamera(float m[16], float)
     }
     if (g_Phase != Phase::Intro)
         return false;
-    const ULONGLONG t = GetTickCount64() - g_IntroAt;
+    const ULONGLONG t = GameTime() - g_IntroAt;
     if (IntroShot(t, m)) {
         std::copy(m, m + 16, g_LastShot);
         return true;
@@ -1327,6 +1331,21 @@ bool GamePaused()
     }
 }
 
+ULONGLONG g_RealTick = 0, g_GameTime = 100000;
+
+void GameTimeFrame()
+{
+    const ULONGLONG now = GetTickCount64();
+    if (g_RealTick && !GamePaused())
+        g_GameTime += std::min<ULONGLONG>(now - g_RealTick, 250); // a long frame (a load) counts as a short one
+    g_RealTick = now;
+}
+
+ULONGLONG GameTime()
+{
+    return g_GameTime;
+}
+
 bool HvvLineOfSight(const float a[3], const float b[3]) { return !g_Active || LineOfSight(a, b); }
 
 HvvState GetHvvState()
@@ -1335,7 +1354,7 @@ HvvState GetHvvState()
     s.active = g_Active;
     if (!g_Active)
         return s;
-    const ULONGLONG now = GetTickCount64();
+    const ULONGLONG now = GameTime();
     s.started = g_Woken;
     s.intro = g_Active && g_Phase == Phase::Intro;
     s.fighting = g_Phase == Phase::Fight;
@@ -1459,7 +1478,7 @@ bool EndHvvNow()
     for (int i = 0; i < g_Count; ++i)
         score[SideOf(i)] += g_Fighters[i].score;
     g_Winner = g_Lives[0] != g_Lives[1] ? (g_Lives[0] > g_Lives[1] ? 0 : 1) : (score[0] >= score[1] ? 0 : 1);
-    g_WinnerAt = GetTickCount64();
+    g_WinnerAt = GameTime();
     LOG_INFO("HvV: ended from the console; the %s win", g_Winner == 0 ? "heroes" : "villains");
     return true;
 }
@@ -1516,7 +1535,7 @@ void HvvFrame()
     uint8_t* player = PlayerObject();
     if (!player)
         return;
-    const ULONGLONG now = GetTickCount64();
+    const ULONGLONG now = GameTime();
     if (!g_InLevelAt)
         g_InLevelAt = now;
     if (!g_Woken) {
@@ -1549,6 +1568,7 @@ void HvvFrame()
             g_Phase = Phase::Intro;
             g_IntroAt = now;
             HoldEveryone(true);
+            input::TakeHeldPress(); // a press from before (the menu's) does not skip it
             LOG_INFO("HvV: the intro");
         } else {
             g_Phase = Phase::Fight;
@@ -1559,7 +1579,7 @@ void HvvFrame()
         return;
     }
     if (g_Phase == Phase::Intro) {
-        if (input::TakeHeldPress()) // skipped (A or Start), as the game's Versus intros
+        if (input::TakeHeldPress() && now - g_IntroAt > 1000) // skipped (A or Start), as the game's Versus intros
             g_IntroAt = now - IntroLength();
         const ULONGLONG t = now - g_IntroAt;
         if (t < kShotsLength) {

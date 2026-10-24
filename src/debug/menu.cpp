@@ -16,6 +16,7 @@
 #include "debug/console.h"
 #include "game/characters.h"
 #include "game/cody.h"
+#include "game/customchars.h"
 #include "game/revan.h"
 #include "game/coop.h"
 #include "game/custommaps.h"
@@ -1100,6 +1101,8 @@ void RenderMenu()
 void MenuAfterFrame()
 {
     RunQueuedConsoleCommands();
+    game::GameTimeFrame();
+    game::CustomCharactersFrame();
     game::PlayerFrame();
     game::CoopFrame();
     game::CodyFrame();

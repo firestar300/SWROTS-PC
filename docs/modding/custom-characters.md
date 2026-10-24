@@ -38,7 +38,8 @@ Base=IAnakin             ; the class whose moves, AI and sounds it has
 Costume=Luke             ; its costume's name
 Mesh=luke\luke           ; its body, under meshes\chars, without .msh
 Saber=0 255 0            ; its saber's colour, 0-255 each (optional; 0 255 0 is the game's own green)
-Saber2=255 0 0           ; player 2's when both Versus players pick it (optional; as the game's dark Anakin)
+Saber2=255 0 0           ; player 2's when both Versus players pick it (optional; else red for a hero, blue for a
+                         ; villain, as the game's dark Anakin)
 SaberLeft=255 0 0        ; its second saber's colour, the one in its left hand (optional; on a two-saber base)
 Blades=single            ; its saber: single, double (double-bladed) or dual (two sabers) (optional; the base's)
 Hilt=LsaberObi\LsaberObi ; its hilt, a weapon mesh under meshes\weapons, without .msh (optional; the base's)
@@ -69,6 +70,14 @@ WIN=luk011               ; on winning a Versus round (optional; else a KIL line)
 [Subtitles]              ; optional: the texts of its own lines
 LUK001=For the Rebellion!
 ```
+
+## Player 2's look
+
+The game's fighters have a second look for player 2 in Versus (dark Anakin, Jedi Vader): the duel gives player 2's
+character the texture suffix `_duel`, and each of its textures is then `<texture>_duel` where the level has one. A
+pack gives its character the same: `<texture>_duel.stx` next to each body texture (e.g. `luke_body_duel.stx`, its name
+inside `luke_body_duel`), declared with the body like its other textures. Without them player 2 looks like player 1;
+`Saber2=` (or the other side's colour) still tells them apart.
 
 ## The body
 

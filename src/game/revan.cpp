@@ -61,8 +61,6 @@ constexpr uint32_t kForceStun = 0x120C, kForceStunAlt = 0x120E, kForceGraspStun 
 constexpr uint32_t kForceLightning = 0x11F0, kForceLightningAlt = 0x11F2, kForceGraspLightning = 0x11D0;
 constexpr uint32_t kGrabAttempt = 0x1120, kSerraGrabAttempt = 0x17C6, kGrabKD = 0x112A, kGrabLaunch = 0x112C;
 constexpr uint32_t kInstanceLightningOn = 0x2DD; // byte: its lightning allowed
-constexpr uint32_t kCharacterWeapons = 0x1080; // its sabers: 4 slots, 0x20 apart
-constexpr uint32_t kSaberColour = 0x814;       // a saber's colour (three floats, as its SetColor stores it)
 
 // the storm
 constexpr float kStormCost = 400, kStormRange = 600;
@@ -123,7 +121,7 @@ bool PlaySequence(uint8_t* character, const char* name)
 
 bool Wants(const CustomCharacter& c)
 {
-    return _stricmp(c.base.c_str(), "ISerra") == 0 && (c.lightning || !c.grapples.empty() || c.forceStorm || c.hasSaberLeft);
+    return _stricmp(c.base.c_str(), "ISerra") == 0 && (c.lightning || !c.grapples.empty() || c.forceStorm);
 }
 
 bool DookuGrapples(const CustomCharacter& c)
@@ -366,7 +364,7 @@ void RevanTurn(uint8_t* inst, uint8_t* classObject)
             return;
         Fighter& f = g_Fighters[character];
         const uint32_t id = At<uint32_t>(character, 4);
-        const ULONGLONG now = GetTickCount64();
+        const ULONGLONG now = GameTime();
         if (f.id != id) {
             f = Fighter{};
             f.id = id;
@@ -392,12 +390,6 @@ void RevanTurn(uint8_t* inst, uint8_t* classObject)
         }
         if (custom->lightning)
             inst[kInstanceLightningOn] = 1;
-        // its left hand's saber (the second weapon, +0x10A0): the equip gave both the character's colour (+0xF20)
-        if (custom->hasSaberLeft)
-            if (uint8_t* left = At<uint8_t*>(character, kCharacterWeapons + 0x20))
-                if (std::memcmp(left + kSaberColour, custom->saberLeft, sizeof custom->saberLeft) != 0)
-                    reinterpret_cast<void(__fastcall*)(uint8_t*, void*, const float*)>(
-                        (*reinterpret_cast<void* const* const*>(left))[0x604 / 4])(left, nullptr, custom->saberLeft);
         if (At<int32_t>(character, 0x43C) >= 0)
             f.player = true;
         // Force Storm: the player's on block + stun; the computer's when enemies are near; not before a round is on
@@ -415,7 +407,7 @@ void RevanTurn(uint8_t* inst, uint8_t* classObject)
             f.nextLook = now + 1500;
             std::vector<uint8_t*> nearby;
             NearestEnemy(character, kStormRange, &nearby);
-            cast = !nearby.empty() && (GetTickCount64() / 7) % 3 == 0;
+            cast = !nearby.empty() && (GameTime() / 7) % 3 == 0;
         }
         if (cast) {
             force -= kStormCost;
@@ -524,7 +516,7 @@ void RevanFrame()
 {
     if (g_Fighters.empty() && g_Strikes.empty())
         return;
-    const ULONGLONG now = GetTickCount64();
+    const ULONGLONG now = GameTime();
     for (auto it = g_Fighters.begin(); it != g_Fighters.end();) {
         uint8_t* character = it->first;
         Fighter& f = it->second;
@@ -581,7 +573,7 @@ void RevanFrame()
             column.push = 0;
             column.damageType = "Electrified";
             column.damage = 0;
-            FireBlast(nullptr, spark, column);
+            FireBlast(it->owner, spark, column);
             ++it->step;
             it->at = now + kBoltStepMs;
             ++it;
@@ -606,7 +598,7 @@ void RevanFrame()
             ground.push = 0;
             ground.damageType = "Electrified";
             ground.damage = 0;
-            FireBlast(nullptr, at, ground);
+            FireBlast(it->owner, at, ground);
         }
         it = g_Strikes.erase(it);
     }

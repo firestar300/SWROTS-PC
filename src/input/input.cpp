@@ -517,6 +517,8 @@ void HoldPlayerInput(bool hold)
 
 static std::atomic<bool> g_HeldPress = false;
 
+static bool g_HoldPrimed = false; // the held-back input read once (a button down then was pressed before)
+
 bool TakeHeldPress()
 {
     return g_HeldPress.exchange(false);
@@ -659,10 +661,13 @@ static DWORD __stdcall XbInputGetState(HANDLE device, XInputState* state)
         ReadTestButtons(held);
         static bool wasDown = false;
         const bool down = held.bAnalogButtons[0] > 0x40 || (held.wButtons & XB_START);
-        if (down && !wasDown)
+        if (down && !wasDown && g_HoldPrimed) // a press made while held back (not one still down from before)
             g_HeldPress = true;
         wasDown = down;
+        g_HoldPrimed = true;
     }
+    if (index == 0 && !g_HoldPlayer)
+        g_HoldPrimed = false;
     if (index != 0 || !g_HoldPlayer) { // the free camera has player 1's input
         if (!RunningInBackground()) { // an unattended test: a pad in someone's hands on this PC is not its input
             ReadHostPad(index, g);

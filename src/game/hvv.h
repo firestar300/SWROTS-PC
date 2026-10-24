@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,10 @@ bool HvvLineOfSight(const float a[3], const float b[3]);
 bool HvvSameSide(const uint8_t* a, const uint8_t* b);
 // Whether the game is paused (its pause menu).
 bool GamePaused();
+// The game's own time in milliseconds: it stands still while the game is paused (the port's timers in matches, so
+// a pause holds them: reinforcements, specials, respawns, the stuck fighters' rescue). GameTimeFrame each frame.
+uint64_t GameTime();
+void GameTimeFrame();
 
 // The match, for the overlay (scoreboard, titles, markers, kill feed, leaderboard, end) and the debug menu.
 struct HvvState {

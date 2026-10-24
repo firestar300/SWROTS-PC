@@ -41,6 +41,11 @@ struct BlastLook {
 bool FireBlast(uint8_t* owner, const float at[3], const BlastLook& look);
 // Who fired a blast (FireBlast's `owner`), or null when `object` is none of them.
 uint8_t* BlastOwner(const uint8_t* object);
+// The kit fighter a blaster bolt (or anything holding a shooter's script instance) counts for: Cody, the droid
+// commander, or the master of one of their reinforcements; null when none.
+uint8_t* ShooterOf(const uint8_t* object);
+// The master of one of their reinforcements, or null.
+uint8_t* HelperMasterOf(const uint8_t* character);
 
 // Cody's clones now (to mark them), with their master.
 struct CodyHelper {

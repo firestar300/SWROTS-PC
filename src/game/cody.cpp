@@ -87,7 +87,7 @@ constexpr float kSummonCost = 500, kBombardCost = 600, kShotCost = 20;
 // to kRollGuardToMs after it starts: a roll in time beats a combo, a roll as the blow lands does not)
 constexpr float kRollCost = 150;
 constexpr ULONGLONG kDodgeWaitMs = 1000, kRollGuardFromMs = 120, kRollGuardToMs = 480;
-// a round starts with his meter empty, his specials no sooner than kSpecialsAfterMs, each with its own wait after use
+// a round starts with his meter full, his specials no sooner than kSpecialsAfterMs, each with its own wait after use
 constexpr ULONGLONG kSpecialsAfterMs = 8000, kSummonWaitMs = 30000, kBombardWaitMs = 20000;
 constexpr ULONGLONG kPressKeepMs = 350;
 constexpr ULONGLONG kShotIntervalMs = 450;
@@ -188,7 +188,7 @@ struct Kit {
     ULONGLONG lastShot = 0, lastFrame = 0, lastDodge = 0, rollAt = 0;
     ULONGLONG roundStart = 0, lastSummon = 0, lastBombard = 0; // his round's start, his specials' last use
     bool roundEnded = false;  // his round over (he or his opponent down), until the next one starts
-    bool emptyMeter = true;   // the meter to empty at his next turn (a round's start)
+    bool newRound = true;     // a round starts at his next turn: his specials' waits from then
     float rollDir[2] = {};         // the roll asked for: where the stick pointed (world x, z), 0 for none
     uint8_t* foe = nullptr;        // his opponent of the round
     uint32_t foeId = 0;
@@ -220,6 +220,15 @@ struct Shell {
     ULONGLONG at;
 };
 std::vector<Shell> g_Shells;
+
+// Whose shots are whose: a blaster bolt keeps its shooter's script instance (not the character), so each kit fighter's
+// and each of their reinforcements' instance is noted in their turn, with the character credited (a reinforcement's
+// shots count for its master).
+struct Shooter {
+    uint8_t* credited;
+    uint32_t creditedId;
+};
+std::unordered_map<uint8_t*, Shooter> g_Shooters; // script instance -> credited character
 
 uint32_t Button(uint32_t global)
 {
@@ -470,6 +479,8 @@ void __cdecl ShellHit(uint8_t* shell, uint8_t* target, void*)
         const char* type = owner == g_ShellOwners.end() ? nullptr : owner->second.damageType;
         if (!target || !IsCharacter(target) || target == cody || IsHelper(target))
             return;
+        if (type && owner->second.damage <= 0) // only a look
+            return;
         if (cody && HvvActive() && HvvSameSide(target, cody))
             return;
         const float* centre = reinterpret_cast<const float*>(reinterpret_cast<uint8_t*(__fastcall*)(uint8_t*, void*)>(
@@ -536,6 +547,29 @@ bool FireBlast(uint8_t* owner, const float at[3], const BlastLook& look)
     return seen;
 }
 
+uint8_t* ShooterOf(const uint8_t* object)
+{
+    if (!object || g_Shooters.empty())
+        return nullptr;
+    __try {
+        for (uint32_t at = 4; at < 0x300; at += 4) {
+            const auto it = g_Shooters.find(*reinterpret_cast<uint8_t* const*>(object + at));
+            if (it != g_Shooters.end() && Live(it->second.credited, it->second.creditedId))
+                return it->second.credited;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    return nullptr;
+}
+
+uint8_t* HelperMasterOf(const uint8_t* character)
+{
+    for (const Helper& h : g_Helpers)
+        if (h.object == character)
+            return h.master;
+    return nullptr;
+}
+
 uint8_t* BlastOwner(const uint8_t* object)
 {
     const auto it = g_ShellOwners.find(const_cast<uint8_t*>(object));
@@ -547,7 +581,7 @@ namespace {
 void FireShell(uint8_t* cody, uint8_t* target)
 {
     const float* p = Position(target);
-    const ULONGLONG r = GetTickCount64();
+    const ULONGLONG r = GameTime();
     const float angle = float(r % 628) / 100.0f, distance = float((r / 7) % 100) / 100.0f * kShellSpread;
     const float at[3] = { p[0] + std::cos(angle) * distance, p[1], p[2] + std::sin(angle) * distance };
     BlastLook look;
@@ -820,7 +854,7 @@ bool __fastcall ReactionCallHook(uint8_t* character, void*, void* bump, void* co
     const auto kit = g_Kits.find(character);
     if (kit == g_Kits.end())
         return g_OriginalReactionCall(character, nullptr, bump, collision, sequence);
-    if (Guarded(kit->second, GetTickCount64()))
+    if (Guarded(kit->second, GameTime()))
         return true;
     const int32_t port = At<int32_t>(character, kCharacterPort);
     At<int32_t>(character, kCharacterPort) = -1;
@@ -885,6 +919,7 @@ void InstallCody()
     g_Helpers.clear();
     g_Shells.clear();
     g_ShellOwners.clear();
+    g_Shooters.clear();
     for (OwnMove& move : g_Moves)
         move.handle = 0;
     if (std::none_of(std::begin(kKinds), std::end(kKinds), [](const Kind& k) { return FindCustomCharacter(k.className) != nullptr; }))
@@ -914,12 +949,21 @@ void InstallCody()
 
 void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
 {
+    if (instance && character) {
+        if (IsHelper(character)) {
+            for (const Helper& h : g_Helpers)
+                if (h.object == character)
+                    g_Shooters[instance] = { h.master, At<uint32_t>(h.master, 4) };
+        } else if (KindOf(character)) {
+            g_Shooters[instance] = { character, At<uint32_t>(character, 4) };
+        }
+    }
     const Kind* kind = KindOf(character);
     if (!kind || !instance)
         return;
     Kit& kit = g_Kits[character];
     const uint32_t id = At<uint32_t>(character, 4);
-    const ULONGLONG now = GetTickCount64();
+    const ULONGLONG now = GameTime();
     if (kit.id != id) { // a new Cody where an old one was
         kit = Kit{};
         kit.id = id;
@@ -929,11 +973,11 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     if (At<int32_t>(character, 0x43C) >= 0)
         kit.player = true;
     float& meter = At<float>(character, kCharacterMeter);
-    if (kit.emptyMeter) { // a round starts (CodyFrame): the meter from nothing
-        kit.emptyMeter = false;
+    if (kit.newRound) { // a round starts (CodyFrame): his specials wait from now, his meter full
+        kit.newRound = false;
         kit.roundStart = now;
         kit.lastSummon = kit.lastBombard = 0;
-        meter = 0;
+        meter = At<float>(character, kCharacterMeterMost);
     }
     if (kit.lastFrame) // the meter refills
         meter = std::min(At<float>(character, kCharacterMeterMost), meter + kMeterPerSecond * float(now - kit.lastFrame) / 1000.0f);
@@ -1103,7 +1147,7 @@ void CodyFrame()
 {
     if (g_Kits.empty() && g_Helpers.empty() && g_Shells.empty())
         return;
-    const ULONGLONG now = GetTickCount64();
+    const ULONGLONG now = GameTime();
     // his clones: down, they go for his opponent; their time up, his or the round's, they fall as clones do (the
     // character's instant kill, vfunc +0xC8: its death, the game takes the body away; removing the object at once,
     // while the level's lists held it, left a hole in one: 0x16B3C7)
@@ -1154,7 +1198,7 @@ void CodyFrame()
             kit.roundEnded = true;
         } else if (kit.roundEnded) {
             kit.roundEnded = false;
-            kit.emptyMeter = true;
+            kit.newRound = true;
         }
         // his opponent of the round (to know its end), once one stands
         if (standing && (!kit.foe || RoundOver(kit)))
@@ -1215,7 +1259,7 @@ float CodyDamage(uint8_t* character, float change)
     const auto kit = g_Kits.find(character);
     if (change >= 0 || kit == g_Kits.end())
         return change;
-    if (Guarded(kit->second, GetTickCount64()))
+    if (Guarded(kit->second, GameTime()))
         return 0; // rolling: out of the way
     if (At<float>(character, kCharacterHealth) <= 0)
         return change; // already down (the game's own end of him)
