@@ -30,6 +30,7 @@ struct CustomCharacter {
     bool hasSaber = false;
     float saber[3] = {};     // its saber's colour (0-1), when it has one of its own
     int blades = 0;          // its saber (Blades=): 0 the base's, 1 single, 2 double-bladed, 3 dual (two sabers)
+    std::string hilt;        // its saber's hilt (Hilt=): a weapon mesh, "Meshes\Weapons\<folder>\<file>"; empty: the base's
     float scale = 1.0f;      // its size (Scale=), 1 the base's
     float force = -1.0f;     // its Force (Force=, the most it holds; Anakin's is 1000), negative: the base's
     float health = -1.0f;    // its health (Health=; Anakin's 1000, the Jedi Brute's 220), negative: the base's

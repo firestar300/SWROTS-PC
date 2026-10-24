@@ -39,6 +39,7 @@ Costume=Luke             ; its costume's name
 Mesh=luke\luke           ; its body, under meshes\chars, without .msh
 Saber=0 255 0            ; its saber's colour, 0-255 each (optional; 0 255 0 is the game's own green)
 Blades=single            ; its saber: single, double (double-bladed) or dual (two sabers) (optional; the base's)
+Hilt=LsaberObi\LsaberObi ; its hilt, a weapon mesh under meshes\weapons, without .msh (optional; the base's)
 Scale=1                  ; its size (optional; 0.86 makes a Jedi Brute body about as tall as Vader)
 Health=1000              ; its health (optional; the base's: the Jedi Brute 220, Anakin 1000)
 Force=1000               ; the Force it holds (optional; the base's: the Jedi Brute has none, Anakin 1000)
@@ -76,8 +77,10 @@ the texture, and black behind a cut-out shows as a dark fringe.
 
 ## Its saber
 
-`Saber=` sets the colour, `Blades=` the kind; both keep the base's when left out, and they work on any Jedi or Sith
-base:
+`Saber=` sets the colour, `Blades=` the kind and `Hilt=` the hilt; all keep the base's when left out, and they work
+on any Jedi or Sith base. `Hilt=` names a weapon mesh: one of the game's (`LsaberObi\LsaberObi`, `LSaberDooku\LSaberDooku`,
+`LsaberMace\LsaberMace`, ...) or the pack's own under `mods\meshes\weapons\` ([replacing weapons](replacing-weapons.md)
+has the format); a double-bladed saber keeps the double hilt its blades need. The kinds:
 
 - `single`: one blade (a base with a double-bladed saber gets the Jedi Knights' hilt);
 - `double`: the Jedi Brute's double-bladed saber (Darth Maul: `Base=IJDBrute`, whose moves are made for it, needs

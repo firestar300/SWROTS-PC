@@ -234,6 +234,9 @@ void __cdecl ApplyBlades(uint8_t* character)
     if (custom->hasSaber)
         for (int i = 0; i < 2; ++i)
             std::memcpy(first + i * kWeaponRecordSize + 8, custom->saber, sizeof custom->saber);
+    // its own hilt (a single blade's: a double-bladed one keeps the double hilt the blades need)
+    if (!custom->hilt.empty() && custom->blades != 2 && !first[0])
+        AssignString(first + 4, custom->hilt.c_str());
     if (!custom->blades)
         return;
     const char* hilt = *reinterpret_cast<const char**>(first + 4);
@@ -638,6 +641,9 @@ void ReadCharacters(const std::wstring& mods)
                         c.forcePowers |= p.bit;
             }
         }
+        c.hilt = Profile(file, L"Hilt");
+        if (!c.hilt.empty() && _strnicmp(c.hilt.c_str(), "Meshes", 6) != 0) // "lsaberluke\lsaberluke" alone too
+            c.hilt = "Meshes\\Weapons\\" + c.hilt;
         const std::string blades = Profile(file, L"Blades");
         c.blades = _stricmp(blades.c_str(), "single") == 0 ? 1 : _stricmp(blades.c_str(), "double") == 0 ? 2
             : _stricmp(blades.c_str(), "dual") == 0 ? 3 : 0;
