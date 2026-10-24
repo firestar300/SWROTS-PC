@@ -41,6 +41,9 @@ Things the Xbox release never had:
 - **Droid Commander.** Cody's Separatist counterpart: a B1 battle droid commander in its yellow markings,
   with a blaster, a duck under the saber, droids dropping in to help and a bombardment, and its own lines.
   See [its controls](docs/controls.md#droid-commander).
+- **Battlefront.** A conquest battle in the main menu (Multi Player > Battlefront): clone troopers against
+  battle droids, command posts to take and hold, tickets, and heroes bought with points, on the developer
+  map or a custom map. See [Battlefront](docs/battlefront.md).
 - **Play story levels as anyone, in any costume or body.** Vader in Order 66, Anakin without his
   robe in the Jedi Temple, a 501st clone trooper, Obi-Wan in Anakin's duel outfit: pick a class, a
   costume, a texture set and a body in the debug menu's Characters tab (or `player IAnakin duel`),

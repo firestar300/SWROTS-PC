@@ -23,6 +23,7 @@ struct DevMapCharacter {
     std::string className; // e.g. "IObiwan"
     uint32_t id;           // the object's id, unique in the level (see kDevMapFirstId)
     float x, z, yaw;
+    std::string costume;   // its costume ("Mesh Choice", e.g. "hordeBattleDroid": the battle droid's first has no body)
 };
 // A box of collision (a box brush): its centre (y from the floor), half extents and turn about the up axis.
 struct DevMapBox {

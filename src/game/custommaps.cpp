@@ -125,6 +125,20 @@ bool ReadMap(const std::wstring& file, const std::string& id, CustomMap& m)
     v = Numbers(Profile(file, L"Map", L"Spawns"));
     for (size_t i = 0; i + 1 < v.size(); i += 2)
         m.spawns.push_back({ v[i], v[i + 1] });
+    v = Numbers(Profile(file, L"Battlefront", L"CommandPosts"));
+    for (size_t i = 0; i + 1 < v.size(); i += 2)
+        m.commandPosts.push_back({ v[i], v[i + 1] });
+    {
+        const std::vector<float> clones = Numbers(Profile(file, L"Battlefront", L"CloneStart"));
+        const std::vector<float> droids = Numbers(Profile(file, L"Battlefront", L"DroidStart"));
+        if (clones.size() >= 2 && droids.size() >= 2) {
+            m.hasStarts = true;
+            m.cloneStart[0] = clones[0];
+            m.cloneStart[1] = clones[1];
+            m.droidStart[0] = droids[0];
+            m.droidStart[1] = droids[1];
+        }
+    }
     v = Numbers(Profile(file, L"Map", L"Bounds"));
     if (v.size() >= 4) {
         m.hasBounds = true;

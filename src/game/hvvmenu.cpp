@@ -36,6 +36,10 @@ namespace {
 constexpr const char* kMainMenu = "interfc\\front_end\\xml\\main_menu.xml";
 constexpr const char* kRowName = "hvv";
 constexpr const char* kRowText = "IDS_PORT_HVV";
+constexpr const char* kBfRowName = "battlefront"; // Battlefront's row, under Heroes vs Villains
+constexpr const char* kBfRowText = "IDS_PORT_BF";
+constexpr const char* kBfScreen = "bf_setup";
+constexpr const char* kBfFile = "interfc\\front_end\\xml\\bf_setup.xml";
 constexpr const char* kSetupScreen = "hvv_setup";
 constexpr const char* kLineupScreen = "hvv_lineup";
 constexpr const char* kSetupFile = "interfc\\front_end\\xml\\hvv_setup.xml";
@@ -80,10 +84,17 @@ bool PatchMainMenu(std::vector<uint8_t>& data)
     const size_t nameAt = MenuString("screenItem").size();
     // the new row: Cooperative's, one row lower, Versus's screen
     std::vector<uint8_t> row(data.begin() + coop, data.begin() + coopEnd);
+    std::vector<uint8_t> bfRow = row; // Battlefront's: the same, one more row lower
     float x, y;
     MenuItemPosition(row, &x, &y, false);
     y += kRowStep;
     MenuItemPosition(row, &x, &y, true);
+    {
+        float bx, by;
+        MenuItemPosition(bfRow, &bx, &by, false);
+        by += 2 * kRowStep;
+        MenuItemPosition(bfRow, &bx, &by, true);
+    }
     size_t rowEnd = row.size();
     // after the text id: down (stays Versus: back to the top), then up (Cooperative)
     const std::vector<uint8_t> versusString = MenuString("versus");
@@ -103,6 +114,24 @@ bool PatchMainMenu(std::vector<uint8_t>& data)
     }
     const uint32_t versusId = 2;
     std::memcpy(row.data() + screenAt + screen.size(), &versusId, 4);
+    // Heroes vs Villains' down: Battlefront; Battlefront's: down Versus (the top), up Heroes vs Villains
+    size_t rowLinks = row.size();
+    ok = MenuReplaceString(row, nameAt + 8, rowLinks, "versus", kBfRowName);
+    size_t bfEnd = bfRow.size();
+    ok = ok && MenuReplaceString(bfRow, 0, bfEnd, "cooperative", kBfRowName) &&
+         MenuReplaceString(bfRow, nameAt + 8, bfEnd, "IDS_COOPERATIVE", kBfRowText);
+    const size_t bfDown = ok ? MenuFind(bfRow, versusString, nameAt + 8, bfEnd) : std::string::npos;
+    ok = bfDown != std::string::npos &&
+         MenuReplaceString(bfRow, bfDown + versusString.size(), bfEnd, "versus", kRowName) &&
+         MenuReplaceString(bfRow, nameAt + 8, bfEnd, "select_challenge", kBfScreen);
+    const std::vector<uint8_t> bfScreen = MenuString(kBfScreen);
+    const size_t bfScreenAt = ok ? MenuFind(bfRow, bfScreen, nameAt + 8, bfEnd) : std::string::npos;
+    if (!ok || bfScreenAt == std::string::npos || bfScreenAt + bfScreen.size() + 4 > bfEnd) {
+        LOG_WARN("HvV menu: the rows are not as expected; no Battlefront entry");
+        return false;
+    }
+    std::memcpy(bfRow.data() + bfScreenAt + bfScreen.size(), &versusId, 4);
+    row.insert(row.end(), bfRow.begin(), bfRow.end());
     // Cooperative's down and Versus's up go to the new row (the later edits first: they move nothing before them)
     size_t coopLinks = coopEnd;
     if (!MenuReplaceString(data, coop + nameAt + 12, coopLinks, "versus", kRowName)) {
@@ -115,13 +144,13 @@ bool PatchMainMenu(std::vector<uint8_t>& data)
     const std::vector<uint8_t> coopString = MenuString("cooperative");
     const size_t down = MenuFind(data, coopString, versus + nameAt + 8, versusLinks);
     if (down == std::string::npos ||
-        !MenuReplaceString(data, down + coopString.size(), versusLinks, "cooperative", kRowName)) {
+        !MenuReplaceString(data, down + coopString.size(), versusLinks, "cooperative", kBfRowName)) {
         LOG_WARN("HvV menu: the Versus row's links are not as expected; no Heroes vs Villains entry");
         return false;
     }
-    ++children;
+    children += 2;
     std::memcpy(data.data() + versus - 4, &children, 4);
-    LOG_INFO("HvV menu: the main menu has a Heroes vs Villains entry");
+    LOG_INFO("HvV menu: the main menu has Heroes vs Villains and Battlefront entries");
     return true;
 }
 
@@ -145,6 +174,9 @@ bool __fastcall SwitchButtonEvent(uint8_t* self, void*, int event, int value)
             g_HvvMode = true;
             g_PickSlot = -1;
             LOG_INFO("HvV menu: Heroes vs Villains chosen");
+        } else if (key == MenuKey(kBfRowName)) {
+            g_HvvMode = false;
+            LOG_INFO("HvV menu: Battlefront chosen");
         } else if (key) {
             g_HvvMode = false;
         }
@@ -394,6 +426,14 @@ std::vector<ScreenRow> SetupRows()
         { "hvvstart", "IDS_PORT_HVV_START", true } };
 }
 
+// Battlefront's setup: Map, Side, Troopers, Tickets, Heroes, Start.
+std::vector<ScreenRow> BfRows()
+{
+    return { { "bfmap", "IDS_PORT_BF_MAP", false }, { "bfside", "IDS_PORT_BF_SIDE", false },
+        { "bftroops", "IDS_PORT_BF_TROOPS", false }, { "bftickets", "IDS_PORT_BF_TICKETS", false },
+        { "bfheroes", "IDS_PORT_BF_HEROES", false }, { "bfstart", "IDS_PORT_HVV_START", true } };
+}
+
 std::vector<ScreenRow> LineupRows()
 {
     std::vector<ScreenRow> rows;
@@ -558,6 +598,8 @@ bool GenerateScreens(const std::string& lowerName, std::vector<uint8_t>& data)
         ok = BuildScreen(data, kSetupScreen, SetupRows(), "IDS_PORT_HVV_TITLE");
     else if (lowerName == kLineupFile)
         ok = BuildScreen(data, kLineupScreen, LineupRows(), "IDS_PORT_HVV_LINEUP_TITLE");
+    else if (lowerName == kBfFile)
+        ok = BuildScreen(data, kBfScreen, BfRows(), "IDS_PORT_BF_TITLE");
     return ok;
 }
 
@@ -576,10 +618,56 @@ std::wstring Wide(const std::string& text)
     return std::wstring(text.begin(), text.end());
 }
 
+// Battlefront's choices: its map (the dev map's floor, then the custom maps with command posts), side, troopers a
+// side, tickets, heroes.
+constexpr int kBfTroopChoices[] = { 4, 6, 8 };
+constexpr int kBfTicketChoices[] = { 50, 100, 150, 200, 300 };
+int g_BfMap = 0, g_BfSide = 0, g_BfTroops = 1, g_BfTickets = 1;
+bool g_BfHeroes = true;
+
+std::vector<const CustomMap*> BfMaps()
+{
+    std::vector<const CustomMap*> maps;
+    for (const CustomMap& m : CustomMaps())
+        if (!m.commandPosts.empty())
+            maps.push_back(&m);
+    return maps;
+}
+
+std::string BfMapChoice()
+{
+    const std::vector<const CustomMap*> maps = BfMaps();
+    return g_BfMap > 0 && g_BfMap <= int(maps.size()) ? maps[size_t(g_BfMap - 1)]->id : std::string();
+}
+
+// The heroes each side can call: the game's, the built-in commanders, and the custom characters of that side.
+void BfHeroes(std::vector<std::string>& republic, std::vector<std::string>& separatists)
+{
+    republic = { "IAnakin", "IObiwan", "IYoda", "ICody" };
+    separatists = { "IGrievous", "IDooku", "IDroidCommander" };
+    for (const CustomCharacter& custom : CustomCharacters()) {
+        if (custom.builtIn)
+            continue;
+        std::vector<std::string>& pool = custom.side == 0 ? republic : separatists;
+        if (pool.size() < 5)
+            pool.push_back(custom.className);
+    }
+    if (separatists.size() < 5)
+        separatists.push_back("IVader");
+}
+
 // The rows' texts: a value row's name is its text, its value the On text the control shows; a line-up row is the
 // place and the fighter.
 void UpdateTexts()
 {
+    {
+        const std::string map = BfMapChoice();
+        const CustomMap* custom = map.empty() ? nullptr : FindCustomMap(map);
+        SetMenuText("IDS_PORT_BF_V_MAP", Wide(custom ? custom->name : "DEVELOPER MAP"));
+        SetMenuText("IDS_PORT_BF_V_SIDE", g_BfSide == 0 ? L"REPUBLIC (CLONES)" : L"SEPARATISTS (DROIDS)");
+        SetMenuText("IDS_PORT_BF_V_TROOPS", Wide(std::to_string(kBfTroopChoices[g_BfTroops]) + " A SIDE"));
+        SetMenuText("IDS_PORT_BF_V_TICKETS", Wide(std::to_string(kBfTicketChoices[g_BfTickets])));
+    }
     SetMenuText("IDS_PORT_HVV_V_TEAM", Wide(std::to_string(g_PerSide) + " VS " + std::to_string(g_PerSide)));
     SetMenuText("IDS_PORT_HVV_V_LIVES", Wide(std::to_string(kLivesChoices[g_LivesChoice])));
     SetMenuText("IDS_PORT_HVV_V_HEALTH", Wide(std::to_string(kHealthChoices[g_HealthChoice])));
@@ -636,8 +724,29 @@ uint8_t* CurrentProfile()
                     : nullptr;
 }
 
+char __fastcall BfValueDraw(uint8_t* handler, uint32_t value, int row)
+{
+    static const char* const kTexts[] = { "IDS_PORT_BF_V_MAP", "IDS_PORT_BF_V_SIDE", "IDS_PORT_BF_V_TROOPS",
+        "IDS_PORT_BF_V_TICKETS", nullptr };
+    const bool on = row == 4 ? g_BfHeroes : true;
+    handler[0x23C] = on ? 1 : 0;
+    uint8_t* profile = CurrentProfile();
+    const uint8_t saved = profile ? profile[0x2A] : 0;
+    if (profile)
+        profile[0x2A] = on ? 1 : 0;
+    if (row < int(std::size(kTexts)) && kTexts[row])
+        SetOnOffTexts(kTexts[row], kTexts[row]);
+    const char result = g_OnOffDraw(handler, nullptr, value);
+    SetOnOffTexts(nullptr, nullptr);
+    if (profile)
+        profile[0x2A] = saved;
+    return result;
+}
+
 char __fastcall ValueDraw(uint8_t* handler, void*, uint32_t value)
 {
+    if (const int bfRow = RowOf(handler, BfRows()); bfRow >= 0 && bfRow < 5)
+        return BfValueDraw(handler, value, bfRow);
     static const char* const kValueTexts[] = { "IDS_PORT_HVV_V_TEAM", "IDS_PORT_HVV_V_LIVES", "IDS_PORT_HVV_V_HEALTH",
         nullptr, "IDS_PORT_HVV_V_MAP" };
     const int row = RowOf(handler, SetupRows());
@@ -672,8 +781,28 @@ void Step(int row, int by)
     UpdateTexts();
 }
 
+void BfStep(int row, int by)
+{
+    const auto wrap = [](int v, int n) { return ((v % n) + n) % n; };
+    switch (row) {
+    case 0: g_BfMap = wrap(g_BfMap + by, int(BfMaps().size()) + 1); break;
+    case 1: g_BfSide = 1 - g_BfSide; break;
+    case 2: g_BfTroops = wrap(g_BfTroops + by, int(std::size(kBfTroopChoices))); break;
+    case 3: g_BfTickets = wrap(g_BfTickets + by, int(std::size(kBfTicketChoices))); break;
+    case 4: g_BfHeroes = !g_BfHeroes; break;
+    default: return;
+    }
+    UpdateTexts();
+}
+
 char __fastcall ValueEvent(uint8_t* handler, void*, int event, int value)
 {
+    if (const int bfRow = RowOf(handler, BfRows()); bfRow >= 0 && event != kB &&
+        (event == kLeft || event == kRight || event == kChosen)) {
+        g_OnOffEvent(handler, nullptr, event, value);
+        BfStep(bfRow, event == kLeft ? -1 : 1);
+        return 1;
+    }
     const int row = RowOf(handler, SetupRows());
     if (event == kB)
         return reinterpret_cast<ItemEventFn>(uintptr_t(kItemEvent))(handler, nullptr, event, value);
@@ -699,8 +828,28 @@ void StartMatch()
         LOG_INFO("HvV menu: the match starts");
 }
 
+void StartBattlefrontMatch()
+{
+    BattlefrontSetup setup;
+    setup.map = BfMapChoice();
+    setup.side = g_BfSide;
+    setup.troops = kBfTroopChoices[g_BfTroops];
+    setup.tickets = kBfTicketChoices[g_BfTickets];
+    setup.heroes = g_BfHeroes;
+    BfHeroes(setup.republicHeroes, setup.separatistHeroes);
+    std::string error;
+    if (!StartBattlefront(setup, error))
+        LOG_WARN("HvV menu: Battlefront cannot start: %s", error.c_str());
+    else
+        LOG_INFO("HvV menu: Battlefront starts");
+}
+
 char __fastcall ButtonEvent(uint8_t* handler, void*, int event, int value)
 {
+    if (RowOf(handler, BfRows()) == 5 && event == kChosen) {
+        StartBattlefrontMatch();
+        return 1;
+    }
     const int setupRow = RowOf(handler, SetupRows());
     const int row = setupRow < 0 ? RowOf(handler, LineupRows()) : -1;
     const int slot = row >= 0 ? SlotOfRow(row) : -1;
@@ -816,6 +965,12 @@ void InstallScreens()
     SetMenuText("IDS_PORT_HVV_MAP", L"Map");
     SetMenuText("IDS_PORT_HVV_LINEUP", L"Line-up");
     SetMenuText("IDS_PORT_HVV_START", L"Start");
+    SetMenuText("IDS_PORT_BF_TITLE", L"Battlefront");
+    SetMenuText("IDS_PORT_BF_MAP", L"Map");
+    SetMenuText("IDS_PORT_BF_SIDE", L"Side");
+    SetMenuText("IDS_PORT_BF_TROOPS", L"Troopers");
+    SetMenuText("IDS_PORT_BF_TICKETS", L"Tickets");
+    SetMenuText("IDS_PORT_BF_HEROES", L"Heroes");
     // the line-up's defaults, once (kept across the game's restarts, as the rules)
     if (g_Lineup[0].empty()) {
         // Versus fighters only (the select screen offers no others); a custom villain fourth when there is one
@@ -834,6 +989,7 @@ void InstallScreens()
     AddShellHandler("HvvButton", &MakeButton);
     AddShellScreen(kSetupFile);
     AddShellScreen(kLineupFile);
+    AddShellScreen(kBfFile);
     RegisterResourceGenerator(&GenerateScreens);
 }
 
@@ -951,6 +1107,7 @@ void InstallHvvMenu()
     g_SelectSeen = 0;
     g_SelectScreen = nullptr;
     SetMenuText(kRowText, L"Heroes vs Villains");
+    SetMenuText(kBfRowText, L"Battlefront");
     RegisterResourcePatch(kMainMenu, &PatchMainMenuResource);
     const uint32_t slot = kSwitchButtonVtable + kEventSlot * 4;
     const uint32_t frameSlot = kSelectVtable + kSelectFrameSlot * 4;

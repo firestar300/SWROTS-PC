@@ -24,7 +24,9 @@ namespace swrots::game {
 namespace {
 
 constexpr const char* kLevelArgument = "map:u107_uta_grievoussurvival";
-constexpr const char* kDevMapArgument = "devmap:1";
+// (with the boot flow's switches a direct start needs: no licence movies, no direct-launch check, which otherwise
+// sends a start from the debug menu through the intro movies and title first)
+constexpr const char* kDevMapArgument = "devmap:1 playlicensemovie:0 allowskipmovie:1 detectDirectLaunch:0";
 // A Versus duel on the dev map: the game's Versus starts its Utapau arena (a duel level; its PAK brings the duel's
 // fighters, sounds, cameras and HUD art), whose level file is served as the dev map built for a duel.
 constexpr const char* kDuelArena = "levels\\u107_uta_grievous_01.slp";

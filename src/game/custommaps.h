@@ -23,6 +23,10 @@ struct CustomMap {
     float lineGap = 150;
     std::vector<DevMapBox> boxes;           // in the map's own coordinates (cy from its y 0), yaw in radians
     std::vector<std::pair<float, float>> spawns;
+    // Battlefront ([Battlefront]): its command posts and where each team starts (its own coordinates, x z)
+    std::vector<std::pair<float, float>> commandPosts;
+    bool hasStarts = false;
+    float cloneStart[2] = {}, droidStart[2] = {};
     bool hasBounds = false;
     float bounds[4] = {};      // x0 z0 x1 z1
     // its light ([Lighting]): negative: the dev map's

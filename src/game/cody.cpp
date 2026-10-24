@@ -155,6 +155,8 @@ struct Kind {
     const char* event;       // the dialogue event its lines are said through
     const char* callLine;
     const char* strikeLine;
+    bool trooper = false;    // a Battlefront trooper: no specials, its shots and dodges free (B calls its hero)
+    float shotCost = kShotCost, rollCost = kRollCost;
 };
 constexpr Kind kKinds[] = {
     { "ICody", "CloneTrooper", "ICloneTrooper", "", "CODY'S CLONE", true, false, "Cody_RollRight", true,
@@ -164,12 +166,19 @@ constexpr Kind kKinds[] = {
       "Droid_Duck", false, "Droid_Pushaway", true, "Droid_Call", "Droid_Strike",
       "TNT", "BDD951", "BDD943" },  // "Move in, corporal, we'll cover you.", "Fire!"
 };
+// The player's trooper in Battlefront (hvv.h): a clone or a battle droid with Cody's or the droid commander's
+// blaster, roll or duck and blow, nothing more.
+constexpr Kind kCloneTrooper = { "ICloneTrooper", "CloneTrooper", nullptr, nullptr, nullptr, false, false,
+    "Cody_RollRight", true, "ctroop_atk_riflebutt", false, nullptr, nullptr, nullptr, nullptr, nullptr, true, 0, 0 };
+constexpr Kind kDroidTrooper = { "IBattleDroid", "BattleDroid", nullptr, nullptr, nullptr, false, true,
+    "Droid_Duck", false, "Droid_Pushaway", true, nullptr, nullptr, nullptr, nullptr, nullptr, true, 0, 0 };
 
-const Kind* KindOf(const uint8_t* character)
+const Kind* KindOf(const uint8_t* character, bool droid = false)
 {
     const CustomCharacter* custom = character ? CustomCharacterOf(character) : nullptr;
     if (!custom || !custom->builtIn)
-        return nullptr;
+        return character && BattlefrontActive() && character == PlayerObject() ? (droid ? &kDroidTrooper : &kCloneTrooper)
+                                                                               : nullptr;
     for (const Kind& kind : kKinds)
         if (custom->className == kind.className)
             return &kind;
@@ -876,7 +885,7 @@ void __fastcall DroidStateManagerHook(uint8_t* script, void*, uint32_t a, uint32
     const uint8_t* context = *reinterpret_cast<uint8_t* const*>(uintptr_t(kScriptCharacterContext));
     uint8_t* instance = *reinterpret_cast<uint8_t**>(uintptr_t(0x006964C0));
     if (context)
-        CloneKitFrame(script, instance, *reinterpret_cast<uint8_t* const*>(context + 0x68));
+        CloneKitFrame(script, instance, *reinterpret_cast<uint8_t* const*>(context + 0x68), true);
 }
 
 uint8_t* Trampoline(uint32_t address, const uint8_t* bytes, uint32_t length)
@@ -948,18 +957,18 @@ void InstallCody()
     RegisterResourceGenerator(&HelmetGenerator);
 }
 
-void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
+void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character, bool droid)
 {
     if (instance && character) {
         if (IsHelper(character)) {
             for (const Helper& h : g_Helpers)
                 if (h.object == character)
                     g_Shooters[instance] = { h.master, At<uint32_t>(h.master, 4) };
-        } else if (KindOf(character)) {
+        } else if (KindOf(character, droid)) {
             g_Shooters[instance] = { character, At<uint32_t>(character, 4) };
         }
     }
-    const Kind* kind = KindOf(character);
+    const Kind* kind = KindOf(character, droid);
     if (!kind || !instance)
         return;
     Kit& kit = g_Kits[character];
@@ -997,9 +1006,9 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     const bool free = CanAct(kit.scripts);
     const bool squadOut = std::any_of(g_Helpers.begin(), g_Helpers.end(), [&](const Helper& h) { return h.master == character; });
     const bool specials = now >= kit.roundStart + kSpecialsAfterMs;
-    const bool canSummon = specials && !squadOut && !kit.summon && meter >= kSummonCost &&
+    const bool canSummon = kind->call && specials && !squadOut && !kit.summon && meter >= kSummonCost &&
         (!kit.lastSummon || now >= kit.lastSummon + kSummonWaitMs);
-    const bool canBombard = specials && !kit.bombard && meter >= kBombardCost &&
+    const bool canBombard = kind->strike && specials && !kit.bombard && meter >= kBombardCost &&
         (!kit.lastBombard || now >= kit.lastBombard + kBombardWaitMs);
     if (!kit.player) { // shoots as any clone; up close he rolls away or strikes; his specials when his opponent is near
         uint8_t* opponent = OpponentOf(character);
@@ -1040,8 +1049,12 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     // moves take a press made just before
     if (Pressed(kButtonPush))
         kit.summonAsked = now;
-    if (Pressed(kButtonCritical))
-        kit.bombardAsked = now;
+    if (Pressed(kButtonCritical)) {
+        if (kind->trooper)
+            BattlefrontHeroRequest(); // a trooper's B: its hero, when its points are enough
+        else
+            kit.bombardAsked = now;
+    }
     const bool dodge = Held(kButtonDodge);
     if (dodge && !kit.lastBlock) { // the roll: where the stick points on the screen at the press
         kit.rollAsked = now;
@@ -1079,13 +1092,13 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     if (kind->playerMelee && Pressed(kButtonFast) && !kit.melee) // the droid's shove (the clone's rifle butt is its own)
         kit.melee = true;
     // the roll, where the stick pointed (CodyFrame)
-    if (kit.rollAsked && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs && meter >= kRollCost && fresh(kit.rollAsked)) {
+    if (kit.rollAsked && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs && meter >= kind->rollCost && fresh(kit.rollAsked)) {
         kit.lastDodge = now;
-        meter -= kRollCost;
+        meter -= kind->rollCost;
         kit.roll = true;
     }
     // the blaster
-    if (!Held(kButtonHeavy) || meter < kShotCost) {
+    if (!Held(kButtonHeavy) || meter < kind->shotCost) {
         Layer(kit, false);
         return;
     }
@@ -1095,7 +1108,7 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     }
     if (now - kit.lastShot >= kShotIntervalMs) {
         kit.lastShot = now;
-        meter -= kShotCost;
+        meter -= kind->shotCost;
         Fire(*kind, script, instance);
     }
 }
@@ -1265,6 +1278,8 @@ float CodyDamage(uint8_t* character, float change)
     if (At<float>(character, kCharacterHealth) <= 0)
         return change; // already down (the game's own end of him)
     // a blow the game deals a trooper or a droid as a kill (its one-hit reactions: -1000) counts as a hard one
+    if (kit->second.kind && kit->second.kind->trooper)
+        return change; // a Battlefront trooper's health is the match's (hvv.cpp)
     return std::max(change, -kHardestHit) * kDamageTaken;
 }
 

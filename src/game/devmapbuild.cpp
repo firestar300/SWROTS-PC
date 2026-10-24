@@ -1030,6 +1030,11 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
             const float m[12] = { c, 0, -s, 0, 1, 0, s, 0, c, placed.x, float(kFloorY + kStandLift), placed.z };
             transform.Raw(m, sizeof m);
             o.props = { { "ID", id.out }, { "Name", name.out }, { "Transform", transform.out } };
+            if (!placed.costume.empty()) {
+                Writer costume;
+                costume.String(placed.costume);
+                o.props.push_back({ "Mesh Choice", costume.out });
+            }
             o.tail.assign(8, 0);
             keptObjects.push_back(std::move(o));
         }

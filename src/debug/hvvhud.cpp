@@ -19,6 +19,7 @@
 #include "game/hvv.h"
 #include "game/hvvmenu.h"
 #include "imgui.h"
+#include "input/controls.h"
 
 namespace swrots::debug {
 
@@ -33,6 +34,21 @@ constexpr ImU32 kPanel = IM_COL32(10, 12, 18, 175);
 constexpr ImU32 kEdge = IM_COL32(200, 200, 210, 110);
 
 ImU32 SideColour(int side) { return side == 0 ? kHeroes : side == 1 ? kVillains : kWhite; }
+
+// The sides' names: the heroes and villains, or Battlefront's republic and separatists.
+const char* SideName(const game::HvvState& s, int side)
+{
+    if (s.conquest)
+        return side == 0 ? "REPUBLIC" : "SEPARATISTS";
+    return side == 0 ? "HEROES" : "VILLAINS";
+}
+
+const char* WinText(const game::HvvState& s)
+{
+    if (s.conquest)
+        return s.winner == 0 ? "REPUBLIC WINS" : "SEPARATISTS WIN";
+    return s.winner == 0 ? "HEROES WIN" : "VILLAINS WIN";
+}
 
 ImU32 Faded(ImU32 colour, float alpha)
 {
@@ -103,7 +119,9 @@ void Scoreboard(const game::HvvState& s, const ImGuiViewport* vp, float u)
         snprintf(line, sizeof line, "%d", s.lives[side]);
         Text(middle + sign * 18 * u, top, h, SideColour(side), line, side == 0 ? 1.0f : 0.0f);
         Text(middle + sign * 70 * u, top + 6 * u, h * 0.6f, Faded(SideColour(side), 0.85f),
-            side == 0 ? "HEROES" : "VILLAINS", side == 0 ? 1.0f : 0.0f);
+            SideName(s, side), side == 0 ? 1.0f : 0.0f);
+        if (s.conquest) // tickets, no dots: the command posts under them
+            continue;
         const int from = side == 0 ? 0 : s.heroes, to = side == 0 ? s.heroes : int(s.fighters.size());
         for (int k = 0; k < to - from; ++k) {
             const auto& f = s.fighters[size_t(from + k)];
@@ -263,7 +281,7 @@ void Leaderboard(const game::HvvState& s, const ImGuiViewport* vp, float u)
         kPanel, 6 * u);
     for (int side = 0; side < 2; ++side) {
         const float x = left + side * (colW + gap);
-        Text(x, top, 22 * u, SideColour(side), side == 0 ? "HEROES" : "VILLAINS");
+        Text(x, top, 22 * u, SideColour(side), SideName(s, side));
         const float cols[] = { x + colW * 0.56f, x + colW * 0.70f, x + colW * 0.84f, x + colW };
         const char* heads[] = { "D", "A", "F", "SCORE" };
         for (int c = 0; c < 4; ++c)
@@ -294,8 +312,7 @@ void EndScreen(const game::HvvState& s, const ImGuiViewport* vp, float u)
     const float alpha = std::min(1.0f, s.endingAge / 0.8f);
     const float middle = vp->Pos.x + vp->Size.x / 2;
     if (s.winner >= 0)
-        Text(middle, vp->Pos.y + vp->Size.y * 0.08f, 40 * u, Faded(SideColour(s.winner), alpha),
-            s.winner == 0 ? "HEROES WIN" : "VILLAINS WIN", 0.5f);
+        Text(middle, vp->Pos.y + vp->Size.y * 0.08f, 40 * u, Faded(SideColour(s.winner), alpha), WinText(s), 0.5f);
     static const char* kRanks[] = { "FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH" };
     static const float kAt[5][2] = { { 0.5f, 0.68f }, { 0.30f, 0.62f }, { 0.70f, 0.62f }, { 0.11f, 0.70f },
         { 0.89f, 0.70f } };
@@ -335,6 +352,82 @@ void EndScreen(const game::HvvState& s, const ImGuiViewport* vp, float u)
         char score[32];
         snprintf(score, sizeof score, "%d SCORE", f.score);
         Text(cx, y + h - (r < 3 ? 22 : 19) * u, (r < 3 ? 16 : 13) * u, Faded(kGold, a), score, 0.5f);
+    }
+}
+
+// Battlefront's command posts: a row of their letters under the tickets (each in its holder's colour, a bar under it
+// filling as a side turns it), and a marker where each stands in the world (its letter in a diamond).
+ImU32 PostColour(int owner) { return owner == 0 ? kHeroes : owner == 1 ? kVillains : IM_COL32(200, 200, 200, 255); }
+
+void PostRow(const game::HvvState& s, const ImGuiViewport* vp, float u)
+{
+    const float size = 22 * u, gap = 8 * u, top = vp->Pos.y + 58 * u;
+    const float width = float(s.posts.size()) * size + float(s.posts.size() - 1) * gap;
+    float x = vp->Pos.x + (vp->Size.x - width) / 2;
+    for (const auto& post : s.posts) {
+        const ImU32 colour = PostColour(post.owner);
+        g_Draw->AddRectFilled(ImVec2(x, top), ImVec2(x + size, top + size), IM_COL32(10, 12, 18, 170), 3 * u);
+        g_Draw->AddRect(ImVec2(x, top), ImVec2(x + size, top + size), colour, 3 * u, 0, 2 * u);
+        Text(x + size / 2, top + 3 * u, size - 6 * u, colour, post.name, 0.5f);
+        // how far it is turned: towards the clones (left, blue) or the droids (right, red)
+        const float hold = std::abs(post.hold);
+        if (hold > 0.01f && hold < 0.99f)
+            g_Draw->AddRectFilled(ImVec2(x, top + size + 3 * u), ImVec2(x + size * hold, top + size + 6 * u),
+                PostColour(post.hold < 0 ? 0 : 1));
+        x += size + gap;
+    }
+}
+
+void PostMarkers(const game::HvvState& s, const ImGuiViewport* vp, float u)
+{
+    for (const auto& post : s.posts) {
+        const float at3[3] = { post.at[0], post.at[1] + 130.0f, post.at[2] };
+        ImVec2 at;
+        float depth = 0;
+        if (!OnScreen(at3, vp, at, &depth))
+            continue;
+        const float r = std::clamp(14.0f * u * (900.0f / std::max(depth, 1.0f)), 9.0f * u, 16.0f * u);
+        const ImU32 colour = PostColour(post.owner);
+        const ImVec2 n(at.x, at.y - r), e(at.x + r, at.y), so(at.x, at.y + r), w(at.x - r, at.y);
+        g_Draw->AddQuadFilled(n, e, so, w, IM_COL32(10, 12, 18, 170));
+        g_Draw->AddQuad(n, e, so, w, colour, 2.5f * u);
+        Text(at.x, at.y - r * 0.55f, r * 1.1f, colour, post.name, 0.5f);
+        const float hold = std::abs(post.hold);
+        if (hold > 0.01f && hold < 0.99f) // being turned: a bar under it
+            g_Draw->AddRectFilled(ImVec2(at.x - r, at.y + r + 3 * u), ImVec2(at.x - r + 2 * r * hold, at.y + r + 6 * u),
+                PostColour(post.hold < 0 ? 0 : 1));
+        if (depth > 300.0f) {
+            char metres[16];
+            snprintf(metres, sizeof metres, "%dM", int(depth / 36.0f));
+            Text(at.x, at.y + r + 8 * u, 11 * u, Faded(kWhite, 0.8f), metres, 0.5f);
+        }
+    }
+}
+
+// The player's hero: its points towards one, then "HERO READY" with the button (B, or the key bound to it).
+void HeroPrompt(const game::HvvState& s, const ImGuiViewport* vp, float u)
+{
+    if (s.playerDown)
+        return;
+    const float middle = vp->Pos.x + vp->Size.x / 2, y = vp->Pos.y + vp->Size.y * 0.86f;
+    if (s.heroReady) {
+        std::string key = "B";
+        if (input::KeyboardPrompts()) {
+            const std::vector<int> keys = input::ActionKeys(L"CriticalAttack");
+            char name[64] = {};
+            if (!keys.empty() && GetKeyNameTextA(LONG(MapVirtualKeyA(UINT(keys[0]), MAPVK_VK_TO_VSC)) << 16, name, sizeof name) > 0)
+                key = name;
+        }
+        for (char& c : key)
+            c = char(toupper(static_cast<unsigned char>(c)));
+        const float pulse = 0.75f + 0.25f * std::sin(float(GetTickCount64() % 100000) / 180.0f);
+        Text(middle, y, 22 * u, Faded(kGold, pulse), "HERO READY  -  PRESS " + key, 0.5f);
+        return;
+    }
+    if (s.heroCost > 0) {
+        char line[48];
+        snprintf(line, sizeof line, "HERO  %d / %d", std::min(s.heroPoints, s.heroCost), s.heroCost);
+        Text(middle, y + 6 * u, 13 * u, Faded(kWhite, 0.6f), line, 0.5f);
     }
 }
 
@@ -413,14 +506,18 @@ void DrawHvvHud()
     OverheadInfo(s, vp, u);
     Markers(s, vp, u);
     Scoreboard(s, vp, u);
+    if (s.conquest) {
+        PostMarkers(s, vp, u);
+        PostRow(s, vp, u);
+        HeroPrompt(s, vp, u);
+    }
     KillFeed(s, vp, u);
     Captions(s, vp, u);
     Notice(s, vp, u);
     if (s.started && (s.board || TabHeld()))
         Leaderboard(s, vp, u);
     if (s.winner >= 0)
-        Text(vp->Pos.x + vp->Size.x / 2, vp->Pos.y + vp->Size.y * 0.3f, 48 * u, SideColour(s.winner),
-            s.winner == 0 ? "HEROES WIN" : "VILLAINS WIN", 0.5f);
+        Text(vp->Pos.x + vp->Size.x / 2, vp->Pos.y + vp->Size.y * 0.3f, 48 * u, SideColour(s.winner), WinText(s), 0.5f);
 }
 
 } // namespace swrots::debug

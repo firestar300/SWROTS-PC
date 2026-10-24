@@ -631,9 +631,37 @@ void* __fastcall PortraitLookupHook(uint8_t* manager, void* edx, const char* nam
 // own shows it, loaded and added to the list the first time.
 constexpr uint32_t kHudPortraitCall = 0x0025EADD;
 
+// A trooper the player plays (Battlefront) has no portrait of the game's: the clone's Cody's helmet picture, the
+// battle droid's the droid commander's picture (customchars.cpp), by its costume list's class name (header +0).
+const char* TrooperFace(const uint8_t* character)
+{
+    __try {
+        const uint8_t* list = *reinterpret_cast<const uint8_t* const*>(character + kCharacterVariants);
+        const char* shortName = list ? *reinterpret_cast<const char* const*>(list) : nullptr;
+        if (shortName && _stricmp(shortName, "CloneTrooper") == 0)
+            return "interfc\\hud_b\\hud_face_codyport01";
+        if (shortName && _stricmp(shortName, "BattleDroid") == 0)
+            return "interfc\\hud_b\\hud_face_droidport01";
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    return nullptr;
+}
+
 void* __cdecl PortraitForCharacter(uint8_t* manager, const char* name, int head, const uint8_t* character)
 {
     const CustomCharacter* custom = CustomCharacterOf(character);
+    if (!custom && !head && manager && character)
+        if (const char* face = TrooperFace(character)) {
+            if (void* found = g_OriginalPortraitLookup(manager, nullptr, face, 0))
+                return found;
+            MakeGeneratedResource(std::string(face) + ".stx");
+            PortraitRecord record = { LoadInterfaceTexture(face, true), nullptr, face };
+            if (record.face) {
+                reinterpret_cast<void(__fastcall*)(void*, void*, const PortraitRecord*)>(uintptr_t(kPortraitListAdd))(
+                    manager + 0x260, nullptr, &record);
+                return record.face;
+            }
+        }
     if (!custom || custom->hudFace.empty() || head || !manager)
         return PortraitLookupHook(manager, nullptr, name, head);
     if (void* found = g_OriginalPortraitLookup(manager, nullptr, custom->hudFace.c_str(), 0))

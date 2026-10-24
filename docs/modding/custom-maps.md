@@ -65,6 +65,20 @@ Lights=0.6                       ; the level's point lights' intensity, scaled
 The map is turned and moved so that the middle between its two lines is the dev map's middle and the heroes face the
 villains along +z: the intro's camera, the line-up and the end are then the same as on the floor.
 
+## Battlefront
+
+A map with command posts can host [Battlefront](../battlefront.md) (it is then offered on its setup screen):
+
+```ini
+[Battlefront]
+CommandPosts=0 0; 300 250; -280 -160; 560 -480   ; the posts (x z, separated by ";"), named A, B, C... in this order
+CloneStart=700 245                               ; where the clones start (x z)
+DroidStart=-720 -120                             ; and the droids
+```
+
+Without the starts, the clones start on the heroes' line and the droids on the villains'. Each side starts with the
+post nearest its start. Keep the posts on open floor, inside `Bounds=`, a few hundred units apart.
+
 ## Light
 
 Without `[Lighting]` the model is lit by a bright ambient light alone, as the floor. With a baked light the level's

@@ -77,6 +77,17 @@ struct HvvState {
     bool ending = false;            // the end: the top five
     float endingAge = 0;
     std::vector<int> top;           // fighters, best first (up to 5)
+    // Battlefront: the sides are the clones (0) and the droids (1), lives are tickets
+    bool conquest = false;
+    struct PostState {
+        float at[3] = {};
+        int owner = -1;             // 0, 1, or -1 neutral
+        float hold = 0;             // -1 the clones' to +1 the droids'
+        std::string name;           // A, B, ...
+    };
+    std::vector<PostState> posts;
+    bool heroReady = false;         // the player can call a hero (B)
+    int heroPoints = 0, heroCost = 0;
 };
 HvvState GetHvvState();
 
@@ -102,6 +113,22 @@ bool EndHvvNow();
 // The launch arguments that carry the player's profile into the next start (saving it first): the main menu after a
 // match keeps it. Empty without one (a start from Default_Xbox.cfg).
 std::string ProfileSessionArguments();
+
+// Battlefront (conquest): clones against battle droids on the dev map or a custom map with command posts (its
+// [Battlefront] section; the dev map's floor has its own), tickets, heroes for points. Starts it (the game restarts).
+struct BattlefrontSetup {
+    std::string map;                // a custom map's id, empty for the dev map's floor
+    int side = 0;                   // the player's: 0 the clones, 1 the droids
+    int troops = 6;                 // troopers a side (2 to 8), the player one of them
+    int tickets = 100;
+    bool heroes = true;
+    std::vector<std::string> republicHeroes, separatistHeroes; // classes (those the game has are kept)
+};
+bool StartBattlefront(const BattlefrontSetup& setup, std::string& error);
+// Whether this start is a Battlefront match.
+bool BattlefrontActive();
+// The player asks for its hero (the troopers' B): taken when its points are enough and its side has none.
+void BattlefrontHeroRequest();
 
 // Pins the leaderboard (as holding Tab shows it), or unpins it.
 void SetHvvBoardPinned(bool pinned);

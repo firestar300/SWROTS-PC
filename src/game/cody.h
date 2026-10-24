@@ -18,7 +18,7 @@ void InstallCody();
 void CodyFrame();
 
 // From the clone script's StateManager (coop.cpp's hook), every clone every frame, in its script's turn.
-void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character);
+void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character, bool droid = false);
 
 // A health change of a character as it lands (coop.cpp's health hook): none for a Cody in the middle of a roll.
 float CodyDamage(uint8_t* character, float change);

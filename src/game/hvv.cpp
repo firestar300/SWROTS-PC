@@ -81,6 +81,24 @@ constexpr ULONGLONG kMenuAfter = 12000; // ms of the top five
 constexpr const char* kDefaultLineup[] = { "IObiwan", "IYoda", "IMace", "ISerra",
     "IVader", "IDooku", "IGrievous", "IAnakin" };
 
+// Battlefront (conquest, `bf:1`): the same match with troopers (clones against battle droids) and tickets for lives,
+// command posts to take and hold (a side holding more of them drains the other's tickets; fighters come back at their
+// side's posts) and heroes: points buy one (the player's, a press of B) and the AI's sides call theirs too, one hero a
+// side at a time.
+constexpr float kPostRadius = 240.0f;      // a fighter this near a post counts for it
+constexpr float kCaptureMs = 7000.0f;      // one fighter alone turns a post (neutral to its side) in this long
+constexpr int kMostCapturers = 3;          // more fighters turn it faster, up to this many
+constexpr ULONGLONG kBleedMs = 5000;       // a side holding fewer posts loses a ticket this often
+constexpr ULONGLONG kBleedAllMs = 2000;    // ... holding none while the other holds all
+constexpr int kHeroPoints = 500;           // the player's points for a hero
+constexpr int kAiHeroPoints = 800;         // a side's AI's points for its hero
+constexpr int kCapturePoints = 50;
+constexpr int kDefaultTickets = 100;
+constexpr int kDefaultTroopHealth = 150, kDefaultHeroHealth = 800;
+constexpr float kDevPosts[][2] = { { 12750, 8100 }, { 10500, 8100 }, { 15000, 8100 }, { 12750, 6400 }, { 12750, 9800 } };
+constexpr float kDevStarts[2][2] = { { 8600, 8100 }, { 16900, 8100 } };
+constexpr uint32_t kLoaderIds = 0x40; // the hero classes' placed characters (they load the classes, sounds and all)
+
 // The game's character fields and calls the match uses.
 constexpr uint32_t kActivate = 0xB4;           // object vfunc, thiscall (): a placed character joins the level
 constexpr uint32_t kPlace = 0x1F4;             // object vfunc, thiscall (const float m[16])
@@ -123,6 +141,8 @@ struct Fighter {
     float stillAt[3] = {};   // where it was when it last moved on (stuck: see Unstick)
     ULONGLONG stillSince = 0;
     ULONGLONG lastBlow = 0;  // when it last dealt or took an enemy's hit (idle beside its target: see Unstick)
+    std::string troopClass;  // Battlefront: its trooper's class (it is a hero while `hero`)
+    bool hero = false;
 };
 
 bool g_Active = false;
@@ -166,6 +186,24 @@ std::vector<std::pair<float, float>> g_Spawns; // a map's own places to come bac
 std::string g_MapName;
 int g_KillEye = -1; // the kill camera's place last chosen (kept while it sees)
 
+// Battlefront
+bool g_Conquest = false;
+struct Post {
+    float x = 0, z = 0, y = 0;
+    int owner = -1;     // 0 the clones, 1 the droids, -1 neutral
+    float hold = 0;     // -1 the clones' to +1 the droids'
+};
+std::vector<Post> g_Posts;
+float g_TeamStart[2][2] = {};
+std::vector<std::string> g_HeroPool[2];
+int g_HeroOf[2] = { -1, -1 }; // the fighter that is its side's hero, or -1
+int g_SidePoints[2] = {};     // the AI's points towards its side's next hero
+int g_TroopHealth = kDefaultTroopHealth, g_HeroHealth = kDefaultHeroHealth;
+int g_PlayerHeroSpent = 0;
+int g_HeroCost = kHeroPoints; // the player's (bfherocost:)
+bool g_PlayerHeroAsked = false;
+ULONGLONG g_LastBleed = 0, g_LastPosts = 0;
+
 struct FeedEntry {
     int killer, victim;
     ULONGLONG at;
@@ -207,6 +245,10 @@ std::string DisplayNameOf(const std::string& className)
     for (const DisplayName& n : kNames)
         if (_stricmp(n.className, className.c_str()) == 0)
             return n.name;
+    if (_stricmp(className.c_str(), "ICloneTrooper") == 0) // Battlefront's troopers
+        return "CLONE TROOPER";
+    if (_stricmp(className.c_str(), "IBattleDroid") == 0)
+        return "BATTLE DROID";
     std::string name = className.size() > 1 && className[0] == 'I' ? className.substr(1) : className;
     for (char& c : name)
         c = char(toupper(static_cast<unsigned char>(c)));
@@ -380,8 +422,14 @@ int AttackerOf(uint8_t* attacker)
 
 // Somewhere to come back: just outside the fight (near its middle, as far from every standing fighter as the tries
 // find, at least kRespawnClear when one does), facing the middle.
+void ConquestPlace(int side, float (&m)[16]);
+
 void SafePlace(int except, float (&m)[16])
 {
+    if (g_Conquest) { // at one of its side's posts
+        ConquestPlace(SideOf(except), m);
+        return;
+    }
     float cx = 0, cz = 0;
     int n = 0;
     std::vector<std::pair<float, float>> others;
@@ -452,6 +500,11 @@ void Engage(int i)
     if (current >= 0 && SideOf(current) != SideOf(i) && Standing(g_Fighters[current]))
         return;
     const float* p = Position(f.object);
+    // Battlefront: the post it goes for (the nearest its side does not hold): the enemy nearest it
+    const Post* goal = nullptr;
+    for (const Post& post : g_Posts)
+        if (post.owner != SideOf(i) && (!goal || std::hypot(post.x - p[0], post.z - p[2]) < std::hypot(goal->x - p[0], goal->z - p[2])))
+            goal = &post;
     int best = -1;
     float bestDistance = 1e9f;
     for (int k = 0; k < g_Count; ++k) {
@@ -459,7 +512,8 @@ void Engage(int i)
             (k == g_Player && (g_PlayerFell || g_Fighters[k].out))) // the player's fresh fighter, waiting
             continue;
         const float* q = Position(g_Fighters[k].object);
-        const float d = std::hypot(p[0] - q[0], p[2] - q[2]);
+        const float d = std::hypot(p[0] - q[0], p[2] - q[2]) * (goal ? 0.5f : 1.0f) +
+            (goal ? std::hypot(goal->x - q[0], goal->z - q[2]) : 0.0f);
         if (d < bestDistance) {
             bestDistance = d;
             best = k;
@@ -581,6 +635,8 @@ void Defeated(int victim, ULONGLONG now)
     v.hits.clear();
     ++v.falls;
     v.streak = 0;
+    if (killer >= 0 && g_Conquest && killer != g_Player)
+        g_SidePoints[SideOf(killer)] += kDefeatPoints;
     if (killer >= 0) {
         Fighter& k = g_Fighters[killer];
         ++k.defeats;
@@ -639,6 +695,14 @@ int LikelyAttacker(int victim)
     return best;
 }
 
+// The mode's health of a fighter: the match's, or in Battlefront a trooper's or a hero's.
+int HealthOf(int i)
+{
+    if (!g_Conquest || i < 0)
+        return g_Health;
+    return g_Fighters[i].hero ? g_HeroHealth : g_TroopHealth;
+}
+
 // Every hit on a fighter: the enemy that dealt it scores its damage and is remembered for the defeat.
 void Damaged(uint8_t* character, float change, uint32_t, uint8_t* attacker)
 {
@@ -652,7 +716,7 @@ void Damaged(uint8_t* character, float change, uint32_t, uint8_t* attacker)
         return;
     Fighter& v = g_Fighters[victim];
     Fighter& k = g_Fighters[by];
-    k.damage += -change * float(g_Health) / kHealthScale; // in the mode's health
+    k.damage += -change * float(HealthOf(victim)) / kHealthScale; // in the mode's health
     k.score = int(k.damage) + k.defeats * kDefeatPoints + k.assists * kAssistPoints; // damage counts as it comes
     v.hits.push_back({ by, GameTime() });
     v.lastBlow = k.lastBlow = GameTime();
@@ -663,9 +727,10 @@ void Damaged(uint8_t* character, float change, uint32_t, uint8_t* attacker)
 // Damage to a fighter, scaled to the mode's health (see kHealthScale).
 float ScaleDamage(uint8_t* character, float change)
 {
-    if (!g_Active || change >= 0 || FighterOf(character) < 0)
+    const int i = FighterOf(character);
+    if (!g_Active || change >= 0 || i < 0)
         return change;
-    return change * kHealthScale / float(g_Health);
+    return change * kHealthScale / float(HealthOf(i));
 }
 
 // A fatal hit on the player: the game must never see it die (that ends the mission with its Game Over screen).
@@ -695,6 +760,17 @@ void CheckWinner(ULONGLONG now)
 {
     if (g_Winner >= 0)
         return;
+    if (g_Conquest) { // a side out of tickets loses at once
+        for (int side = 0; side < 2; ++side) {
+            if (g_Lives[side] > 0)
+                continue;
+            g_Winner = 1 - side;
+            g_WinnerAt = now;
+            LOG_INFO("Battlefront: the %s win", g_Winner == 0 ? "clones" : "droids");
+            return;
+        }
+        return;
+    }
     for (int side = 0; side < 2; ++side) {
         if (g_Lives[side] > 0)
             continue;
@@ -1219,6 +1295,153 @@ void StartEnd(ULONGLONG now)
     LOG_INFO("HvV: the end; first %s with %d", ShownName(g_Top[0]).c_str(), g_Fighters[g_Top[0]].score);
 }
 
+
+// --- Battlefront ---------------------------------------------------------------------------------------------------
+
+// Where a fighter of `side` comes back: a post its side holds (one of them at random), else its side's start; a step
+// off it, facing the middle of the posts.
+void ConquestPlace(int side, float (&m)[16])
+{
+    std::vector<const Post*> own;
+    for (const Post& post : g_Posts)
+        if (post.owner == side)
+            own.push_back(&post);
+    float x = g_TeamStart[side][0], z = g_TeamStart[side][1];
+    if (!own.empty()) {
+        const Post* post = own[size_t(std::rand()) % own.size()];
+        x = post->x;
+        z = post->z;
+    }
+    const float angle = float(std::rand()) / RAND_MAX * 2 * kPi, reach = 60.0f + float(std::rand()) / RAND_MAX * 110.0f;
+    x = std::clamp(x + std::sin(angle) * reach, g_Bounds[0] + g_Margin, g_Bounds[2] - g_Margin);
+    z = std::clamp(z + std::cos(angle) * reach, g_Bounds[1] + g_Margin, g_Bounds[3] - g_Margin);
+    float cx = 0, cz = 0;
+    for (const Post& post : g_Posts) {
+        cx += post.x / float(g_Posts.size());
+        cz += post.z / float(g_Posts.size());
+    }
+    Transform(x, z, std::atan2(cx - x, cz - z), m);
+}
+
+// A post's letter (A, B, C...).
+std::string PostName(size_t k)
+{
+    return std::string(1, char('A' + k % 26));
+}
+
+// The posts: the fighters near each turn it towards their side (when only one side is there), a side's own once
+// turned all the way, neutral on the way between. Points for the fighters who took it.
+void UpdatePosts(ULONGLONG now)
+{
+    const float dt = g_LastPosts ? float(std::min<ULONGLONG>(now - g_LastPosts, 500)) : 0.0f;
+    g_LastPosts = now;
+    for (size_t k = 0; k < g_Posts.size(); ++k) {
+        Post& post = g_Posts[k];
+        int count[2] = {};
+        std::vector<int> inside[2];
+        for (int i = 0; i < g_Count; ++i) {
+            Fighter& f = g_Fighters[i];
+            if (f.out || !Standing(f) || (i == g_Player && g_PlayerFell))
+                continue;
+            const float* p = Position(f.object);
+            if (std::hypot(p[0] - post.x, p[2] - post.z) > kPostRadius)
+                continue;
+            ++count[SideOf(i)];
+            inside[SideOf(i)].push_back(i);
+        }
+        if ((count[0] > 0) == (count[1] > 0)) // nobody, or contested
+            continue;
+        const int side = count[0] > 0 ? 0 : 1;
+        const float step = dt / kCaptureMs * float(std::min(count[side], kMostCapturers)) * (side == 0 ? -1.0f : 1.0f);
+        const int before = post.owner;
+        post.hold = std::clamp(post.hold + step, -1.0f, 1.0f);
+        if (post.owner == 1 - side && (side == 0 ? post.hold < 0.0f : post.hold > 0.0f))
+            post.owner = -1; // neutralised
+        if (post.owner == -1 && std::abs(post.hold) >= 1.0f)
+            post.owner = side;
+        if (post.owner == before || post.owner != side)
+            continue;
+        for (int i : inside[side]) {
+            g_Fighters[i].score += kCapturePoints;
+            if (i == g_Player)
+                NoticeFor("COMMAND POST " + PostName(k) + " CAPTURED", "", kCapturePoints, side, now);
+        }
+        if (std::find(inside[side].begin(), inside[side].end(), g_Player) == inside[side].end())
+            g_SidePoints[side] += kCapturePoints;
+        LOG_INFO("Battlefront: the %s take command post %s", side == 0 ? "clones" : "droids", PostName(k).c_str());
+    }
+    // a side holding fewer posts loses tickets: faster when it holds none and the other all
+    int held[2] = {};
+    for (const Post& post : g_Posts)
+        if (post.owner >= 0)
+            ++held[post.owner];
+    if (held[0] == held[1]) {
+        g_LastBleed = now;
+        return;
+    }
+    const int losing = held[0] < held[1] ? 0 : 1;
+    const ULONGLONG every = held[losing] == 0 && held[1 - losing] == int(g_Posts.size()) ? kBleedAllMs : kBleedMs;
+    if (!g_LastBleed)
+        g_LastBleed = now;
+    if (now - g_LastBleed >= every && g_Lives[losing] > 0) {
+        g_LastBleed = now;
+        --g_Lives[losing];
+    }
+}
+
+// The player's points buy a hero (B, as the troopers' kit asks: BattlefrontHeroRequest) while its side has none.
+bool PlayerHeroReady()
+{
+    const Fighter& me = g_Fighters[g_Player];
+    return g_Conquest && !me.hero && !me.out && !g_PlayerFell && g_HeroOf[SideOf(g_Player)] < 0 &&
+        !g_HeroPool[SideOf(g_Player)].empty() && me.score - g_PlayerHeroSpent >= g_HeroCost;
+}
+
+std::string PickHero(int side)
+{
+    const std::vector<std::string>& pool = g_HeroPool[side];
+    return pool.empty() ? std::string() : pool[size_t(std::rand()) % pool.size()];
+}
+
+// The player becomes its side's hero where it stands (the live player change).
+void BecomeHero(ULONGLONG now)
+{
+    Fighter& me = g_Fighters[g_Player];
+    const std::string hero = PickHero(SideOf(g_Player));
+    SetPlayerClass(nullptr);
+    SetPlayerClass(hero.c_str(), false);
+    std::string error;
+    if (!ReplacePlayer(error)) {
+        LOG_WARN("Battlefront: no hero for you (%s)", error.c_str());
+        SetPlayerClass(nullptr);
+        SetPlayerClass(me.className.c_str(), false);
+        return;
+    }
+    uint8_t* player = PlayerObject();
+    Track(me, player);
+    FullHealth(player);
+    me.className = hero;
+    me.hero = true;
+    g_HeroOf[SideOf(g_Player)] = g_Player;
+    g_PlayerHeroSpent += g_HeroCost;
+    Shield(me, now);
+    RefocusCameraOnPlayer();
+    NoticeFor("YOU ARE " + DisplayNameOf(hero), "", 0, SideOf(g_Player), now);
+    LOG_INFO("Battlefront: you are %s", hero.c_str());
+}
+
+// A fighter that falls as a hero comes back as its trooper; its side may call another.
+void HeroFell(int i)
+{
+    Fighter& f = g_Fighters[i];
+    if (!f.hero)
+        return;
+    f.hero = false;
+    f.className = f.troopClass;
+    if (g_HeroOf[SideOf(i)] == i)
+        g_HeroOf[SideOf(i)] = -1;
+}
+
 } // namespace
 
 void InstallHvv()
@@ -1237,6 +1460,15 @@ void InstallHvv()
     g_Top.clear();
     for (Fighter& f : g_Fighters)
         f = {};
+    g_Conquest = false;
+    g_Posts.clear();
+    g_HeroPool[0].clear();
+    g_HeroPool[1].clear();
+    g_HeroOf[0] = g_HeroOf[1] = -1;
+    g_SidePoints[0] = g_SidePoints[1] = 0;
+    g_PlayerHeroSpent = 0;
+    g_PlayerHeroAsked = false;
+    g_LastBleed = g_LastPosts = 0;
     SetFatalHitGuard(nullptr);
     SetDamageObserver(nullptr);
     SetDamageFilter(nullptr);
@@ -1280,12 +1512,80 @@ void InstallHvv()
         }
         g_MapName = map->name;
     }
+    g_Conquest = BootArgument("bf", value) && value == "1";
+    if (g_Conquest) {
+        g_IntroWanted = false;
+        if (!BootArgument("hvvlives", value))
+            g_Lives[0] = g_Lives[1] = g_StartLives = kDefaultTickets;
+        g_HeroCost = BootArgument("bfherocost", value) ? std::max(0, std::atoi(value.c_str())) : kHeroPoints;
+        if (BootArgument("bfhealth", value)) {
+            const std::vector<std::string> h = Split(value, ',');
+            if (h.size() >= 2) {
+                g_TroopHealth = std::max(1, std::atoi(h[0].c_str()));
+                g_HeroHealth = std::max(1, std::atoi(h[1].c_str()));
+            }
+        }
+        for (int side = 0; side < 2; ++side) { // its heroes: the classes this game has
+            if (!BootArgument(side == 0 ? "bfheroes0" : "bfheroes1", value))
+                continue;
+            for (const std::string& c : Split(value, ','))
+                if (const char* name = RegisteredClassName(c.c_str()); name && ClassHasBody(name))
+                    g_HeroPool[side].push_back(name);
+        }
+        const CustomMap* map = DevMapCustomMap();
+        if (map && !map->commandPosts.empty()) {
+            for (const auto& c : map->commandPosts) {
+                Post post;
+                CustomMapToWorld(*map, c.first, c.second, post.x, post.z);
+                g_Posts.push_back(post);
+            }
+        } else {
+            for (const auto& c : kDevPosts) {
+                Post post;
+                post.x = c[0];
+                post.z = c[1];
+                g_Posts.push_back(post);
+            }
+        }
+        if (map && map->hasStarts) {
+            CustomMapToWorld(*map, map->cloneStart[0], map->cloneStart[1], g_TeamStart[0][0], g_TeamStart[0][1]);
+            CustomMapToWorld(*map, map->droidStart[0], map->droidStart[1], g_TeamStart[1][0], g_TeamStart[1][1]);
+        } else if (map) { // its lines
+            CustomMapToWorld(*map, map->heroes[0], map->heroes[1], g_TeamStart[0][0], g_TeamStart[0][1]);
+            CustomMapToWorld(*map, map->villains[0], map->villains[1], g_TeamStart[1][0], g_TeamStart[1][1]);
+        } else {
+            std::memcpy(g_TeamStart, kDevStarts, sizeof g_TeamStart);
+        }
+        for (Post& post : g_Posts)
+            post.y = kDevMapFloorY;
+        // each side starts with the post nearest its start
+        for (int side = 0; side < 2; ++side) {
+            Post* nearest = nullptr;
+            for (Post& post : g_Posts)
+                if (post.owner < 0 && (!nearest || std::hypot(post.x - g_TeamStart[side][0], post.z - g_TeamStart[side][1]) <
+                        std::hypot(nearest->x - g_TeamStart[side][0], nearest->z - g_TeamStart[side][1])))
+                    nearest = &post;
+            if (nearest) {
+                nearest->owner = side;
+                nearest->hold = side == 0 ? -1.0f : 1.0f;
+            }
+        }
+    }
 
     DevMapLayout layout;
     for (int i = 0; i < g_Count; ++i) {
         g_Fighters[i].className = classes[i];
+        g_Fighters[i].troopClass = classes[i];
         float x, z, yaw;
         LinePlace(i, x, z, yaw);
+        if (g_Conquest) { // a group at its side's start
+            const int side = SideOf(i), k = i - SideStart(side);
+            const float sx = g_TeamStart[side][0], sz = g_TeamStart[side][1];
+            const float tx = kDevMapMiddleX, tz = kDevMapMiddleZ;
+            yaw = std::atan2(tx - sx, tz - sz);
+            x = sx + std::cos(yaw) * (float(k % 4) - 1.5f) * 70.0f - std::sin(yaw) * float(k / 4) * 80.0f;
+            z = sz - std::sin(yaw) * (float(k % 4) - 1.5f) * 70.0f - std::cos(yaw) * float(k / 4) * 80.0f;
+        }
         if (i == g_Player) {
             layout.start = true;
             layout.startX = x;
@@ -1294,7 +1594,16 @@ void InstallHvv()
             continue;
         }
         g_Fighters[i].placedId = kDevMapFirstId + uint32_t(i);
-        layout.characters.push_back({ classes[i], g_Fighters[i].placedId, x, z, yaw });
+        // a battle droid's first costume has no body: the plain droid's
+        layout.characters.push_back({ classes[i], g_Fighters[i].placedId, x, z, yaw,
+            _stricmp(classes[i].c_str(), "IBattleDroid") == 0 ? "hordeBattleDroid" : "" });
+    }
+    if (g_Conquest) { // the heroes' classes load with the level (their sounds), placed far off and never woken
+        uint32_t loader = 0;
+        for (int side = 0; side < 2; ++side)
+            for (const std::string& hero : g_HeroPool[side])
+                layout.characters.push_back({ hero, kDevMapFirstId + kLoaderIds + loader++,
+                    kDevMapMiddleX + 7000.0f + 200.0f * float(loader), kDevMapMiddleZ - 4500.0f, 0.0f });
     }
     SetDevMapLayout(layout);
     SavePlayerChoice();
@@ -1369,6 +1678,21 @@ HvvState GetHvvState()
     s.heroes = g_Heroes;
     s.paused = GamePaused();
     s.playerDown = g_PlayerFell || (g_Player < g_Count && g_Fighters[g_Player].out);
+    s.conquest = g_Conquest;
+    for (size_t k = 0; k < g_Posts.size(); ++k) {
+        HvvState::PostState post;
+        post.at[0] = g_Posts[k].x;
+        post.at[1] = g_Posts[k].y;
+        post.at[2] = g_Posts[k].z;
+        post.owner = g_Posts[k].owner;
+        post.hold = g_Posts[k].hold;
+        post.name = PostName(k);
+        s.posts.push_back(post);
+    }
+    s.heroReady = PlayerHeroReady();
+    s.heroCost = g_HeroCost;
+    if (g_Player < g_Count)
+        s.heroPoints = std::max(0, g_Fighters[g_Player].score - g_PlayerHeroSpent);
     s.board = g_BoardPinned;
     s.fighters.resize(size_t(g_Count));
     for (int side = 0; side < 2; ++side)
@@ -1642,6 +1966,12 @@ void HvvFrame()
         Transform(kDevMapMiddleX + 9000, kDevMapMiddleZ + 4500, 0, away);
         VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(player, kPlace)(player, nullptr, away);
         std::string error;
+        const std::string fallen = me.className; // the body that falls: as it fought (a hero's)
+        if (g_Conquest && me.hero) { // it comes back as its trooper
+            HeroFell(g_Player);
+            SetPlayerClass(nullptr);
+            SetPlayerClass(me.className.c_str(), false);
+        }
         if (ReplacePlayer(error)) {
             player = PlayerObject();
             Track(me, player);
@@ -1653,7 +1983,7 @@ void HvvFrame()
             Field<uint8_t>(player, kCharacterInvincible) = 1;
             SetIgnoredByAI(player, true);
             input::HoldPlayerInput(true);
-            if (uint8_t* body = SpawnCharacterAt(me.className.c_str(), "", "", "", SpawnSide::Default, fell, error)) {
+            if (uint8_t* body = SpawnCharacterAt(fallen.c_str(), "", "", "", SpawnSide::Default, fell, error)) {
                 g_Corpse = body;
                 g_CorpseId = Field<uint32_t>(body, 4);
                 uint8_t* by = g_PlayerKiller >= 0 && Placed(g_Fighters[g_PlayerKiller])
@@ -1711,6 +2041,7 @@ void HvvFrame()
             if (!Standing(f)) {
                 f.fellAt = now;
                 Defeated(i, now);
+                HeroFell(i);
             }
             continue;
         }
@@ -1723,6 +2054,15 @@ void HvvFrame()
             f.fellAt = 0;
             LOG_INFO("HvV: %s is out", f.className.c_str());
             continue;
+        }
+        if (g_Conquest && g_HeroOf[side] < 0 && g_SidePoints[side] >= kAiHeroPoints && !g_HeroPool[side].empty()) {
+            f.className = PickHero(side);
+            f.hero = true;
+            g_HeroOf[side] = i;
+            g_SidePoints[side] -= kAiHeroPoints;
+            NoticeFor(DisplayNameOf(f.className) + " JOINS THE BATTLE", side == 0 ? "REPUBLIC HERO" : "SEPARATIST HERO", 0,
+                side, now);
+            LOG_INFO("Battlefront: %s comes as the %s' hero", f.className.c_str(), side == 0 ? "clones" : "droids");
         }
         float m[16];
         SafePlace(i, m);
@@ -1741,6 +2081,14 @@ void HvvFrame()
         Engage(i);
         LOG_INFO("HvV: %s came back (%d lives left)", f.className.c_str(), g_Lives[side]);
     }
+    if (g_Conquest && g_Phase == Phase::Fight && g_Winner < 0) {
+        UpdatePosts(now);
+        if (g_PlayerHeroAsked) {
+            g_PlayerHeroAsked = false;
+            if (PlayerHeroReady())
+                BecomeHero(now);
+        }
+    }
     if (now - g_LastEngage >= kEngageEvery) {
         g_LastEngage = now;
         EngageAll();
@@ -1748,6 +2096,51 @@ void HvvFrame()
             Unstick(i, now);
     }
     CheckWinner(now);
+}
+
+bool BattlefrontActive()
+{
+    return g_Active && g_Conquest;
+}
+
+void BattlefrontHeroRequest()
+{
+    if (BattlefrontActive())
+        g_PlayerHeroAsked = true;
+}
+
+bool StartBattlefront(const BattlefrontSetup& setup, std::string& error)
+{
+    if (!setup.map.empty() && !FindCustomMap(setup.map)) {
+        error = "no map " + setup.map + " under mods/maps";
+        return false;
+    }
+    const int troops = std::clamp(setup.troops, 2, kMaxSide);
+    const char* clone = RegisteredClassName("ICloneTrooper");
+    const char* droid = RegisteredClassName("IBattleDroid");
+    if (!clone || !droid) {
+        error = "the game has no clone troopers or battle droids";
+        return false;
+    }
+    // the player's place: the first of its side
+    std::string lineup;
+    for (int side = 0; side < 2; ++side)
+        for (int k = 0; k < troops; ++k)
+            lineup += std::string(lineup.empty() ? "" : ",") + (side == 0 ? clone : droid);
+    const int player = setup.side == 1 ? troops : 0;
+    auto heroes = [](const std::vector<std::string>& pool) {
+        std::string text;
+        for (const std::string& c : pool)
+            if (const char* name = RegisteredClassName(c.c_str()); name && ClassHasBody(name))
+                text += (text.empty() ? "" : ",") + std::string(name);
+        return text;
+    };
+    StartDevMap("hvv:" + lineup + " hvvheroes:" + std::to_string(troops) + " hvvplayer:" + std::to_string(player) +
+        " hvvlives:" + std::to_string(setup.tickets > 0 ? setup.tickets : kDefaultTickets) + " hvvintro:0 bf:1" +
+        " bfhealth:" + std::to_string(kDefaultTroopHealth) + "," + std::to_string(kDefaultHeroHealth) +
+        (setup.heroes ? " bfheroes0:" + heroes(setup.republicHeroes) + " bfheroes1:" + heroes(setup.separatistHeroes) : "") +
+        (setup.map.empty() ? "" : " custommap:" + setup.map) + SessionArguments());
+    return true;
 }
 
 } // namespace swrots::game
