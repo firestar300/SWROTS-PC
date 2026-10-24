@@ -771,7 +771,35 @@ constexpr uint32_t kLoad = 0x0001F650, kRelease = 0x0001F5E0, kDrawQuad = 0x0001
 constexpr uint32_t kFooterIconReturn = 0x002C4ECD; // ButtonIcon's draw
 constexpr uint32_t kTipTable = 0x007F0608;         // 18 x {int w, h; const char* key; void* handle}
 
-std::unordered_map<void*, int> g_Icons; // the icons' handles (this start's)
+// The icons' handles (this start's), with the image each held when loaded: a handle the game freed and gave to
+// another picture (an effect's) holds another image, and is no icon any more.
+struct IconHandle {
+    int icon;
+    void* image;
+};
+std::unordered_map<void*, IconHandle> g_Icons;
+
+void* ImageOf(void* handle)
+{
+    __try {
+        return *reinterpret_cast<void**>(handle);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
+// The icon a handle is now, or -1.
+int IconNow(void* handle)
+{
+    auto it = handle ? g_Icons.find(handle) : g_Icons.end();
+    if (it == g_Icons.end())
+        return -1;
+    if (ImageOf(handle) != it->second.image) {
+        g_Icons.erase(it);
+        return -1;
+    }
+    return it->second.icon;
+}
 
 using LoadFn = void*(__fastcall*)(void*, void*, const uint8_t*, int*, int*, int, int, int);
 using ReleaseFn = void(__fastcall*)(void*, void*, void*);
@@ -784,7 +812,7 @@ void* __fastcall LoadHook(void* self, void*, const uint8_t* path, int* w, int* h
     if (handle && path) {
         const int icon = IconOf(reinterpret_cast<const char*>(path + 8));
         if (icon >= 0)
-            g_Icons[handle] = icon;
+            g_Icons[handle] = { icon, ImageOf(handle) };
     }
     return handle;
 }
@@ -851,8 +879,8 @@ uint32_t __fastcall DrawQuadHook(void* self, void*, const float* topLeft, const 
         } __except (EXCEPTION_EXECUTE_HANDLER) {
         }
     }
-    auto it = keyboard && handle ? g_Icons.find(handle) : g_Icons.end();
-    const Cap* cap = it != g_Icons.end() ? CapForIcon(it->second) : nullptr;
+    const int icon = keyboard ? IconNow(handle) : -1;
+    const Cap* cap = icon >= 0 ? CapForIcon(icon) : nullptr;
     if (!cap || !topLeft || !bottomRight)
         return draw(self, nullptr, topLeft, bottomRight, handle, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13);
     // the cap at the icon's height; a wider one grows from the icon's right side in a footer (its label follows the
@@ -899,11 +927,10 @@ TextureOfFn g_OriginalTextureOf = nullptr;
 
 void* __cdecl TextureOfHook(void* handle, int frame)
 {
-    if (handle && !g_Icons.empty()) {
-        auto it = g_Icons.find(handle);
-        if (it != g_Icons.end() && input::KeyboardPrompts())
-            if (const Cap* cap = CapForIcon(it->second))
-                handle = cap->handle;
+    if (handle && !g_Icons.empty() && g_Icons.count(handle) && input::KeyboardPrompts()) {
+        const int icon = IconNow(handle);
+        if (const Cap* cap = icon >= 0 ? CapForIcon(icon) : nullptr)
+            handle = cap->handle;
     }
     return g_OriginalTextureOf(handle, frame);
 }
