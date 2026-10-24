@@ -646,6 +646,32 @@ void* __cdecl PortraitForCharacter(uint8_t* manager, const char* name, int head,
     return record.face;
 }
 
+// The pause screen's combat chart asks for the player's head picture (0x2B2A91: the lookup with head 1, the class's
+// name, no character): player 1 a custom character with a select-screen head of its own (its Versus strip cell,
+// interfc\front_end\s_selduel_<costume>head) shows that one, loaded from its file once per start.
+constexpr uint32_t kPausePortraitCall = 0x002B2A91;
+std::unordered_map<std::string, void*> g_CustomHeads;
+
+void* __fastcall PausePortrait(uint8_t* manager, void*, const char* name, int head)
+{
+    const CustomCharacter* custom = CustomCharacterOf(PlayerObject());
+    if (custom && head && !custom->costume.empty()) {
+        auto it = g_CustomHeads.find(custom->className);
+        if (it == g_CustomHeads.end()) {
+            std::string path = "interfc\\front_end\\s_selduel_" + custom->costume + "head";
+            for (char& c : path)
+                c = char(tolower(static_cast<unsigned char>(c)));
+            void* texture = ModFileExists(path + ".stx") ? LoadInterfaceTexture(path.c_str(), true) : nullptr;
+            if (texture)
+                LOG_INFO("Characters: %s's combat chart picture %s loaded", custom->className.c_str(), path.c_str());
+            it = g_CustomHeads.emplace(custom->className, texture).first;
+        }
+        if (it->second)
+            return it->second;
+    }
+    return PortraitLookupHook(manager, nullptr, name, head);
+}
+
 __declspec(naked) void PortraitCallStub()
 {
     __asm {
@@ -921,6 +947,11 @@ void InstallCharacters()
         if (*reinterpret_cast<const uint8_t*>(uintptr_t(kHudPortraitCall)) == 0xE8 &&
             std::memcmp(reinterpret_cast<const void*>(uintptr_t(kHudPortraitCall + 1)), &lookup, 4) == 0)
             PatchCall(kHudPortraitCall, reinterpret_cast<const void*>(&PortraitCallStub), 5);
+        g_CustomHeads.clear(); // the textures of the last start are gone with it
+        const int32_t pauseLookup = int32_t(kPortraitLookup) - int32_t(kPausePortraitCall + 5);
+        if (*reinterpret_cast<const uint8_t*>(uintptr_t(kPausePortraitCall)) == 0xE8 &&
+            std::memcmp(reinterpret_cast<const void*>(uintptr_t(kPausePortraitCall + 1)), &pauseLookup, 4) == 0)
+            PatchCall(kPausePortraitCall, reinterpret_cast<const void*>(&PausePortrait), 5);
     } else {
         LOG_WARN("Characters: unexpected code at the HUD portrait lookup; portraits unchanged");
     }
