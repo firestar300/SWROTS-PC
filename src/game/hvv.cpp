@@ -146,6 +146,7 @@ float g_DeathView[16] = {};   // the game's camera when the player fell (the kil
 bool g_DeathViewSet = false;
 float g_KillView[16] = {};    // the kill camera's last placement (the way back starts there)
 ULONGLONG g_BackAt = 0;       // when the player came back (the camera returns)
+ULONGLONG g_RefocusAt = 0;    // when the camera's focus is put on the player once more after coming back
 bool g_IntroWanted = true;
 enum class Phase { Waiting, Intro, Fight, End } g_Phase = Phase::Waiting;
 ULONGLONG g_IntroAt = 0, g_FightAt = 0, g_EndAt = 0;
@@ -1655,7 +1656,12 @@ void HvvFrame()
             const int lists = RefocusCameraOnPlayer();
             g_BackAt = now;
             LOG_INFO("HvV: you came back (%d lives left; %d camera lists on you)", g_Lives[SideOf(g_Player)], lists);
+            g_RefocusAt = now + 500;
         }
+    }
+    if (g_RefocusAt && now >= g_RefocusAt) { // once more, after a camera change the game makes late (a grapple's end)
+        g_RefocusAt = 0;
+        RefocusCameraOnPlayer();
     }
 
     for (int i = 0; i < g_Count; ++i) {
