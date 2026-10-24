@@ -67,8 +67,10 @@ constexpr float kStormCost = 400, kStormRange = 600;
 constexpr ULONGLONG kStormWaitMs = 15000, kFirstStrikeMs = 550, kStrikeGapMs = 260;
 constexpr int kStrikes = 5;
 constexpr float kStrikeDamage = 30;
-constexpr const char* kStrikeEffects[] = { "IDS_FX_Force_lightning_impact", "IDS_FX_electric_explosion_small",
-    "IDS_FX_Char_Static_Shock" };
+// one-shot effects only: the lightning's own impact (IDS_FX_Force_lightning_impact) and static shock loop as long as
+// the lightning lasts, and a blast that ends does not stop them (they stayed in the air)
+constexpr const char* kStrikeEffects[] = { "IDS_FX_Valor_Palm_Blast", "IDS_FX_electric_explosion_small",
+    "IDS_FX_Force_Stunned" };
 constexpr const char* kStrikeGroundEffects[] = { "IDS_FX_FURY_FORCESHOCK", "IDS_FX_Valor_FORCESHOCK", "IDS_FX_FURY_SHOCKWAVE" };
 
 template <typename T> T& At(uint8_t* p, uint32_t offset)
