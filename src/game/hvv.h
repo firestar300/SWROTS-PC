@@ -21,6 +21,8 @@ bool HvvActive();
 
 // Whether nothing of the match's map (its collision boxes) stands between two points of the world.
 bool HvvLineOfSight(const float a[3], const float b[3]);
+// Whether two characters are fighters of the same side in the running match (false when either is none).
+bool HvvSameSide(const uint8_t* a, const uint8_t* b);
 // Whether the game is paused (its pause menu).
 bool GamePaused();
 

@@ -338,12 +338,9 @@ void EndScreen(const game::HvvState& s, const ImGuiViewport* vp, float u)
     }
 }
 
-// A helper still standing, and whether it is against the player: its master is the computer's (no controller,
-// +0x43C below 0).
-bool HelperStanding(const uint8_t* object, const uint8_t* master, bool& enemy)
+bool HelperStanding(const uint8_t* object)
 {
     __try {
-        enemy = *reinterpret_cast<const int32_t*>(master + 0x43C) < 0;
         return *reinterpret_cast<const float*>(object + 0x130) > 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -355,10 +352,9 @@ bool HelperStanding(const uint8_t* object, const uint8_t* master, bool& enemy)
 void CodyMarks(const ImGuiViewport* vp, float u)
 {
     for (const game::CodyHelper& h : game::CodyHelpers()) {
-        bool enemy = false;
-        if (!HelperStanding(h.object, h.master, enemy))
+        if (!HelperStanding(h.object))
             continue;
-        const ImU32 colour = enemy ? kVillains : kHeroes;
+        const ImU32 colour = h.enemy ? kVillains : kHeroes;
         const float* p = reinterpret_cast<const float*>(h.object + 0x150 + 48);
         const float head[3] = { p[0], p[1] + 82.0f, p[2] };
         ImVec2 at;

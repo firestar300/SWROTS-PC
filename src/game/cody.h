@@ -26,6 +26,7 @@ bool KeepsLimbs(const uint8_t* character);
 struct CodyHelper {
     uint8_t* object;
     uint8_t* master;
+    bool enemy; // against the player (its Cody the computer's)
 };
 std::vector<CodyHelper> CodyHelpers();
 

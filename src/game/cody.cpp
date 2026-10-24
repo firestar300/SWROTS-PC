@@ -2,24 +2,26 @@
 //
 // A clone under player control has one rule, the rifle butt on fast attack (the clone's rules 0x35AE70, player part
 // 0x35B2A4); its shooting is its AI's (CloneTrooper.cpp: a layer over what it does, a bolt at its target). The cut
-// playable Cody (ICommanderCody, whose script survives, rules 0x360D00) had his own: a shot on fast attack and a
-// 10-bolt burst on heavy attack for 250 of his meter. Here, in the clone's script's turn (its StateManager, called for
-// every clone every frame; the input functions read the script's character's own controller):
-//   - heavy attack (Y) held: the shooting layer and a bolt every kShotIntervalMs, as co-op's clone;
-//   - critical (B): a burst of kBurstBolts for kBurstCost of the meter (Force +0xA40, which the clone has; refilled
-//     here, kMeterPerSecond);
-//   - block (LT) with the stick left or right, in the rules' turn (a decision frame): a roll, the clone's roll out of
-//     cover (CTroop_Nav_RollOut_L/R) as sequences of the port's (optional in the class, so not loaded in a duel: the
-//     port's are required on duel maps, as the duelists' intros are), instead of a block, which a clone has not;
-//   - push (RT): two clones of his for kHelperLifeMs, kSummonWaitMs between calls; he signals them in (his intro).
-// The computer's Cody shoots as any clone; he calls his clones when he can.
+// playable Cody (ICommanderCody, whose script survives, rules 0x360D00) had his own: a shot on fast attack and a burst
+// on heavy attack for 250 of his meter. Here his meter (Force +0xA40, which the clone has; refilled here) pays for all
+// he does beyond the rifle butt, for the player's Cody and the computer's alike:
+//   - heavy attack (Y) held: the shooting layer and a bolt every kShotIntervalMs, kShotCost each (in the clone's
+//     script's turn: its StateManager, called for every clone every frame, the input functions reading the script's
+//     character's own controller);
+//   - block (LT): a roll aside (left or right with the stick), the clone's roll out of cover (CTroop_Nav_RollOut_L/R)
+//     as sequences of the port's (optional in the class, so not loaded in a duel: the port's are required on duel maps,
+//     as the duelists' intros are), instead of a block, which a clone has not;
+//   - push (RT): two clones of his rappelling down beside him (the clone's own CTroop_Rappel_Loop: rope, slide, landing)
+//     for kHelperLifeMs, one squad at a time; he signals them in and calls for them ("Bring up the reinforcements!");
+//   - critical (B): a bombardment: shells (the game's IExplosion) falling round his opponent, hurting none of his;
+//     he signals the strike ("Concentrate fire on the target!").
+// What the player's input asks for is made outside the scripts (CodyFrame).
 
 #include "game/cody.h"
 
 #include <windows.h>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -27,23 +29,21 @@
 #include <utility>
 
 #include "core/log.h"
-#include "core/patch.h"
 #include "game/characters.h"
 #include "game/classsetup.h"
 #include "game/customchars.h"
 #include "game/devmap.h"
+#include "game/hvv.h"
 
 namespace swrots::game {
 
 namespace {
 
-constexpr uint32_t kScriptContext = 0x006964C0;          // the script instance running
-constexpr uint32_t kScriptCharacterContext = 0x006943CC; // +0x68: the character it runs for
-constexpr uint32_t kIsComputer = 0x00176E30;             // cdecl bool (): the script's character is the AI's
-constexpr uint32_t kHeldFrames = 0x00177FF0;             // cdecl int (button, 0)
+constexpr uint32_t kHeldFrames = 0x00177FF0;             // cdecl int (button, 0), in a script's turn
 constexpr uint32_t kPressed = 0x00178070;                // cdecl bool (button, 1, 0, 2)
 constexpr uint32_t kButtonHeavy = 0x006964DC, kButtonCritical = 0x006964EC; // the script's button ids (Y, B)
 constexpr uint32_t kButtonBlock = 0x006964E4, kButtonPush = 0x006964E8;     // (LT, RT)
+constexpr uint32_t kSayEvent = 0x0017ACC0;               // cdecl (event, context, 1, 0, 0): the script character says
 constexpr uint32_t kScriptHasTarget = 0x00176FF0;   // cdecl bool ()
 constexpr uint32_t kScriptPlayLayer = 0x00173B40;   // cdecl (animation, ...): an animation layer
 constexpr uint32_t kScriptStopLayer = 0x00173B80;   // cdecl (layer, blend)
@@ -53,21 +53,29 @@ constexpr uint32_t kCloneNextMuzzle = 0x001760B0;   // cdecl (muzzle*, count)
 constexpr uint32_t kScriptPlaySound = 0x0017AD20;   // cdecl (sound, near, 1, far, -1, 0)
 constexpr uint32_t kCloneMuzzle = 0x3D8, kCloneMuzzleData = 0x3EC, kCloneFireSound = 0x3E4; // in the instance
 constexpr char kCloneShootingLoop[] = "ctroop_atk_shooting_loop";
-constexpr uint32_t kCharacterHealth = 0x130, kCharacterMeter = 0xA40, kCharacterMeterMost = 0xA44;
+constexpr uint32_t kCharacterHealth = 0x130, kCharacterHealthMost = 0x134, kCharacterMeter = 0xA40, kCharacterMeterMost = 0xA44;
 constexpr uint32_t kCharacterTransform = 0x150, kCharacterOpponent = 0x3B8, kCharacterScript = 0x434;
 constexpr uint32_t kCharacterAI = 0x9FC;
 constexpr uint32_t kAISetTarget = 0x00193D90;  // thiscall on the AI controller (target)
 constexpr uint32_t kObjectById = 0x000A31F0;   // cdecl (instance id) -> object or null
 constexpr uintptr_t kPlaySequence = 0x150E30;  // ICharacter, thiscall (sequence, 0, 0, 0, speed)
+constexpr uintptr_t kFindSequence = 0x150D60;  // ICharacter, thiscall (name) -> its sequence record or null
 
-constexpr ULONGLONG kShotIntervalMs = 250;
-// his specials, paid from his meter (the player's Cody and the computer's alike)
-constexpr float kMeterPerSecond = 40;
-constexpr float kSummonCost = 500, kBombardCost = 400, kDodgeCost = 150;
+// his meter
+constexpr float kMeterPerSecond = 35;
+constexpr float kShotCost = 15, kSummonCost = 500, kBombardCost = 400, kDodgeCost = 150;
+constexpr ULONGLONG kShotIntervalMs = 400;
 constexpr ULONGLONG kHelperLifeMs = 25000;
 constexpr ULONGLONG kComputerDodgeWaitMs = 2500; // the computer's Cody: one dodge in this long at most
-constexpr float kHelperSide = 90;      // how far beside him they come in
-constexpr float kComputerCallsWithin = 900; // the computer's Cody calls his clones with his opponent this near
+constexpr float kHelperSide = 90;            // how far beside him they come down
+constexpr float kRappelHeight = 320;         // and from how high (indoor arenas have ceilings)
+constexpr ULONGLONG kHelperEngageMs = 2500;  // they turn on his opponent once down
+constexpr float kComputerCallsWithin = 900;  // the computer's Cody calls his specials with his opponent this near
+constexpr ULONGLONG kArmAfterMs = 7000;      // his specials only once the duel's intro is over (he appears in it)
+// the bombardment
+constexpr int kShells = 4;
+constexpr ULONGLONG kFirstShellMs = 900, kShellGapMs = 350;
+constexpr float kShellSpread = 110;
 
 template <typename T> T& At(uint8_t* p, uint32_t offset)
 {
@@ -79,6 +87,11 @@ bool Live(uint8_t* object, uint32_t id)
     return object && reinterpret_cast<uint8_t*(__cdecl*)(uint32_t)>(uintptr_t(kObjectById))(id) == object;
 }
 
+const float* Position(uint8_t* character)
+{
+    return reinterpret_cast<const float*>(character + kCharacterTransform + 48);
+}
+
 bool IsCody(const uint8_t* character)
 {
     const CustomCharacter* custom = character ? CustomCharacterOf(character) : nullptr;
@@ -88,9 +101,15 @@ bool IsCody(const uint8_t* character)
 struct Kit {
     uint32_t id = 0;
     bool shooting = false;
+    bool lastBlock = false;
+    ULONGLONG armedAt = 0; // his specials from then on (not in the duel's intro)
+    // a player's Cody: he had a controller (+0x43C, -1 for none) once since he came. The game's own test (0x1545A0)
+    // also counts a player's character as the computer's while its AI drives it (the duel's intro), so it is not asked
+    bool player = false;
     ULONGLONG lastShot = 0, lastFrame = 0, lastDodge = 0;
     bool summon = false;  // asked for, made in CodyFrame
     bool bombard = false; // likewise
+    int roll = 0;         // likewise: 1 left, 2 right
 };
 std::unordered_map<uint8_t*, Kit> g_Kits;
 
@@ -98,9 +117,19 @@ struct Helper {
     uint8_t* object;
     uint32_t id;
     uint8_t* master;
+    bool enemy;          // against the player (its master the computer's)
+    ULONGLONG engageAt;  // when it turns on its master's opponent (once down)
     ULONGLONG until;
 };
 std::vector<Helper> g_Helpers;
+
+struct Shell {
+    uint8_t* cody;
+    uint32_t codyId;
+    uint8_t* target;
+    ULONGLONG at;
+};
+std::vector<Shell> g_Shells;
 
 uint32_t Button(uint32_t global)
 {
@@ -110,6 +139,23 @@ uint32_t Button(uint32_t global)
 bool Pressed(uint32_t global)
 {
     return reinterpret_cast<bool(__cdecl*)(uint32_t, int, int, int)>(uintptr_t(kPressed))(Button(global), 1, 0, 2);
+}
+
+bool Held(uint32_t global)
+{
+    return reinterpret_cast<int(__cdecl*)(uint32_t, int)>(uintptr_t(kHeldFrames))(Button(global), 0) > 0;
+}
+
+bool Direction(uint32_t test, uint8_t* instance) // 0x1F5480 left, 0x1F54C0 right on [instance + 0xFC]
+{
+    return reinterpret_cast<bool(__cdecl*)(uint32_t)>(uintptr_t(test))(At<uint32_t>(instance, 0xFC));
+}
+
+// A line of his, in his script's turn: the event asked as the game asks it, the line forced (customchars.h).
+void Say(uint8_t* character, const char* event, const char* line)
+{
+    ForceNextLine(character, event, line);
+    reinterpret_cast<int(__cdecl*)(const char*, const char*, int, int, int)>(uintptr_t(kSayEvent))(event, "", 1, 0, 0);
 }
 
 void Fire(uint8_t* script, uint8_t* instance)
@@ -138,6 +184,11 @@ void Layer(Kit& kit, bool on)
     kit.shooting = on;
 }
 
+bool IsHelper(const uint8_t* c)
+{
+    return std::any_of(g_Helpers.begin(), g_Helpers.end(), [&](const Helper& h) { return h.object == c; });
+}
+
 // The opponent a character fights: its own (+0x3B8) when it is a standing character, else the nearest other one
 // standing that is not one of the helpers.
 uint8_t* OpponentOf(uint8_t* character)
@@ -145,16 +196,18 @@ uint8_t* OpponentOf(uint8_t* character)
     const auto standing = [](uint8_t* c) { return c && At<float>(c, kCharacterHealth) > 0; };
     const std::vector<uint8_t*> characters = LevelCharacters();
     uint8_t* own = At<uint8_t*>(character, kCharacterOpponent);
-    if (own && own != character && standing(own) && std::find(characters.begin(), characters.end(), own) != characters.end())
+    if (own && own != character && standing(own) && !IsHelper(own) &&
+        std::find(characters.begin(), characters.end(), own) != characters.end())
         return own;
-    const float* p = reinterpret_cast<const float*>(character + kCharacterTransform + 48);
+    const float* p = Position(character);
     uint8_t* best = nullptr;
     float bestDistance = 1e30f;
     for (uint8_t* c : characters) {
-        if (c == character || !standing(c) ||
-            std::any_of(g_Helpers.begin(), g_Helpers.end(), [&](const Helper& h) { return h.object == c; }))
+        if (c == character || !standing(c) || IsHelper(c))
             continue;
-        const float* q = reinterpret_cast<const float*>(c + kCharacterTransform + 48);
+        if (HvvActive() && HvvSameSide(c, character))
+            continue;
+        const float* q = Position(c);
         const float d = std::hypot(q[0] - p[0], q[2] - p[2]);
         if (d < bestDistance) {
             bestDistance = d;
@@ -164,44 +217,35 @@ uint8_t* OpponentOf(uint8_t* character)
     return best;
 }
 
-// Plays one of a character's sequences by name, as the duel plays an intro (ICharacter 0x150E30); false without it.
-bool PlaySequence(uint8_t* character, const char* wanted)
+// Plays one of a character's sequences by name, as the duel plays an intro; false without it.
+bool PlaySequence(uint8_t* character, const char* name)
 {
-    uint8_t* script = At<uint8_t*>(character, kCharacterScript);
-    uint8_t* list = script ? At<uint8_t*>(script, 4) : nullptr;
-    const int count = list ? At<int>(list, 8) : 0;
-    uint8_t** items = list ? At<uint8_t**>(list, 0xC) : nullptr;
-    for (int i = 0; i < count; ++i) {
-        const char* name = items[i] ? At<const char*>(items[i], 0xC) : nullptr;
-        if (name && _stricmp(name, wanted) == 0)
-            return reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint8_t*, float, int, int, float)>(kPlaySequence)(
-                character, nullptr, items[i], 0.0f, 0, 0, 1.0f);
-    }
-    return false;
+    uint8_t* record = reinterpret_cast<uint8_t*(__fastcall*)(uint8_t*, void*, const char*)>(kFindSequence)(character, nullptr, name);
+    return record && reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint8_t*, float, int, int, float)>(kPlaySequence)(
+        character, nullptr, record, 0.0f, 0, 0, 1.0f);
 }
 
-// The bombardment: explosions called down on his opponent (see the recipe in Bombard's comment).
-void Bombard(uint8_t* cody)
-{
-    LOG_INFO("Cody: bombardment called on %p", OpponentOf(cody)); // made once the explosions are found
-}
-
-// --- His rolls: sequences of the port's on the clone class ---
-struct Roll {
+// --- His moves: sequences of the port's on the clone class (only in matches) ---
+struct OwnMove {
     const char* name;
     const char* animation;
     uint16_t handle;
 };
-Roll g_Rolls[2] = { { "Cody_RollLeft", "CTroop_Nav_RollOut_L", 0 }, { "Cody_RollRight", "CTroop_Nav_RollOut_R", 0 } };
+OwnMove g_Moves[] = {
+    { "Cody_RollLeft", "CTroop_Nav_RollOut_L", 0 },
+    { "Cody_RollRight", "CTroop_Nav_RollOut_R", 0 },
+    { "Cody_SignalLeft", "ClnCom_Signal_Left", 0 }, // calling his clones in
+};
+constexpr int kMoveCount = int(std::size(g_Moves));
 constexpr uint32_t kSetup = 0x006965D8;
 const char kDuelMapTag[] = "DuelMap";
 
-template <int K> bool __fastcall RollFn(uint8_t*, void*, uint32_t, uint32_t)
+template <int K> bool __fastcall MoveFn(uint8_t*, void*, uint32_t, uint32_t)
 {
     auto* setup = reinterpret_cast<uint8_t*>(uintptr_t(kSetup));
-    Roll& roll = g_Rolls[K];
+    OwnMove& move = g_Moves[K];
     const bool declared = reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint16_t*, const char*, const char*, float, uint32_t)>(
-        uintptr_t(0x001F5B20))(setup, nullptr, &roll.handle, roll.name, roll.animation, 1.0f, 0x0055FB60);
+        uintptr_t(0x001F5B20))(setup, nullptr, &move.handle, move.name, move.animation, 1.0f, 0x0055FB60);
     if (declared) { // optional, required on duel maps (as Vader_Intro)
         *reinterpret_cast<uint8_t*>(uintptr_t(0x00696531)) = 1;
         *reinterpret_cast<const char**>(uintptr_t(0x006964B8)) = kDuelMapTag;
@@ -210,52 +254,147 @@ template <int K> bool __fastcall RollFn(uint8_t*, void*, uint32_t, uint32_t)
         setup, nullptr, reinterpret_cast<const char*>(uintptr_t(0x0059C07C)), 0x7D00 + K);
 }
 
-int __cdecl RollSequences(const char* shortName, ClassSequenceFn* fns, int max)
+int __cdecl MoveSequences(const char* shortName, ClassSequenceFn* fns, int max)
 {
-    if (!BootIsMatch() || _stricmp(shortName, "CloneTrooper") != 0 || max < 2 || !FindCustomCharacter("ICody"))
+    if (!BootIsMatch() || _stricmp(shortName, "CloneTrooper") != 0 || max < kMoveCount || !FindCustomCharacter("ICody"))
         return 0;
-    fns[0] = &RollFn<0>;
-    fns[1] = &RollFn<1>;
-    LOG_INFO("Cody: his rolls added to the clone trooper's moves");
-    return 2;
+    fns[0] = &MoveFn<0>;
+    fns[1] = &MoveFn<1>;
+    fns[2] = &MoveFn<2>;
+    LOG_INFO("Cody: his rolls and signal added to the clone trooper's moves");
+    return kMoveCount;
 }
 
-void OfferRoll(bool condition, const Roll& roll)
+// --- His clones rappel down ---
+// The clone's own CTroop_Rappel_Loop (handle +0xFF6): at its first frame a rope from where it starts to its left hand
+// (the rope manager, a singleton [0x7F2EAC], draws it: without one, or one not active ([+0xC] & 0x40000), the rope's
+// add faults), no gravity, a steady slide down; on the floor its Rappel_Out lets go and gives it back to its AI.
+bool RopesReady()
 {
-    void* sequence = reinterpret_cast<void*(__cdecl*)(uint32_t, const char*, int)>(uintptr_t(0x001F53E0))(roll.handle,
-        "cody.cpp", __LINE__);
-    reinterpret_cast<void(__cdecl*)(bool, void*, int, int, int, float)>(uintptr_t(0x00175D60))(condition, sequence,
-        3, 3, 1, 1.0f);
+    const uint8_t* ropes = *reinterpret_cast<uint8_t* const*>(uintptr_t(0x007F2EAC));
+    return ropes && (*reinterpret_cast<const uint32_t*>(ropes + 0xC) & 0x40000) != 0;
 }
 
-bool Direction(uint32_t test, uint8_t* instance) // 0x1F5480 left, 0x1F54C0 right on [instance + 0xFC]
+void CallSquad(uint8_t* cody, bool enemy, ULONGLONG now)
 {
-    return reinterpret_cast<bool(__cdecl*)(uint32_t)>(uintptr_t(test))(At<uint32_t>(instance, 0xFC));
+
+    const bool rappel = RopesReady();
+    int made = 0;
+    for (int side = -1; side <= 1; side += 2) {
+        float m[16];
+        std::memcpy(m, cody + kCharacterTransform, sizeof m);
+        for (int k = 0; k < 3; ++k) // beside him, a step back
+            m[12 + k] += m[k] * kHelperSide * float(side) - m[8 + k] * 40.0f;
+        if (rappel)
+            m[13] += kRappelHeight;
+        std::string error;
+        uint8_t* clone = SpawnHelper("ICloneTrooper", std::string(), cody, enemy, m, error);
+        if (!clone) {
+            LOG_WARN("Cody: a clone of his could not come (%s)", error.c_str());
+            continue;
+        }
+        const bool roped = rappel && PlaySequence(clone, "CTroop_Rappel_Loop");
+        if (rappel && !roped)
+            LOG_WARN("Cody: his clone has no rappel here; it drops in");
+        g_Helpers.push_back({ clone, At<uint32_t>(clone, 4), cody, enemy, now + (roped ? kHelperEngageMs : 0), now + kHelperLifeMs });
+        ++made;
+    }
+    LOG_INFO("Cody: %d of his clones called in%s", made, rappel ? ", rappelling" : "");
+
 }
 
-// The clone's rules, called from its StateManager on a decision frame (0x35AE5E: push esi; push ecx; call 0x35AE70).
-constexpr uint32_t kCloneRulesCall = 0x0035AE5E;
-constexpr uint32_t kCloneRules = 0x0035AE70;
-bool g_RollLeftNext = true;
+// --- The bombardment ---
+// A shell is the game's IExplosion (class info 0x68E760, as a breakable or a rocket makes one): its properties at
+// +0x1E0 (the effect key +0x1F0, the hit callback +0x200, the sound link +0x204, radii, lifetime, explode once), spawned
+// (0xA2DE0) where it falls and set off (vfunc +0xA4): the effect, the sound, a damage sphere growing over its lifetime,
+// which hands each object it reaches to the callback. The callback hurts his enemies only, modestly, through the
+// game's own hit (0xA6720: a knock-down reaction from r_environment's EXPLOSION_* rows, the health change after it).
+// The effects are each level's own: the first of these the level has; without one, the shell is heard, not seen.
+constexpr uint32_t kExplosionClass = 0x0068E760;
+constexpr const char* kShellEffects[] = { "IDS_FX_explosion_med", "IDS_FX_explosion_large06", "IDS_FX_explosion_barrel_small",
+    "IDS_FX_explosion_large05", "IDS_FX_flak_explosion01", "IDS_FX_explosion_large", "IDS_FX_Homing_Rocket_Explosion",
+    "IDS_FX_electric_explosion_small", "IDS_FX_flak_explosion03", "IDS_FX_flak_explosion02", "IDS_FX_dust_burst_explosion09" };
+std::unordered_map<uint8_t*, uint8_t*> g_ShellOwners; // shell -> his Cody
 
-void __cdecl CloneRulesHook(uint8_t* instance, uint8_t* classObject)
+bool IsCharacter(uint8_t* object)
 {
-    reinterpret_cast<void(__cdecl*)(uint8_t*, uint8_t*)>(uintptr_t(kCloneRules))(instance, classObject);
+    return reinterpret_cast<bool(__cdecl*)(uint8_t*)>(uintptr_t(0x00089D10))(object);
+}
+
+void __cdecl ShellHit(uint8_t* shell, uint8_t* target, void*)
+{
     __try {
-        uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(kScriptCharacterContext));
-        uint8_t* character = scripts ? At<uint8_t*>(scripts, 0x68) : nullptr;
-        if (!IsCody(character) || !g_Rolls[0].handle || reinterpret_cast<bool(__cdecl*)()>(uintptr_t(kIsComputer))())
+        const auto owner = g_ShellOwners.find(shell);
+        uint8_t* cody = owner == g_ShellOwners.end() ? nullptr : owner->second;
+        if (!target || !IsCharacter(target) || target == cody || IsHelper(target))
             return;
-        float& meter = At<float>(character, kCharacterMeter);
-        if (!Pressed(kButtonBlock) || meter < kDodgeCost)
+        if (cody && HvvActive() && HvvSameSide(target, cody))
             return;
-        meter -= kDodgeCost;
-        const bool left = Direction(0x001F5480, instance), right = Direction(0x001F54C0, instance);
-        const bool toLeft = left || (!right && g_RollLeftNext);
-        if (!left && !right)
-            g_RollLeftNext = !g_RollLeftNext;
-        OfferRoll(true, g_Rolls[toLeft ? 0 : 1]);
+        const float* centre = reinterpret_cast<const float*>(reinterpret_cast<uint8_t*(__fastcall*)(uint8_t*, void*)>(
+            uintptr_t(0x000F2280))(shell, nullptr) + 0x30);
+        const float* p = Position(target);
+        const float d = std::hypot(p[0] - centre[0], p[2] - centre[2]);
+        float damage = d < 60 ? 60.0f : d < 110 ? 40.0f : 20.0f;
+        const auto isA = reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint32_t)>(
+            (*reinterpret_cast<void* const* const*>(target))[1]);
+        if (isA(target, nullptr, 0x00249950) && At<uint8_t>(target, 0x1060)) // a Jedi blocking (as the canister)
+            damage /= 2;
+        const float from[4] = { centre[0], centre[1] + 720.0f, centre[2], 1.0f };
+        reinterpret_cast<int(__cdecl*)(uint8_t*, uint8_t*, const char*, const float*, int, float, bool)>(uintptr_t(0x000A6720))(
+            target, shell, d < 60 ? "EXPLOSION_MEDIUM" : "EXPLOSION_LIGHT", from, 0, damage, true);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+// The two kinds of text in the properties, as the canister sets them (0x24F1C0): the effect key (+0x10) is an interned
+// name (made by 0x222FA0 cdecl (out, text) into a holder of the game's that keeps it, and copied in as it is); the sound
+// link (+0x24) a text the constructor made, set with its assign (0x225A10).
+void AssignText(uint8_t* field, const char* text)
+{
+    reinterpret_cast<void(__fastcall*)(void*, void*, const char*)>(uintptr_t(0x00225A10))(field, nullptr, text);
+}
+
+bool SetEffect(uint8_t* field)
+{
+    for (const char* key : kShellEffects) { // the effect manager's check (0x1B3B00): one this level has
+        void* name = nullptr; // held, never released: the interned name lives on, as the canister's holder's does
+        reinterpret_cast<void*(__cdecl*)(void*, const char*)>(uintptr_t(0x00222FA0))(&name, key);
+        if (name && reinterpret_cast<bool(__cdecl*)(void*)>(uintptr_t(0x001B3B00))(&name)) {
+            *reinterpret_cast<void**>(field) = name;
+            return true;
+        }
+    }
+    return false;
+}
+
+void FireShell(uint8_t* cody, uint8_t* target)
+{
+    const float* p = Position(target);
+    const ULONGLONG r = GetTickCount64();
+    const float angle = float(r % 628) / 100.0f, distance = float((r / 7) % 100) / 100.0f * kShellSpread;
+    float m[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, p[0] + std::cos(angle) * distance, p[1], p[2] + std::sin(angle) * distance, 1 };
+    uint8_t* shell = reinterpret_cast<uint8_t*(__cdecl*)(uint32_t)>(uintptr_t(0x000A2DB0))(kExplosionClass);
+    if (!shell)
+        return;
+    uint8_t* props = shell + 0x1E0; // as its constructor left them (its texts made), the port's values set
+    const bool seen = SetEffect(props + 0x10);
+    *reinterpret_cast<void**>(props + 0x20) = reinterpret_cast<void*>(&ShellHit);
+    AssignText(props + 0x24, "exp_canister_small");
+    At<float>(props, 0x28) = 0;     // start radius
+    At<float>(props, 0x2C) = 150;   // end radius
+    At<float>(props, 0x30) = 200;   // push
+    At<float>(props, 0x34) = 60;    // damage (ours: the callback's)
+    At<float>(props, 0x38) = 20;
+    At<float>(props, 0x3C) = 0.4f;  // lifetime
+    props[0x40] = 1;                // explode once (removed at the end)
+    g_ShellOwners[shell] = cody;
+    if (!reinterpret_cast<bool(__cdecl*)(uint8_t*, void*, const float*, int)>(uintptr_t(0x000A2DE0))(shell, nullptr, m, 1))
+        return;
+    reinterpret_cast<void(__fastcall*)(uint8_t*, void*)>((*reinterpret_cast<void* const* const*>(shell))[0xA4 / 4])(shell, nullptr);
+    static bool noted = false;
+    if (!noted) {
+        noted = true;
+        LOG_INFO("Cody: a shell falls (%s)", seen ? "with the level's explosion" : "the level has no explosion to show");
     }
 }
 
@@ -265,17 +404,12 @@ void InstallCody()
 {
     g_Kits.clear();
     g_Helpers.clear();
-    g_Rolls[0].handle = g_Rolls[1].handle = 0;
-    if (!FindCustomCharacter("ICody"))
-        return;
-    AddClassSequences(&RollSequences);
-    uint8_t call[5] = { 0xE8 };
-    const int32_t rel = int32_t(kCloneRules) - int32_t(kCloneRulesCall + 5);
-    std::memcpy(call + 1, &rel, 4);
-    if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kCloneRulesCall)), call, 5) == 0)
-        PatchCall(kCloneRulesCall, reinterpret_cast<const void*>(&CloneRulesHook), 5);
-    else
-        LOG_WARN("Cody: the clone trooper's rules are not as expected; Cody does not roll");
+    g_Shells.clear();
+    g_ShellOwners.clear();
+    for (OwnMove& move : g_Moves)
+        move.handle = 0;
+    if (FindCustomCharacter("ICody"))
+        AddClassSequences(&MoveSequences);
 }
 
 void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
@@ -284,38 +418,43 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         return;
     Kit& kit = g_Kits[character];
     const uint32_t id = At<uint32_t>(character, 4);
+    const ULONGLONG now = GetTickCount64();
     if (kit.id != id) { // a new Cody where an old one was
         kit = Kit{};
         kit.id = id;
+        kit.armedAt = now + kArmAfterMs;
     }
-    const ULONGLONG now = GetTickCount64();
-    // the meter refills
-    if (kit.lastFrame) {
-        float& meter = At<float>(character, kCharacterMeter);
-        const float most = At<float>(character, kCharacterMeterMost);
-        meter = std::min(most, meter + kMeterPerSecond * float(now - kit.lastFrame) / 1000.0f);
+    if (At<int32_t>(character, 0x43C) >= 0)
+        kit.player = true;
+    // his health's most: a duel gives its fighters 1000 at each round, more than a blaster against a saber should have
+    if (const CustomCharacter* custom = CustomCharacterOf(character); custom && custom->health > 0) {
+        At<float>(character, kCharacterHealthMost) = custom->health;
+        At<float>(character, kCharacterHealth) = std::min(At<float>(character, kCharacterHealth), custom->health);
     }
+    float& meter = At<float>(character, kCharacterMeter);
+    if (kit.lastFrame) // the meter refills
+        meter = std::min(At<float>(character, kCharacterMeterMost), meter + kMeterPerSecond * float(now - kit.lastFrame) / 1000.0f);
     kit.lastFrame = now;
-    if (At<float>(character, kCharacterHealth) <= 0) {
+    if (At<float>(character, kCharacterHealth) <= 0 || now < kit.armedAt || (HvvActive() && GetHvvState().intro)) {
         Layer(kit, false);
         return;
     }
-    float& meter = At<float>(character, kCharacterMeter);
     const bool squadOut = std::any_of(g_Helpers.begin(), g_Helpers.end(), [&](const Helper& h) { return h.master == character; });
-    const bool computer = reinterpret_cast<bool(__cdecl*)()>(uintptr_t(kIsComputer))();
-    if (computer) { // shoots as any clone; his specials when his opponent is near (CodyFrame dodges for him)
+    if (!kit.player) { // shoots as any clone; his specials when his opponent is near
         uint8_t* opponent = OpponentOf(character);
         if (!opponent || kit.summon || kit.bombard)
             return;
-        const float* p = reinterpret_cast<const float*>(character + kCharacterTransform + 48);
-        const float* q = reinterpret_cast<const float*>(opponent + kCharacterTransform + 48);
+        const float* p = Position(character);
+        const float* q = Position(opponent);
         const float apart = std::hypot(q[0] - p[0], q[2] - p[2]);
         if (apart < kComputerCallsWithin && !squadOut && meter >= kSummonCost + kDodgeCost) {
             meter -= kSummonCost;
             kit.summon = true;
+            Say(character, "TKE", "CLC013");
         } else if (apart > 250 && apart < kComputerCallsWithin && meter >= kBombardCost + kDodgeCost + 100) {
             meter -= kBombardCost;
             kit.bombard = true;
+            Say(character, "TKE", "CMC915");
         }
         return;
     }
@@ -323,32 +462,44 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
     if (Pressed(kButtonPush) && !squadOut && !kit.summon && meter >= kSummonCost) {
         meter -= kSummonCost;
         kit.summon = true;
+        Say(character, "TKE", "CLC013"); // "Bring up the reinforcements!"
     }
     if (Pressed(kButtonCritical) && !kit.bombard && meter >= kBombardCost) {
         meter -= kBombardCost;
         kit.bombard = true;
+        Say(character, "TKE", "CMC915"); // "Concentrate fire on the target!"
     }
-    const bool held = reinterpret_cast<int(__cdecl*)(uint32_t, int)>(uintptr_t(kHeldFrames))(Button(kButtonHeavy), 0) > 0;
-    if (!held) {
+    // the roll: on the press of block, to the stick's side (the left without one)
+    const bool block = Held(kButtonBlock);
+    if (block && !kit.lastBlock && !kit.roll && meter >= kDodgeCost) {
+        meter -= kDodgeCost;
+        kit.roll = Direction(0x001F54C0, instance) ? 2 : 1;
+    }
+    kit.lastBlock = block;
+    // the blaster
+    if (!Held(kButtonHeavy) || meter < kShotCost) {
         Layer(kit, false);
         return;
     }
     if (!kit.shooting) {
         Layer(kit, true);
-        kit.lastShot = now - kShotIntervalMs + 50;
+        kit.lastShot = now - kShotIntervalMs + 120; // the first bolt a few frames into the layer
     }
     if (now - kit.lastShot >= kShotIntervalMs) {
         kit.lastShot = now;
+        meter -= kShotCost;
         Fire(script, instance);
     }
 }
 
 void CodyFrame()
 {
-    if (g_Kits.empty() && g_Helpers.empty())
+    if (g_Kits.empty() && g_Helpers.empty() && g_Shells.empty())
         return;
     const ULONGLONG now = GetTickCount64();
-    // his clones' time is up, or his
+    // his clones: down, they go for his opponent; their time up (or his), they fall as clones do (the character's
+    // instant kill, vfunc +0xC8: its death, the game takes the body away; removing the object at once, while the
+    // level's lists held it, left a hole in one: 0x16B3C7)
     for (auto it = g_Helpers.begin(); it != g_Helpers.end();) {
         const auto kit = g_Kits.find(it->master);
         const bool masterGone = kit == g_Kits.end() || !Live(it->master, kit->second.id) ||
@@ -358,16 +509,29 @@ void CodyFrame()
             continue;
         }
         if (now >= it->until || masterGone) {
-            // they fall as any clone does (the character's instant kill, vfunc +0xC8: health 0 and its death): the
-            // game takes the body away; removing the object at once, while the level's lists (Heroes vs Villains just
-            // moved its player to a new body) held it, left a hole in one (0x16B3C7)
             if (At<float>(it->object, kCharacterHealth) > 0)
                 reinterpret_cast<void(__fastcall*)(uint8_t*, void*, uint32_t)>(
                     (*reinterpret_cast<void* const* const*>(it->object))[0xC8 / 4])(it->object, nullptr, 0);
             it = g_Helpers.erase(it);
             continue;
         }
+        if (it->engageAt && now >= it->engageAt) {
+            it->engageAt = 0;
+            if (uint8_t* opponent = OpponentOf(it->master))
+                if (uint8_t* brain = At<uint8_t*>(it->object, kCharacterAI))
+                    reinterpret_cast<void(__fastcall*)(uint8_t*, void*, uint8_t*)>(uintptr_t(kAISetTarget))(brain, nullptr, opponent);
+        }
         ++it;
+    }
+    // the shells falling
+    for (auto it = g_Shells.begin(); it != g_Shells.end();) {
+        if (now < it->at) {
+            ++it;
+            continue;
+        }
+        if (Live(it->cody, it->codyId) && it->target && At<float>(it->target, kCharacterHealth) > 0)
+            FireShell(it->cody, it->target);
+        it = g_Shells.erase(it);
     }
     for (auto it = g_Kits.begin(); it != g_Kits.end();) {
         uint8_t* cody = it->first;
@@ -376,42 +540,36 @@ void CodyFrame()
             it = g_Kits.erase(it);
             continue;
         }
+        const bool standing = At<float>(cody, kCharacterHealth) > 0;
         if (kit.summon) {
             kit.summon = false;
-            uint8_t* opponent = OpponentOf(cody);
-            int made = 0;
-            for (int side = -1; side <= 1; side += 2) {
-                float m[16];
-                std::memcpy(m, cody + kCharacterTransform, sizeof m);
-                for (int k = 0; k < 3; ++k) // beside him, a step back
-                    m[12 + k] += m[k] * kHelperSide * float(side) - m[8 + k] * 40.0f;
-                std::string error;
-                uint8_t* clone = SpawnHelper("ICloneTrooper", std::string(), cody, m, error);
-                if (!clone) {
-                    LOG_WARN("Cody: a clone of his could not come (%s)", error.c_str());
-                    continue;
-                }
-                if (opponent)
-                    if (uint8_t* brain = At<uint8_t*>(clone, kCharacterAI))
-                        reinterpret_cast<void(__fastcall*)(uint8_t*, void*, uint8_t*)>(uintptr_t(kAISetTarget))(
-                            brain, nullptr, opponent);
-                g_Helpers.push_back({ clone, At<uint32_t>(clone, 4), cody, now + kHelperLifeMs });
-                ++made;
+            if (standing) {
+                PlaySequence(cody, "Cody_SignalLeft"); // he waves them in
+                CallSquad(cody, !kit.player, now);
             }
-            LOG_INFO("Cody: %d of his clones called in", made);
-            PlaySequence(cody, "Cody_Intro"); // he signals them in: his intro (the attack signal)
         }
         if (kit.bombard) {
             kit.bombard = false;
-            Bombard(cody);
+            if (uint8_t* target = standing ? OpponentOf(cody) : nullptr) {
+                PlaySequence(cody, "Cody_Intro"); // the strike signal
+                for (int i = 0; i < kShells; ++i)
+                    g_Shells.push_back({ cody, kit.id, target, now + kFirstShellMs + ULONGLONG(i) * kShellGapMs });
+                LOG_INFO("Cody: bombardment on %p", target);
+            }
+        }
+        if (kit.roll) {
+            if (standing)
+                LOG_INFO("Cody: rolls %s%s", kit.roll == 1 ? "left" : "right",
+                    PlaySequence(cody, kit.roll == 1 ? "Cody_RollLeft" : "Cody_RollRight") ? "" : " (refused)");
+            kit.roll = 0;
         }
         // the computer's Cody rolls aside now and then when his opponent comes close
-        if (At<int32_t>(cody, 0x43C) < 0 && At<float>(cody, kCharacterHealth) > 0 && now - kit.lastDodge > kComputerDodgeWaitMs) {
+        if (standing && !kit.player && now - kit.lastDodge > kComputerDodgeWaitMs) {
             float& meter = At<float>(cody, kCharacterMeter);
             uint8_t* opponent = OpponentOf(cody);
             if (opponent && meter >= kDodgeCost) {
-                const float* p = reinterpret_cast<const float*>(cody + kCharacterTransform + 48);
-                const float* q = reinterpret_cast<const float*>(opponent + kCharacterTransform + 48);
+                const float* p = Position(cody);
+                const float* q = Position(opponent);
                 kit.lastDodge = now; // looked once a wait: a roll a third of the time
                 if (std::hypot(q[0] - p[0], q[2] - p[2]) < 170.0f && (now / 7) % 3 == 0 &&
                     PlaySequence(cody, (now / 13) % 2 ? "Cody_RollLeft" : "Cody_RollRight")) {
@@ -433,7 +591,7 @@ std::vector<CodyHelper> CodyHelpers()
 {
     std::vector<CodyHelper> out;
     for (const Helper& h : g_Helpers)
-        out.push_back({ h.object, h.master });
+        out.push_back({ h.object, h.master, h.enemy });
     return out;
 }
 

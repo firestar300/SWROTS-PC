@@ -70,6 +70,11 @@ bool ModFileExists(const std::string& relative);
 
 // The custom character a character is (recognised by its costume list, the port's own), or null.
 const CustomCharacter* CustomCharacterOf(const uint8_t* character);
+// The next line `speaker` starts for `event` (three letters, e.g. "TKE": an event its speaker code has entries for)
+// says `lineId` instead (a line of the mounted dialogue archives, e.g. "CLC013"), for the next few seconds; the event is
+// then asked as usual (the script's SayEvent, 0x17ACC0, in the character's script turn).
+void ForceNextLine(const uint8_t* speaker, const char* event, const char* lineId);
+
 // The duel cameras' name of the duelist whose intro a custom character plays (Intro=), or null for the base's.
 const char* IntroCameras(const CustomCharacter& custom);
 // The file's contents; false when there is none.

@@ -202,8 +202,33 @@ struct DuelLine {
 };
 DuelLine g_DuelLine;
 
+// A line asked for by the port (ForceNextLine): the speaker's next entry of the event says it.
+struct ForcedLine {
+    const uint8_t* speaker = nullptr;
+    char event[4] = {};
+    const char* id = nullptr; // pooled
+    ULONGLONG until = 0;
+};
+ForcedLine g_Forced;
+
 int __fastcall StartEntryHook(uint8_t* engine, void*, uint8_t* speaker, int entry, int a, int b, int c)
 {
+    if (speaker && speaker == g_Forced.speaker && entry >= 0 && g_Forced.id && GetTickCount64() < g_Forced.until) {
+        uint8_t* e = *reinterpret_cast<uint8_t**>(engine + kDialogueEntries) + size_t(entry) * kDialogueEntrySize;
+        const char* name = *reinterpret_cast<const char**>(e + 0x14);
+        if (name && _strnicmp(name, g_Forced.event, 3) == 0) {
+            const char*& id = *reinterpret_cast<const char**>(e + 0x10);
+            const char* own = id;
+            id = g_Forced.id;
+            const int result = g_StartEntry(engine, nullptr, speaker, entry, a, b, c);
+            id = own;
+            if (result) {
+                LOG_INFO("Custom characters: says %s (%s)", g_Forced.id, name);
+                g_Forced = {};
+            }
+            return result;
+        }
+    }
     const CustomCharacter* custom = speaker && g_VoiceServed ? CustomCharacterOf(speaker) : nullptr;
     if (!custom || custom->voice.empty() || entry < 0)
         return g_StartEntry(engine, nullptr, speaker, entry, a, b, c);
@@ -258,7 +283,10 @@ int __cdecl SayEventHook(const char* event, const char* context, int a, int b, i
         return g_SayEvent(event, context, a, b, c);
     const bool intro = _strnicmp(event, "TNT", 3) == 0;
     g_DuelLine = { character, intro ? "TNT" : "KIL", intro ? "INT" : "WIN", GetTickCount64() + 4000 };
-    return g_SayEvent(event, custom->intro >= 0 ? "" : context, a, b, c);
+    // a borrowed or own intro (Intro=, IntroAnimation=): its speaker has no Versus lines of its own (the base never
+    // dueled), so the line is asked without the context
+    const bool ownIntro = custom->intro >= 0 || !custom->introAnimation.empty();
+    return g_SayEvent(event, ownIntro ? "" : context, a, b, c);
 }
 
 // The custom lines' files and texts, all characters'.
@@ -1136,7 +1164,7 @@ void AddBuiltInCharacters()
     c.code = "CMC";
     c.speaker = "Commander Cody";
     c.speakerKey = "CommanderCody"; // the game's own text
-    c.health = 1000;
+    c.health = 750; // a Jedi's 1000 was too much against a saber (play test)
     c.force = 1000;
     c.side = 0;
     c.introAnimation = "ClnCom_Signal_Strike";
@@ -1433,6 +1461,17 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         PatchCall(kSpeakerNameStore, reinterpret_cast<const void*>(&SpeakerNameStore), sizeof kSpeakerNameStoreBytes);
     else
         LOG_WARN("Custom characters: the subtitles' speaker name is not as expected; custom characters keep the base's");
+}
+
+void ForceNextLine(const uint8_t* speaker, const char* event, const char* lineId)
+{
+    const char* id = PooledString(lineId);
+    if (!speaker || !event || !id)
+        return;
+    g_Forced.speaker = speaker;
+    strncpy_s(g_Forced.event, event, 3);
+    g_Forced.id = id;
+    g_Forced.until = GetTickCount64() + 3000;
 }
 
 const char* IntroCameras(const CustomCharacter& custom)

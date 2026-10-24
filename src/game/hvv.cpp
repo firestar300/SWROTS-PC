@@ -1305,6 +1305,12 @@ void InstallHvv()
 
 bool HvvActive() { return g_Active; }
 
+bool HvvSameSide(const uint8_t* a, const uint8_t* b)
+{
+    const int i = FighterOf(a), k = FighterOf(b);
+    return g_Active && i >= 0 && k >= 0 && SideOf(i) == SideOf(k);
+}
+
 // The game's pause: the time manager (TManager_Time, [[0x68D944] +0x5C]) has a frozen state on its stack (+0x14 set,
 // +0x38 its entries: only the pause pushes one, 0xA7A30; see fixes.cpp).
 bool GamePaused()

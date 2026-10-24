@@ -1795,8 +1795,8 @@ bool SetCharacterSide(uint8_t* character, SpawnSide side)
     return true;
 }
 
-uint8_t* SpawnHelper(const char* className, const std::string& skin, uint8_t* master, const float* place,
-    std::string& error)
+uint8_t* SpawnHelper(const char* className, const std::string& skin, uint8_t* master, bool againstPlayer,
+    const float* place, std::string& error)
 {
     const char* name = RegisteredClassName(className);
     if (!name || !master || !place) {
@@ -1819,11 +1819,9 @@ uint8_t* SpawnHelper(const char* className, const std::string& skin, uint8_t* ma
     uint32_t teams = 0;
     if (CharacterTeams(master, teams))
         SetCharacterTeams(object, teams);
-    // a player's (its controller, +0x43C, set: 0x176A90): with the player; the computer's: against
-    const bool masterIsPlayer = *reinterpret_cast<const int32_t*>(master + 0x43C) >= 0;
     if (uint8_t* ai = *reinterpret_cast<uint8_t**>(object + kCharacterAIData)) {
         ai[kAIHasSide] = 1;
-        ai[kAITargetPlayer] = masterIsPlayer ? 0 : 1;
+        ai[kAITargetPlayer] = againstPlayer ? 1 : 0;
     }
     LOG_INFO("Characters: %s for %p at %.0f %.0f %.0f", who, master, place[12], place[13], place[14]);
     ++g_SpawnedInLevel;
