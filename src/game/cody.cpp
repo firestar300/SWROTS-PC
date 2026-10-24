@@ -358,7 +358,12 @@ void CodyFrame()
             continue;
         }
         if (now >= it->until || masterGone) {
-            RemoveSpawnedCharacter(it->object);
+            // they fall as any clone does (the character's instant kill, vfunc +0xC8: health 0 and its death): the
+            // game takes the body away; removing the object at once, while the level's lists (Heroes vs Villains just
+            // moved its player to a new body) held it, left a hole in one (0x16B3C7)
+            if (At<float>(it->object, kCharacterHealth) > 0)
+                reinterpret_cast<void(__fastcall*)(uint8_t*, void*, uint32_t)>(
+                    (*reinterpret_cast<void* const* const*>(it->object))[0xC8 / 4])(it->object, nullptr, 0);
             it = g_Helpers.erase(it);
             continue;
         }
