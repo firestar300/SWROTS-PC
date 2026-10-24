@@ -989,6 +989,8 @@ uint8_t* __fastcall CreateCustom(uint8_t* info, void*)
         (*reinterpret_cast<void* const* const*>(character))[1]);
     if (p->custom->hasSaber && isA(character, nullptr, 0x00249950))
         *reinterpret_cast<const float**>(character + kCharacterSaberColor) = p->custom->saber;
+    if (!p->textureSet) // the plain one (not a set the base's list names: a respawn could pick a _duel look)
+        *reinterpret_cast<int*>(character + kCharacterTextureSet) = 0;
     if (p->textureSet) { // its own texture set
         *reinterpret_cast<int*>(character + kCharacterTextureSet) = p->textureSet;
         if (!p->custom->textureSetFile.empty() && !DeclareDiscResource(p->custom->textureSetFile))

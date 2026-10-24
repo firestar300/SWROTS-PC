@@ -929,9 +929,11 @@ uint32_t MatchTexts(uint32_t key)
                 keys[i][k] = MenuKey(kPairs[i][k]);
     if (!HvvActive())
         return key;
-    for (const auto& pair : keys)
-        if (pair[0] == key)
-            return pair[1];
+    static const char* const kBattlefront[] = { "IDS_PORT_BF_RESTART", "IDS_PORT_BF_QUIT", "IDS_PORT_BF_RESTART",
+        "IDS_PORT_BF_QUIT", "IDS_PORT_HVV_RESTART_MESSAGE", "IDS_PORT_HVV_QUIT_MESSAGE" };
+    for (size_t i = 0; i < std::size(keys); ++i)
+        if (keys[i][0] == key)
+            return BattlefrontActive() ? MenuKey(kBattlefront[i]) : keys[i][1];
     return key;
 }
 
@@ -939,6 +941,8 @@ void InstallScreens()
 {
     SetMenuText("IDS_PORT_HVV_RESTART", L"Restart HvV");
     SetMenuText("IDS_PORT_HVV_QUIT", L"Quit HvV");
+    SetMenuText("IDS_PORT_BF_RESTART", L"Restart Battle");
+    SetMenuText("IDS_PORT_BF_QUIT", L"Quit Battle");
     SetMenuText("IDS_PORT_HVV_RESTART_MESSAGE", L"Are you sure you want to restart the match? Its score will be lost.");
     SetMenuText("IDS_PORT_HVV_QUIT_MESSAGE", L"Are you sure you want to quit the match? Its score will be lost.");
     SetMenuTextRedirect(&MatchTexts);

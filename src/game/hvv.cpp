@@ -1298,21 +1298,46 @@ void StartEnd(ULONGLONG now)
 
 // --- Battlefront ---------------------------------------------------------------------------------------------------
 
-// Where a fighter of `side` comes back: a post its side holds (one of them at random), else its side's start; a step
-// off it, facing the middle of the posts.
+// Where a fighter of `side` comes back: one of its side's posts or its start, picked at random among those with no
+// enemy near (kSpawnClear: nobody comes back into a fight, or onto a camp); with none clear, the one furthest from the
+// enemies. A step off it, facing the middle of the posts.
+constexpr float kSpawnClear = 650.0f;
+
+float NearestEnemyTo(int side, float x, float z)
+{
+    float nearest = 1e9f;
+    for (int i = 0; i < g_Count; ++i) {
+        Fighter& f = g_Fighters[i];
+        if (SideOf(i) == side || f.out || !Standing(f))
+            continue;
+        const float* p = Position(f.object);
+        nearest = std::min(nearest, std::hypot(p[0] - x, p[2] - z));
+    }
+    return nearest;
+}
+
 void ConquestPlace(int side, float (&m)[16])
 {
-    std::vector<const Post*> own;
+    std::vector<std::pair<float, float>> places;
     for (const Post& post : g_Posts)
         if (post.owner == side)
-            own.push_back(&post);
-    float x = g_TeamStart[side][0], z = g_TeamStart[side][1];
-    if (!own.empty()) {
-        const Post* post = own[size_t(std::rand()) % own.size()];
-        x = post->x;
-        z = post->z;
+            places.push_back({ post.x, post.z });
+    places.push_back({ g_TeamStart[side][0], g_TeamStart[side][1] });
+    std::vector<size_t> clear;
+    size_t furthest = 0;
+    float furthestDistance = -1;
+    for (size_t k = 0; k < places.size(); ++k) {
+        const float d = NearestEnemyTo(side, places[k].first, places[k].second);
+        if (d >= kSpawnClear)
+            clear.push_back(k);
+        if (d > furthestDistance) {
+            furthestDistance = d;
+            furthest = k;
+        }
     }
-    const float angle = float(std::rand()) / RAND_MAX * 2 * kPi, reach = 60.0f + float(std::rand()) / RAND_MAX * 110.0f;
+    const size_t pick = clear.empty() ? furthest : clear[size_t(std::rand()) % clear.size()];
+    float x = places[pick].first, z = places[pick].second;
+    const float angle = float(std::rand()) / RAND_MAX * 2 * kPi, reach = 60.0f + float(std::rand()) / RAND_MAX * 140.0f;
     x = std::clamp(x + std::sin(angle) * reach, g_Bounds[0] + g_Margin, g_Bounds[2] - g_Margin);
     z = std::clamp(z + std::cos(angle) * reach, g_Bounds[1] + g_Margin, g_Bounds[3] - g_Margin);
     float cx = 0, cz = 0;

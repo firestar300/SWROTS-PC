@@ -37,6 +37,7 @@ struct BlastLook {
     float push = 200;
     const char* damageType = nullptr;     // r_environment's damage type ("Electrified"), null: an explosion's
     float damage = 0;                     // with a damage type
+    uint8_t** made = nullptr;             // the blast object made, when wanted (to take it away early)
 };
 bool FireBlast(uint8_t* owner, const float at[3], const BlastLook& look);
 // Who fired a blast (FireBlast's `owner`), or null when `object` is none of them.

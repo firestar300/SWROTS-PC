@@ -63,14 +63,17 @@ constexpr uint32_t kGrabAttempt = 0x1120, kSerraGrabAttempt = 0x17C6, kGrabKD = 
 constexpr uint32_t kInstanceLightningOn = 0x2DD; // byte: its lightning allowed
 
 // the storm
-constexpr float kStormCost = 400, kStormRange = 600;
+constexpr float kStormCost = 500, kStormRange = 600;
 constexpr ULONGLONG kStormWaitMs = 15000, kFirstStrikeMs = 550, kStrikeGapMs = 260;
 constexpr int kStrikes = 5;
-constexpr float kStrikeDamage = 30;
+constexpr float kStrikeDamage = 55;
 // one-shot effects only: the lightning's own impact (IDS_FX_Force_lightning_impact) and static shock loop as long as
 // the lightning lasts, and a blast that ends does not stop them (they stayed in the air)
 constexpr const char* kStrikeEffects[] = { "IDS_FX_Valor_Palm_Blast", "IDS_FX_electric_explosion_small",
     "IDS_FX_Force_Stunned" };
+// the strike's column: small electric explosions (the lightning's own impact loops on after its object is gone), the palm blast where a level lacks them
+constexpr const char* kColumnEffects[] = { "IDS_FX_electric_explosion_small", "IDS_FX_Valor_Palm_Blast" };
+constexpr ULONGLONG kSparkMs = 450; // a column's piece is taken away after this long
 constexpr const char* kStrikeGroundEffects[] = { "IDS_FX_FURY_FORCESHOCK", "IDS_FX_Valor_FORCESHOCK", "IDS_FX_FURY_SHOCKWAVE" };
 
 template <typename T> T& At(uint8_t* p, uint32_t offset)
@@ -160,6 +163,12 @@ constexpr int kBoltSteps = 6;
 constexpr float kBoltHeight = 420;
 constexpr ULONGLONG kBoltStepMs = 30;
 std::vector<Strike> g_Strikes;
+struct Spark {
+    uint8_t* object;
+    uint32_t id;
+    ULONGLONG until;
+};
+std::vector<Spark> g_Sparks;
 
 // --- Dooku's throws, written out again ---
 uint16_t g_KDHandle = 0, g_LaunchHandle = 0, g_StormHandle = 0;
@@ -286,7 +295,7 @@ bool __fastcall StormCast(uint8_t* self, void*, uint32_t, uint32_t)
 
 int __cdecl RevanSequences(const char* shortName, ClassSequenceFn* fns, int max)
 {
-    if (!BootIsMatch() || _stricmp(shortName, "Serra") != 0 || max < 3)
+    if (_stricmp(shortName, "Serra") != 0 || max < 3)
         return 0;
     int count = 0;
     const auto& customs = CustomCharacters();
@@ -517,7 +526,7 @@ void InstallRevan()
 
 void RevanFrame()
 {
-    if (g_Fighters.empty() && g_Strikes.empty())
+    if (g_Fighters.empty() && g_Strikes.empty() && g_Sparks.empty())
         return;
     const ULONGLONG now = GameTime();
     for (auto it = g_Fighters.begin(); it != g_Fighters.end();) {
@@ -550,6 +559,15 @@ void RevanFrame()
         }
         ++it;
     }
+    for (auto it = g_Sparks.begin(); it != g_Sparks.end();) { // the columns' pieces: away
+        if (now < it->until) {
+            ++it;
+            continue;
+        }
+        if (Live(it->object, it->id))
+            reinterpret_cast<void(__cdecl*)(uint8_t*)>(uintptr_t(0x000A2FE0))(it->object);
+        it = g_Sparks.erase(it);
+    }
     for (auto it = g_Strikes.begin(); it != g_Strikes.end();) {
         if (now < it->at) {
             ++it;
@@ -572,14 +590,18 @@ void RevanFrame()
             const float h = kBoltHeight * float(kBoltSteps - it->step) / float(kBoltSteps);
             const float spark[3] = { it->where[0], it->where[1] + h, it->where[2] };
             BlastLook column;
-            column.effects = kStrikeEffects;
-            column.effectCount = 1;
+            column.effects = kColumnEffects;
+            column.effectCount = std::size(kColumnEffects);
+            uint8_t* made = nullptr;
+            column.made = &made;
             column.sound = it->step == 0 ? "for_lightning" : "";
             column.radius = 1;
             column.push = 0;
             column.damageType = "Electrified";
             column.damage = 0;
             FireBlast(it->owner, spark, column);
+            if (made)
+                g_Sparks.push_back({ made, *reinterpret_cast<uint32_t*>(made + 4), now + kSparkMs });
             ++it->step;
             it->at = now + kBoltStepMs;
             ++it;

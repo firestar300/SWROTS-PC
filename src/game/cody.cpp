@@ -305,6 +305,14 @@ bool IsHelper(const uint8_t* c)
 
 // The opponent a character fights: its own (+0x3B8) when it is a standing character, else the nearest other one
 // standing that is not one of the helpers.
+// The game's "is that character my enemy?" (0x18F3F0, thiscall on the character's AI controller (other, flag)); true
+// without a controller (a duel's).
+bool IsEnemyOf(uint8_t* self, uint8_t* other)
+{
+    uint8_t* brain = self ? At<uint8_t*>(self, kCharacterAI) : nullptr;
+    return !brain || reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint8_t*, int)>(uintptr_t(0x0018F3F0))(brain, nullptr, other, 0);
+}
+
 uint8_t* OpponentOf(uint8_t* character)
 {
     const auto standing = [](uint8_t* c) { return c && At<float>(c, kCharacterHealth) > 0; };
@@ -319,7 +327,7 @@ uint8_t* OpponentOf(uint8_t* character)
     for (uint8_t* c : characters) {
         if (c == character || !standing(c) || IsHelper(c))
             continue;
-        if (HvvActive() && HvvSameSide(c, character))
+        if (HvvActive() ? HvvSameSide(c, character) : !IsEnemyOf(character, c))
             continue;
         const float* q = Position(c);
         const float d = std::hypot(q[0] - p[0], q[2] - p[2]);
@@ -405,8 +413,6 @@ static_assert(std::size(kMoveFns) == kMoveCount, "one function per move");
 
 int __cdecl MoveSequences(const char* shortName, ClassSequenceFn* fns, int max)
 {
-    if (!BootIsMatch())
-        return 0;
     const Kind* kind = nullptr;
     for (const Kind& k : kKinds)
         if (_stricmp(shortName, k.script) == 0 && FindCustomCharacter(k.className))
@@ -440,8 +446,10 @@ void CallSquad(uint8_t* cody, const Kind& kind, bool enemy, ULONGLONG now)
         std::memcpy(m, cody + kCharacterTransform, sizeof m);
         for (int k = 0; k < 3; ++k) // beside him, a step back
             m[12 + k] += m[k] * kHelperSide * float(side) - m[8 + k] * 40.0f;
-        if (rappel || !kind.rappel) // a droid drops in from the same height
+        if (rappel) // on the ground otherwise: a roof would hold them above it
             m[13] += kRappelHeight;
+        else
+            m[13] += 10.0f;
         std::string error;
         uint8_t* clone = SpawnHelper(kind.helper, std::string(), cody, enemy, m, error, kind.helperSkin);
         if (!clone) {
@@ -468,7 +476,8 @@ void CallSquad(uint8_t* cody, const Kind& kind, bool enemy, ULONGLONG now)
 constexpr uint32_t kExplosionClass = 0x0068E760;
 constexpr const char* kShellEffects[] = { "IDS_FX_explosion_med", "IDS_FX_explosion_large06", "IDS_FX_explosion_barrel_small",
     "IDS_FX_explosion_large05", "IDS_FX_flak_explosion01", "IDS_FX_explosion_large", "IDS_FX_Homing_Rocket_Explosion",
-    "IDS_FX_electric_explosion_small", "IDS_FX_flak_explosion03", "IDS_FX_flak_explosion02", "IDS_FX_dust_burst_explosion09" };
+    "IDS_FX_electric_explosion_small", "IDS_FX_flak_explosion03", "IDS_FX_flak_explosion02", "IDS_FX_dust_burst_explosion09",
+    "IDS_FX_FURY_FORCESHOCK", "IDS_FX_FURY_SHOCKWAVE" }; // (the last two in every level)
 struct ShellOf {
     uint8_t* owner;
     const char* damageType; // null: the shell's by distance (EXPLOSION_MEDIUM / _LIGHT)
@@ -491,7 +500,7 @@ void __cdecl ShellHit(uint8_t* shell, uint8_t* target, void*)
             return;
         if (type && owner->second.damage <= 0) // only a look
             return;
-        if (cody && HvvActive() && HvvSameSide(target, cody))
+        if (cody && (HvvActive() ? HvvSameSide(target, cody) : !IsEnemyOf(cody, target)))
             return;
         const float* centre = reinterpret_cast<const float*>(reinterpret_cast<uint8_t*(__fastcall*)(uint8_t*, void*)>(
             uintptr_t(0x000F2280))(shell, nullptr) + 0x30);
@@ -551,6 +560,8 @@ bool FireBlast(uint8_t* owner, const float at[3], const BlastLook& look)
     At<float>(props, 0x3C) = 0.4f;         // lifetime
     props[0x40] = 1;                       // explode once (removed at the end)
     g_ShellOwners[shell] = { owner, look.damageType, look.damage };
+    if (look.made)
+        *look.made = shell;
     if (!reinterpret_cast<bool(__cdecl*)(uint8_t*, void*, const float*, int)>(uintptr_t(0x000A2DE0))(shell, nullptr, m, 1))
         return false;
     reinterpret_cast<void(__fastcall*)(uint8_t*, void*)>((*reinterpret_cast<void* const* const*>(shell))[0xA4 / 4])(shell, nullptr);
