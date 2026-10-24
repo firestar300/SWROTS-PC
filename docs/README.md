@@ -6,7 +6,9 @@
 - [Linux, Steam Deck and handhelds](linux.md): playing through Proton
 - [Settings](settings.md): `settings.ini`: window, graphics, frame rate, developer options
 - [Co-op](coop.md): two players in the story missions: turning it on, controllers, known issues
-- [Controls](controls.md): keyboard, mouse and controllers, `controls.ini`
+- [Controls](controls.md): keyboard, mouse and controllers, `controls.ini`, Commander Cody and the Droid Commander
+- [Heroes vs Villains](research/heroes-vs-villains.md#playing-it): the team mode, from the main menu or the console
+- [Battlefront](battlefront.md): the conquest mode: command posts, tickets, heroes
 - [Debug menu](debug-menu.md): the game's own console, variables and debug displays, and playing
   as any character (class, costume, texture set, body)
 
@@ -20,6 +22,9 @@
 - [Replacing weapons](modding/replacing-weapons.md): lightsaber hilts, worked through with Anakin's Episode III hilt
 - [Replacing music](modding/replacing-music.md): music tracks, their fixed lengths, and a level's own track
 - [Adding versus fighters](modding/adding-versus-fighters.md): a select-screen slot of its own, as Yoda has
+- [Custom characters](modding/custom-characters.md): new fighters from `mods\characters` (model, voice, sabers,
+  Force, intro), in Versus, Heroes vs Villains and the debug menu
+- [Custom maps](modding/custom-maps.md): new maps from `mods\maps` for Versus, Heroes vs Villains and Battlefront
 - [How loading works](modding/how-loading-works.md): level archives and what the port changes
 - [File formats](modding/file-formats.md): PAK, STX, MSH and more
 
@@ -45,7 +50,7 @@ Notes on the game's engine, from its own executable and from related games.
 - [Two players in the story missions](research/coop.md): how the game does co-op, and a second player
   for the campaign
 - [Battlefront](battlefront.md): the conquest mode (command posts, tickets, heroes for points), and how it is built
-- [Heroes vs Villains](research/heroes-vs-villains.md): a 4 against 4 team mode on the developer map (prototype: `hvv`),
-  how it is built and what was tried
+- [Heroes vs Villains](research/heroes-vs-villains.md): the team mode (main menu, `hvv`): how it is built and what
+  was tried
 - [Levels](research/levels.md): how a level is built (the level file, collision brushes, sectors, lights, objects),
   and a developer test map made from one

@@ -41,9 +41,17 @@ Things the Xbox release never had:
 - **Droid Commander.** Cody's Separatist counterpart: a B1 battle droid commander in its yellow markings,
   with a blaster, a duck under the saber, droids dropping in to help and a bombardment, and its own lines.
   See [its controls](docs/controls.md#droid-commander).
+- **Heroes vs Villains.** Teams of heroes against villains in the main menu (Multi Player > Heroes vs
+  Villains), 1 against 1 up to 5 against 5, with lives, intros, a kill feed, points and a podium, on the
+  developer map or a custom map. See [how to play it](docs/research/heroes-vs-villains.md#playing-it).
 - **Battlefront.** A conquest battle in the main menu (Multi Player > Battlefront): clone troopers against
   battle droids, command posts to take and hold, tickets, and heroes bought with points, on the developer
   map or a custom map. See [Battlefront](docs/battlefront.md).
+- **Custom characters and maps.** Drop-in mods add new fighters with their own select-screen slot, model, voice,
+  sabers, Force powers and intro (`mods\characters`), and new maps for Versus, Heroes vs Villains and Battlefront
+  (`mods\maps`). The game is unchanged without them. See [custom characters](docs/modding/custom-characters.md)
+  and [custom maps](docs/modding/custom-maps.md).
+- **Keyboard and mouse button prompts**: the game's prompts show your keys after you use the keyboard or mouse.
 - **Play story levels as anyone, in any costume or body.** Vader in Order 66, Anakin without his
   robe in the Jedi Temple, a 501st clone trooper, Obi-Wan in Anakin's duel outfit: pick a class, a
   costume, a texture set and a body in the debug menu's Characters tab (or `player IAnakin duel`),
@@ -116,6 +124,8 @@ and controller layouts: [controls](docs/controls.md).
 | [Settings](docs/settings.md) | Window, graphics, frame rate, developer options |
 | [Controls](docs/controls.md) | Keyboard, mouse and controllers |
 | [Co-op](docs/coop.md) | Two players in the story missions: how to play, settings, known issues |
+| [Heroes vs Villains](docs/research/heroes-vs-villains.md#playing-it) | The team mode: setting up a match, what's on screen |
+| [Battlefront](docs/battlefront.md) | The conquest mode: command posts, tickets, heroes |
 | [Debug menu](docs/debug-menu.md) | The game's console, variables and debug displays |
 | [Modding](docs/modding/README.md) | Loose-file mods, dumping assets, textures, character swaps |
 | [How it works](docs/architecture.md) | The port's design, for the curious and for contributors |
@@ -146,6 +156,10 @@ and controller layouts: [controls](docs/controls.md).
   character can show at another spot for a moment before it is placed, and some missions expect
   their own character in cutscenes and scripted moments. Vader has no breathing after a live change
   into him in a level without Vader: restart the mission (he then starts the level) to have it.
+
+- Heroes vs Villains, Battlefront and custom content: characters made on Serra's class with a single saber can
+  turn it the wrong way in a saber lock; a custom character's intro or outro now and then does not play; on
+  custom maps the computer's fighters have no paths, so one that cannot get through is moved near its goal.
 
 See the [issue tracker](../../issues) for the current list.
 

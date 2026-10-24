@@ -3,6 +3,58 @@
 What changed in each release of SWROTS-PC, newest first. Downloads are on the
 [releases page](https://github.com/jedijosh920/SWROTS-PC/releases).
 
+## [v0.5.0](https://github.com/jedijosh920/SWROTS-PC/releases/tag/v0.5.0) - 2026-10-24
+
+Heroes vs Villains, Battlefront, Commander Cody and the Droid Commander, and custom characters and maps.
+
+### Added
+
+- **Heroes vs Villains** (main menu: Multi Player > Heroes vs Villains). Teams of heroes against villains, 1 against 1
+  up to 5 against 5, with lives, on the developer map or a custom map. Pick each team's fighters on the Versus select
+  screen; the fighters line up and play their Versus intros, and the winners stand on a podium at the end. A
+  Battlefront-style screen: kill feed, points and killstreaks, assists, the leaderboard (hold Tab / Back), names and
+  health over the fighters' heads, markers on your teammates, and a kill camera when you fall. Settings in
+  `settings.ini` `[HvV]`; more in the debug menu's Heroes vs Villains tab and the console's `hvv`. See
+  [how to play it](https://github.com/jedijosh920/SWROTS-PC/blob/main/docs/research/heroes-vs-villains.md#playing-it).
+- **Battlefront** (main menu: Multi Player > Battlefront). Clone troopers against battle droids: command posts to take
+  and hold, tickets, and heroes bought with points. The computer's troopers attack and defend posts and call their
+  own heroes. You play a trooper with a blaster, a roll or duck and a strike. See the
+  [Battlefront guide](https://github.com/jedijosh920/SWROTS-PC/blob/main/docs/battlefront.md).
+- **Commander Cody**, a new Versus fighter made from the game's own files (the cut playable Cody): the 212th's armour
+  with his helmet's rangefinder, his voice and bust. A blaster against the sabers: he shoots, rolls instead of
+  blocking, and spends his meter on a squad of clones rappelling down or a bombardment. See
+  [his controls](https://github.com/jedijosh920/SWROTS-PC/blob/main/docs/controls.md#commander-cody).
+- **The Droid Commander**, Cody's Separatist counterpart: a B1 battle droid commander with a blaster, a duck under
+  the saber, droids to help and a bombardment.
+- **Custom characters** (`mods\characters\*.ini`): new characters with their own Versus select-screen slot, built on a
+  game class (its moves) with their own model, textures, pictures, HUD portrait, voice lines, sabers (one, two or
+  double-bladed, any colour, own hilt), health, Force powers, intro and outro. Characters on Serra's class can add
+  other duelists' moves: Force lightning, Dooku's grapples and a Force Storm. Installing none changes nothing. See
+  [custom characters](https://github.com/jedijosh920/SWROTS-PC/blob/main/docs/modding/custom-characters.md).
+- **Custom maps** (`mods\maps\<name>\map.ini`): a model, collision boxes, lighting and music of their own, playable as
+  Versus arenas (Select Arena), in Heroes vs Villains and Battlefront (command posts and starts), and with `devmap`.
+  See [custom maps](https://github.com/jedijosh920/SWROTS-PC/blob/main/docs/modding/custom-maps.md).
+- **A community mod pack** with ready-made characters and maps, as a separate download (see the release notes).
+- **Keyboard and mouse button prompts**: the game's prompts, tips and combat chart show your bound keys as key caps
+  after you use the keyboard or mouse, and the Xbox buttons after a controller (`[Controls] ButtonPrompts`).
+- **The developer map**: an empty, lit floor under the sky (`devmap`, or the debug menu's Game tab), the ground for
+  the modes above.
+- The Versus select screen scrolls when it holds more fighters than fit, with arrows at its ends.
+- For modders: the character model format and `tools/meshes/charmsh.py`, level tools (`tools/levels`), event trees,
+  and weapon limits found by modders, in the
+  [modding docs](https://github.com/jedijosh920/SWROTS-PC/blob/main/docs/modding/README.md).
+
+### Fixed
+
+- A spawned Palpatine crashed the game a few seconds into a fight.
+
+### Known issues
+
+- Characters made on Serra's class with a single saber can turn the saber the wrong way in a saber lock.
+- Now and then a custom character's intro or outro may not play.
+- On custom maps the computer's fighters have no paths: one that cannot get through to its target or post is moved
+  near it.
+
 ## [v0.4.0](https://github.com/jedijosh920/SWROTS-PC/releases/tag/v0.4.0) - 2026-10-09
 
 Two-player co-op in the story missions.
