@@ -74,6 +74,7 @@ constexpr float kSummonCost = 500, kBombardCost = 400;
 // his dodge costs nothing (a Jedi's block costs no Force either), one a kDodgeWaitMs at most, and no hit lands on him
 // while he rolls (kRollGuardMs: a roll in time beats a combo, as a block does)
 constexpr ULONGLONG kDodgeWaitMs = 700, kRollGuardMs = 650;
+constexpr ULONGLONG kPressKeepMs = 350;
 constexpr ULONGLONG kShotIntervalMs = 400;
 constexpr ULONGLONG kHelperLifeMs = 25000;
 constexpr ULONGLONG kComputerDodgeWaitMs = 1200; // the computer's Cody: one look for a dodge in this long
@@ -128,6 +129,7 @@ struct Kit {
     bool summon = false;  // asked for, made in CodyFrame
     bool bombard = false; // likewise
     int roll = 0;         // likewise: 1 left, 2 right, 3 the stick's side
+    ULONGLONG summonAsked = 0, bombardAsked = 0, rollAsked = 0; // presses not done yet
 };
 std::unordered_map<uint8_t*, Kit> g_Kits;
 
@@ -651,18 +653,29 @@ bool BodyGenerator(const std::string& lowerName, std::vector<uint8_t>& data)
     return made;
 }
 
-// Whether the script's character may start something now: its current sequence lets it branch (the sequence's
-// record +0x30 bit 1, as the decision-frame test 0x173D70 reads it, without that test's own bookkeeping). Not while
-// gripped, knocked down, hit, rolling or falling.
+// Whether the script's character may start something now: not while its current sequence (its state's record, +0xC
+// its name) is one it is caught in (a hit's reaction R1_.. to R4_.., a finisher's R_.., a fall, being gripped,
+// stunned or shocked, dying, cut) or one of his own (a roll, a signal, his intro or outro). (The record's +0x30 bit 1,
+// which the decision test 0x173D70 reads, is clear while running, strafing or idle and set in those: no help.)
 bool CanAct()
 {
     uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(kScriptCharacterContext));
     uint8_t* state = scripts ? At<uint8_t*>(scripts, 0x70) : nullptr;
     if (!state)
-        return false;
+        return true;
     uint8_t* record = reinterpret_cast<uint8_t*(__fastcall*)(uint8_t*, void*)>(
         (*reinterpret_cast<void* const* const*>(state))[1])(state, nullptr);
-    return record && (At<uint32_t>(record, 0x30) >> 1 & 1) != 0;
+    const char* name = record ? At<const char*>(record, 0xC) : nullptr;
+    if (!name)
+        return true;
+    if (name[0] == 'R' && ((name[1] >= '1' && name[1] <= '9' && name[2] == '_') || name[1] == '_'))
+        return false;
+    static const char* const kCaught[] = { "Fall", "ForceGrasp", "Stun", "Shock", "Death", "Dismember", "KD_", "HitRe",
+        "Rappel", "Cody_" };
+    for (const char* part : kCaught)
+        if (std::strstr(name, part))
+            return false;
+    return true;
 }
 
 } // namespace
@@ -730,28 +743,15 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         }
         return;
     }
-    if (!free) {
-        Layer(kit, false);
-        kit.lastBlock = Held(kButtonDodge);
-        return;
-    }
-    // his clones (one squad at a time), the bombardment
-    if (Pressed(kButtonPush) && !squadOut && !kit.summon && meter >= kSummonCost) {
-        meter -= kSummonCost;
-        kit.summon = true;
-        Say(character, "TKE", "CLC013"); // "Bring up the reinforcements!"
-    }
-    if (Pressed(kButtonCritical) && !kit.bombard && meter >= kBombardCost) {
-        meter -= kBombardCost;
-        kit.bombard = true;
-        Say(character, "TKE", "CMC915"); // "Concentrate fire on the target!"
-    }
-    // the roll: on the press, where the stick points on the screen (its port's stick, by the camera's right and
-    // forward as drawn), the side nearer it once he has turned to his opponent (CodyFrame)
+    // his presses, kept a moment (kPressKeepMs) when he cannot act yet: done as soon as he can, as the game's own
+    // moves take a press made just before
+    if (Pressed(kButtonPush))
+        kit.summonAsked = now;
+    if (Pressed(kButtonCritical))
+        kit.bombardAsked = now;
     const bool dodge = Held(kButtonDodge);
-    if (dodge && !kit.lastBlock && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs) {
-        kit.lastDodge = now;
-        kit.roll = 3; // a side to be chosen
+    if (dodge && !kit.lastBlock) { // the roll: where the stick points on the screen at the press
+        kit.rollAsked = now;
         kit.rollDir[0] = kit.rollDir[1] = 0;
         float x = 0, y = 0, view[16], fov = 0;
         if (input::LeftStick(At<int32_t>(character, 0x43C), x, y) && GameRenderedView(view, fov) && std::hypot(x, y) > 0.3f) {
@@ -760,6 +760,32 @@ void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)
         }
     }
     kit.lastBlock = dodge;
+    const auto fresh = [&](ULONGLONG& asked) {
+        const bool yes = asked && now - asked <= kPressKeepMs;
+        if (yes)
+            asked = 0;
+        return yes;
+    };
+    if (!free) {
+        Layer(kit, false);
+        return;
+    }
+    // his clones (one squad at a time), the bombardment
+    if (kit.summonAsked && !squadOut && !kit.summon && meter >= kSummonCost && fresh(kit.summonAsked)) {
+        meter -= kSummonCost;
+        kit.summon = true;
+        Say(character, "TKE", "CLC013"); // "Bring up the reinforcements!"
+    }
+    if (kit.bombardAsked && !kit.bombard && meter >= kBombardCost && fresh(kit.bombardAsked)) {
+        meter -= kBombardCost;
+        kit.bombard = true;
+        Say(character, "TKE", "CMC915"); // "Concentrate fire on the target!"
+    }
+    // the roll, the side nearer the stick once he has turned to his opponent (CodyFrame)
+    if (kit.rollAsked && !kit.roll && now - kit.lastDodge >= kDodgeWaitMs && fresh(kit.rollAsked)) {
+        kit.lastDodge = now;
+        kit.roll = 3;
+    }
     // the blaster
     if (!Held(kButtonHeavy)) {
         Layer(kit, false);
