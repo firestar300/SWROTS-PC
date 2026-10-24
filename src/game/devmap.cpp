@@ -83,6 +83,8 @@ void BuildDuel(std::vector<uint8_t>& data)
 // the line between the fighters, as far as they are apart, on the side that sees them, nearer them where a wall stands
 // behind it (the map's collision boxes), looking at their middle.
 constexpr float kDuelEyeHeight = 75, kDuelFocusHeight = 45, kDuelLowest = 30;
+constexpr float kDuelEyeRoom = 25; // the room the eye keeps from a wall
+constexpr float kDuelNearest = 70; // and from a fighter
 ULONGLONG g_DuelOwnUntil = 0;
 float g_DuelEye[3] = {};
 bool g_DuelEyeSet = false;
@@ -142,9 +144,13 @@ bool DuelCamera(float m[16], float)
     const float b[3] = { q ? q[0] : p[0], (q ? q[1] : p[1]) + kDuelFocusHeight, q ? q[2] : p[2] };
     const float focus[3] = { (a[0] + b[0]) / 2, floorY + kDuelFocusHeight, (a[2] + b[2]) / 2 };
     const float eye[3] = { m[12], m[13], m[14] };
+    // a little behind the game's eye (its forward row reversed): an eye right at a wall shows the wall's inside
+    const float behind[3] = { eye[0] - m[8] * kDuelEyeRoom, eye[1] - m[9] * kDuelEyeRoom, eye[2] - m[10] * kDuelEyeRoom };
     const ULONGLONG now = GetTickCount64();
     const bool gameGood = eye[1] > floorY + kDuelLowest && CustomMapLineOfSight(*g_Map, a, eye) &&
-        CustomMapLineOfSight(*g_Map, b, eye);
+        CustomMapLineOfSight(*g_Map, b, eye) && CustomMapLineOfSight(*g_Map, focus, behind) &&
+        // not at a fighter's shoulder (the game fades a character that near the eye)
+        std::hypot(eye[0] - a[0], eye[2] - a[2]) > kDuelNearest && std::hypot(eye[0] - b[0], eye[2] - b[2]) > kDuelNearest;
     if (gameGood && now >= g_DuelOwnUntil) {
         g_DuelEyeSet = false;
         return false;
@@ -161,7 +167,7 @@ bool DuelCamera(float m[16], float)
         dx /= apart;
         dz /= apart;
     }
-    const float wanted = std::clamp(apart * 0.8f + 170, 200.0f, 460.0f);
+    const float wanted = std::clamp(apart * 0.7f + 150, 180.0f, 400.0f);
     float best = -1, bestSide = g_DuelSide;
     for (float side : { g_DuelSide, -g_DuelSide }) { // the side it was on first: no swapping while it sees them
         const float direction[3] = { -dz * side, (kDuelEyeHeight - kDuelFocusHeight) / wanted, dx * side };
@@ -172,7 +178,7 @@ bool DuelCamera(float m[16], float)
         }
     }
     g_DuelSide = bestSide;
-    const float d = std::max(best, 60.0f);
+    const float d = std::max(best - kDuelEyeRoom, 60.0f); // off the wall it found
     const float target[3] = { focus[0] - dz * bestSide * d, focus[1] + (kDuelEyeHeight - kDuelFocusHeight) * d / wanted,
         focus[2] + dx * bestSide * d };
     if (!g_DuelEyeSet) {
@@ -181,6 +187,8 @@ bool DuelCamera(float m[16], float)
     }
     for (int k = 0; k < 3; ++k) // eased: no jumps
         g_DuelEye[k] += (target[k] - g_DuelEye[k]) * 0.15f;
+    if (!CustomMapLineOfSight(*g_Map, focus, g_DuelEye)) // easing through a wall: a cut instead
+        std::copy(target, target + 3, g_DuelEye);
     LookAt(g_DuelEye, focus, m);
     return true;
 }

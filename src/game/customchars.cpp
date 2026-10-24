@@ -23,6 +23,7 @@
 #include "core/patch.h"
 #include "game/classsetup.h"
 #include "game/devmap.h"
+#include "game/eventtree.h"
 #include "game/game.h"
 #include "game/menus.h"
 #include "kernel/kernel.h"
@@ -572,6 +573,29 @@ void AddForceRows(std::vector<uint8_t>& data)
         data.insert(data.end(), { '\r', '\n' });
     data.insert(data.end(), added.begin(), added.end());
     LOG_INFO("Custom characters: %s gets %d Force rows from %s", kForceBaseTable, count, g_ForceRowsFrom.c_str());
+}
+
+// Its Force sounds: a character's sounds are its event tree's (eventtree.h), the Jedi Brute's (s_jdbrute) without
+// Force sounds. Vader's Force entries are added to it as it loads (his Force sequences and animations are the Jedi
+// Brute's too); the game's brutes never play those, so they sound as before.
+constexpr const char* kForceBaseTree = "meshes\\chars\\common\\s_jdbrute.xml";
+constexpr const char* kForceDonorTree = "meshes\\chars\\common\\s_vader.xbl_xml";
+constexpr const char* kForceDonorTreeSource = "meshes\\chars\\common\\s_vader.xml";
+
+void AddForceSounds(std::vector<uint8_t>& data)
+{
+    std::vector<uint8_t> donor;
+    const size_t before = data.size();
+    if (!ReadDiscResource(kForceDonorTree, donor) && !ReadDiscResource(kForceDonorTreeSource, donor)) {
+        LOG_WARN("Custom characters: Vader's event tree is not on the disc; Maul's Force stays silent");
+        return;
+    }
+    if (!AppendEventEntries(data, donor, &VaderForceEntry)) {
+        LOG_WARN("Custom characters: Vader's Force sounds could not be added to the Jedi Brute's event tree (%zu, %zu bytes)",
+            data.size(), donor.size());
+        return;
+    }
+    LOG_INFO("Custom characters: %s gets Vader's Force sounds (%zu -> %zu bytes)", kForceBaseTree, before, data.size());
 }
 
 void __cdecl BruteRulesHook(uint8_t* inst, uint8_t* classObject)
@@ -1272,6 +1296,8 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
             ch = char(tolower(static_cast<unsigned char>(ch)));
         g_ForceRowsFrom = table; // one table per base: the first character's Force class
         RegisterResourcePatch(kForceBaseTable, &AddForceRows);
+        if (_stricmp(c.forceFrom.c_str(), "IVader") == 0) // the sounds chosen for that pair
+            RegisterResourcePatch(kForceBaseTree, &AddForceSounds);
         break;
     }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kJediSetup)), kJediSetupBytes, sizeof kJediSetupBytes) == 0) {
