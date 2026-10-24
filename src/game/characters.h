@@ -141,6 +141,10 @@ bool RemoveSpawnedCharacter(uint8_t* character);
 // texture set, body; the player's own class when none is chosen): a new character takes over the
 // controls, the camera and the level's references to the player. False with `error` set when it cannot.
 bool ReplacePlayer(std::string& error);
+// Resolves every camera focus list again (TCamComPrimaryFocusList, slot 5): their "the player" entries take the
+// current player 1. After a player change made while the camera followed something else (a grapple's camera), so the
+// camera follows the new player. Returns how many lists.
+int RefocusCameraOnPlayer();
 
 // After the port activates a character the level holds (vfunc +0xB4): puts back what its class script had set that
 // the activation undid (Grievous's second arms' sabers, switched off with those arms hidden).

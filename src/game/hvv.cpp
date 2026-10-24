@@ -1651,8 +1651,10 @@ void HvvFrame()
             Shield(me, now);
             SetIgnoredByAI(player, false);
             input::HoldPlayerInput(false);
+            // the camera on the new body (a change made during a grapple's camera left it on the old one)
+            const int lists = RefocusCameraOnPlayer();
             g_BackAt = now;
-            LOG_INFO("HvV: you came back (%d lives left)", g_Lives[SideOf(g_Player)]);
+            LOG_INFO("HvV: you came back (%d lives left; %d camera lists on you)", g_Lives[SideOf(g_Player)], lists);
         }
     }
 

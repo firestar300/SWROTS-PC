@@ -1605,6 +1605,36 @@ bool BodyBoundToAnotherClass(uint8_t* character)
     return it != g_BodyClasses.end() && it->second != CharacterType(character);
 }
 
+bool ResolveFocusList(uint8_t* object)
+{
+    __try {
+        // an object (not a stray value): its targets' array plausible
+        const int capacity = *reinterpret_cast<int*>(object + 0x18), count = *reinterpret_cast<int*>(object + 0x1C);
+        if (*reinterpret_cast<uint32_t*>(object) != kFocusListVtable || capacity < count || count < 0 || count > 16 ||
+            !*reinterpret_cast<void**>(object + 0x20))
+            return false;
+        const auto resolve = reinterpret_cast<void(__fastcall*)(uint8_t*, void*, uint32_t)>(
+            (*reinterpret_cast<void* const* const*>(object))[5]);
+        resolve(object, nullptr, *reinterpret_cast<uint32_t*>(object + 4));
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+int RefocusCameraOnPlayer()
+{
+    int resolved = 0;
+    std::vector<uintptr_t> found(4096);
+    for (const auto& [base, size] : kernel::GameMemoryRegions()) {
+        const size_t n = CollectCandidates(base, size, kFocusListVtable, 1, kFocusListVtable, kFocusListVtable,
+            found.data(), found.size());
+        for (size_t i = 0; i < n; ++i)
+            resolved += ResolveFocusList(reinterpret_cast<uint8_t*>(found[i])) ? 1 : 0;
+    }
+    return resolved;
+}
+
 bool ReplacePlayer(std::string& error)
 {
     if (!PlayerAlive()) {
