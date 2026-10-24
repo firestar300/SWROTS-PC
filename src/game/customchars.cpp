@@ -861,7 +861,10 @@ uint8_t* __fastcall CreateCustom(uint8_t* info, void*)
     if (p->list.empty() || baseList != p->baseList)
         BuildList(*p, baseList);
     *reinterpret_cast<uint8_t**>(character + kCharacterVariants) = p->list.data();
-    if (p->custom->hasSaber)
+    // only a Jedi has the colour pointer (IsA, vfunc +4, the IJedi type 0x249950): +0xF20 is past a clone's end
+    const auto isA = reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint32_t)>(
+        (*reinterpret_cast<void* const* const*>(character))[1]);
+    if (p->custom->hasSaber && isA(character, nullptr, 0x00249950))
         *reinterpret_cast<const float**>(character + kCharacterSaberColor) = p->custom->saber;
     g_Made.push_back(character);
     return character;

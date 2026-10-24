@@ -573,6 +573,31 @@ __declspec(naked) void CompareChosenStub()
     }
 }
 
+// The fighter creation gives a fighter its slot's saber colour (0x27B872: mov [edi + 0xF20], ecx, when the slot has a
+// colour): only a Jedi has that field (IsA the IJedi type 0x249950, vfunc +4); a clone's object ends before it.
+constexpr uint32_t kFighterSaberStore = 0x0027B872;
+constexpr uint8_t kFighterSaberStoreBytes[] = { 0x89, 0x8F, 0x20, 0x0F, 0x00, 0x00 };
+
+void __stdcall FighterSaberStore(uint8_t* fighter, const float* colour)
+{
+    const auto isA = reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint32_t)>(
+        (*reinterpret_cast<void* const* const*>(fighter))[1]);
+    if (isA(fighter, nullptr, 0x00249950))
+        *reinterpret_cast<const float**>(fighter + 0xF20) = colour;
+}
+
+__declspec(naked) void FighterSaberStoreStub()
+{
+    __asm {
+        pushad
+        push ecx
+        push edi
+        call FighterSaberStore
+        popad
+        ret
+    }
+}
+
 void __fastcall DuelSetupHook(void* manager, void* edx)
 {
     BuildDuelClasses();
@@ -1112,6 +1137,9 @@ void InstallRoster()
             &g_DuelClasses[0] : &g_DuelClasses[1]);
     for (uint32_t site : kChosenCompareSites)
         PatchCall(site, reinterpret_cast<const void*>(&CompareChosenStub), 5);
+    if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kFighterSaberStore)), kFighterSaberStoreBytes,
+            sizeof kFighterSaberStoreBytes) == 0)
+        PatchCall(kFighterSaberStore, reinterpret_cast<const void*>(&FighterSaberStoreStub), sizeof kFighterSaberStoreBytes);
     g_OriginalDuelSetup = reinterpret_cast<DuelSetupFn>(
         Detour(kDuelSetup, kDuelSetupPrologue, sizeof(kDuelSetupPrologue), reinterpret_cast<const void*>(&DuelSetupHook)));
     std::memcpy(g_SaberColours, reinterpret_cast<const void*>(uintptr_t(kSaberColours)), kFighterCount * 2 * 3 * sizeof(float));
