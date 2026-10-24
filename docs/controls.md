@@ -83,10 +83,11 @@ again over time (about 35 a second, 1000 when full) and pays for everything beyo
 |---|---|---|---|
 | Y (Triangle), held | Mouse 2, held | fires his blaster | 15 a shot |
 | X (Square) | Mouse 1 | rifle butt | - |
-| LT (L2), with the stick left or right | Shift | rolls aside (a clone cannot block) | 150 |
+| White (L1), with the stick left or right | Q | rolls aside, turned to his opponent (a clone cannot block) | 150 |
 | RT (R2) | F | calls two of his clones: they rappel down beside him and fight for 25 seconds, marked "CODY'S CLONE" (blue when they are yours, red when they are against you); one squad at a time | 500 |
 | B (Circle) | E | a bombardment: four shells fall around his opponent, knocking down and hurting his enemies only | 400 |
 
-He waves his clones in and signals the strike, and says so. His specials wait until the duel's intro is over. The
+He waves his clones in and signals the strike, and says so; in Versus he has an intro and a win of his own ("Ready
+weapons.", "Target eliminated."). His specials wait until the duel's intro is over. The
 computer's Cody uses the same: he calls his squad and his bombardments when his opponent is near and rolls away from
 a saber now and then, from the same meter.
