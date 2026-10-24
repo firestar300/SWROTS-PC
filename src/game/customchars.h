@@ -32,6 +32,7 @@ struct CustomCharacter {
     int blades = 0;          // its saber (Blades=): 0 the base's, 1 single, 2 double-bladed, 3 dual (two sabers)
     float scale = 1.0f;      // its size (Scale=), 1 the base's
     float force = -1.0f;     // its Force (Force=, the most it holds; Anakin's is 1000), negative: the base's
+    float health = -1.0f;    // its health (Health=; Anakin's 1000, the Jedi Brute's 220), negative: the base's
     // Force powers on a base whose controls have none (ForceFrom=IVader: the Jedi's Force controls, as Vader's; the
     // Jedi Brute's): which ones (ForcePowers=, the Jedi's defaults when empty: push, grip, saber throw, heal)
     bool forceControls = false;

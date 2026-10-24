@@ -40,6 +40,7 @@ Mesh=luke\luke           ; its body, under meshes\chars, without .msh
 Saber=0 255 0            ; its saber's colour, 0-255 each (optional; 0 255 0 is the game's own green)
 Blades=single            ; its saber: single, double (double-bladed) or dual (two sabers) (optional; the base's)
 Scale=1                  ; its size (optional; 0.86 makes a Jedi Brute body about as tall as Vader)
+Health=1000              ; its health (optional; the base's: the Jedi Brute 220, Anakin 1000)
 Force=1000               ; the Force it holds (optional; the base's: the Jedi Brute has none, Anakin 1000)
 ForceFrom=IVader         ; Force controls on a base without them (optional; the Jedi Brute so far: push, grip by
                          ; holding the push, saber throw, heal, as Vader's)

@@ -373,6 +373,24 @@ void ForceRules(uint8_t* inst, uint8_t* classObject, const CustomCharacter& cust
 constexpr uint32_t kBruteSetForceCall = 0x003DA43C;
 constexpr uint32_t kSetForce = 0x00177AE0;
 
+// Its health, the same way: the Jedi Brute's script sets 220 (0x177AC0 (health): the script's character's vfunc
+// +0x380), called at 0x3DA433.
+constexpr uint32_t kBruteSetHealthCall = 0x003DA433;
+constexpr uint32_t kSetHealth = 0x00177AC0;
+
+void __cdecl BruteSetHealthHook(float health)
+{
+    __try {
+        uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(kScriptCharacter));
+        uint8_t* character = scripts ? *reinterpret_cast<uint8_t**>(scripts + 0x68) : nullptr;
+        const CustomCharacter* custom = character ? CustomCharacterOf(character) : nullptr;
+        if (custom && custom->health > 0)
+            health = custom->health;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    reinterpret_cast<void(__cdecl*)(float)>(uintptr_t(kSetHealth))(health);
+}
+
 void __cdecl BruteSetForceHook(float force, float most)
 {
     __try {
@@ -606,6 +624,8 @@ void ReadCharacters(const std::wstring& mods)
         c.scale = std::clamp(float(atof(Profile(file, L"Scale", L"1").c_str())), 0.5f, 2.0f);
         const std::string force = Profile(file, L"Force");
         c.force = force.empty() ? -1.0f : std::clamp(float(atof(force.c_str())), 0.0f, 10000.0f);
+        const std::string health = Profile(file, L"Health");
+        c.health = health.empty() ? -1.0f : std::clamp(float(atof(health.c_str())), 1.0f, 100000.0f);
         c.forceControls = !Profile(file, L"ForceFrom").empty();
         {
             const std::string powers = Upper(Profile(file, L"ForcePowers"));
@@ -853,6 +873,13 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
             continue;
         g_SetColorOriginals[i] = reinterpret_cast<SetColorFn>(uintptr_t(*slot));
         PatchBytes(uintptr_t(slot), &hook, 4);
+    }
+    {
+        uint8_t call[5] = { 0xE8 };
+        const int32_t rel = int32_t(kSetHealth) - int32_t(kBruteSetHealthCall + 5);
+        std::memcpy(call + 1, &rel, 4);
+        if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kBruteSetHealthCall)), call, 5) == 0)
+            PatchCall(kBruteSetHealthCall, reinterpret_cast<const void*>(&BruteSetHealthHook), 5);
     }
     {
         uint8_t call[5] = { 0xE8 };
