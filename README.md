@@ -33,6 +33,11 @@ Things the Xbox release never had:
   disc kept for him; always unlocked, and Random can pick him. No settings or debug options needed.
 - **Sith Yoda.** In Yoda against Yoda, player 2 is a dark Yoda with a red saber, as the game's own
   fighters get a different look against themselves.
+- **Commander Cody in Versus and Heroes vs Villains.** The playable Cody the game cut, made from its own
+  files: the 212th's armour with his helmet's rangefinder, his voice, his select-screen bust. A blaster
+  against the sabers: he shoots, rolls out of the way instead of blocking, and spends his meter on a
+  squad of clones rappelling down beside him or a bombardment on his opponent. The computer's Cody does
+  the same. See [his controls](docs/controls.md#commander-cody).
 - **Play story levels as anyone, in any costume or body.** Vader in Order 66, Anakin without his
   robe in the Jedi Temple, a 501st clone trooper, Obi-Wan in Anakin's duel outfit: pick a class, a
   costume, a texture set and a body in the debug menu's Characters tab (or `player IAnakin duel`),

@@ -34,6 +34,8 @@
 #include "game/customchars.h"
 #include "game/devmap.h"
 #include "game/hvv.h"
+#include "game/meshedit.h"
+#include "game/resources.h"
 
 namespace swrots::game {
 
@@ -398,6 +400,32 @@ void FireShell(uint8_t* cody, uint8_t* target)
     }
 }
 
+// --- His helmet ---
+// Cody's helmet (his select bust, his portrait) is the Phase II trooper's with a rangefinder: a stalk rising past the dome
+// from a housing over his right ear. His body is the 212th's (meshes\chars\clonetrooper\hordetrooper.msh) with the two
+// added to the helmet's group (headSG, skinned to the head), made at load under a name of his own, so the other clones
+// keep theirs; the engine builds its animation binding as for any new body (the same skeleton). Sizes in model units,
+// the texel each part takes its colour from in the 128-texel body texture (the visor's dark grey, the dome's white).
+constexpr const char* kBodySource = "meshes\\chars\\clonetrooper\\hordetrooper.msh";
+constexpr const char* kBody = "meshes\\chars\\clonetrooper\\hordetrooper_cody.msh";
+const std::vector<MeshBox> kRangefinder = {
+    { { 3.9f, 67.0f, -0.4f }, { 5.0f, 69.4f, 1.5f }, { 30.5f, 109.5f } },   // the housing over the ear
+    { { 4.6f, 69.2f, 0.25f }, { 4.95f, 75.6f, 0.65f }, { 24.5f, 97.5f } },  // the stalk
+};
+
+bool BodyGenerator(const std::string& lowerName, std::vector<uint8_t>& data)
+{
+    if (lowerName != kBody || !ReadDiscResource(kBodySource, data))
+        return false;
+    std::string report;
+    const bool made = AddMeshBoxes(data, "headSG", kRangefinder, 128, report);
+    if (made)
+        LOG_INFO("Cody: his helmet's rangefinder made (%s)", report.c_str());
+    else
+        LOG_WARN("Cody: his helmet could not be made (%s)", report.c_str());
+    return made;
+}
+
 } // namespace
 
 void InstallCody()
@@ -408,8 +436,10 @@ void InstallCody()
     g_ShellOwners.clear();
     for (OwnMove& move : g_Moves)
         move.handle = 0;
-    if (FindCustomCharacter("ICody"))
-        AddClassSequences(&MoveSequences);
+    if (!FindCustomCharacter("ICody"))
+        return;
+    AddClassSequences(&MoveSequences);
+    RegisterResourceGenerator(&BodyGenerator);
 }
 
 void CloneKitFrame(uint8_t* script, uint8_t* instance, uint8_t* character)

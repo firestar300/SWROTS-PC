@@ -73,3 +73,20 @@ How it works (`src/game/prompts.cpp`): every button icon is a 32x32 picture of t
 interface (vtable 0x561A30: load 0x1F650, release 0x1F5E0, draw 0x1F040) or taken from its handle by the menus'
 picture draw (0x2049F0); the port knows which handle is which icon from its file name and draws the key's cap in
 its place, and puts the caps into the tips' icon table (0x7F0608, whose sizes the tips' layout reads).
+
+## Commander Cody
+
+Cody (Versus and Heroes vs Villains) has a blaster, not a saber, and a meter where a Jedi's Force bar is. It fills
+again over time (about 35 a second, 1000 when full) and pays for everything beyond the rifle butt:
+
+| Pad (PlayStation) | Keyboard and mouse (default) | What he does | Meter |
+|---|---|---|---|
+| Y (Triangle), held | Mouse 2, held | fires his blaster | 15 a shot |
+| X (Square) | Mouse 1 | rifle butt | - |
+| LT (L2), with the stick left or right | Shift | rolls aside (a clone cannot block) | 150 |
+| RT (R2) | F | calls two of his clones: they rappel down beside him and fight for 25 seconds, marked "CODY'S CLONE" (blue when they are yours, red when they are against you); one squad at a time | 500 |
+| B (Circle) | E | a bombardment: four shells fall around his opponent, knocking down and hurting his enemies only | 400 |
+
+He waves his clones in and signals the strike, and says so. His specials wait until the duel's intro is over. The
+computer's Cody uses the same: he calls his squad and his bombardments when his opponent is near and rolls away from
+a saber now and then, from the same meter.

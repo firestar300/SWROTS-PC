@@ -1160,7 +1160,7 @@ void AddBuiltInCharacters()
     c.title = "CLONE COMMANDER";
     c.base = "ICloneTrooper";
     c.costume = "Cody";
-    c.mesh = "clonetrooper\\hordeTrooper";
+    c.mesh = "clonetrooper\\hordeTrooper_cody"; // the 212th's body with his helmet's rangefinder (cody.cpp)
     c.code = "CMC";
     c.speaker = "Commander Cody";
     c.speakerKey = "CommanderCody"; // the game's own text

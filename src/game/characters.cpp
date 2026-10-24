@@ -51,7 +51,8 @@ bool MeshOnDisc(const char* mesh)
     if (!mesh)
         return false;
     const std::string file = Lower(std::string("meshes\\chars\\") + mesh + ".msh");
-    return DiscHasResource(file) || HasLooseResource(file); // a mod's own body counts too
+    // a mod's own body counts too, and one the port makes (written to cache\disc: a built-in fighter's, Cody's)
+    return DiscHasResource(file) || HasLooseResource(file) || MakeGeneratedResource(file);
 }
 
 // A costume list's records, up to the first null name.
