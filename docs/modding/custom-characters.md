@@ -48,6 +48,8 @@ ForceFrom=IVader         ; Force controls on a base without them (optional; the 
 ForcePowers=Push Grip SaberThrow Heal ; which (optional; Lightning too if listed)
 Intro=IVader             ; whose Versus intro and outro it plays (optional; the base's): IAnakin, ICinDrallig, IDooku,
                          ; IMace, IObiwan, IOldObiwan, ISerra or IVader
+IntroAnimation=GBguard_Atk_CombinedV1_Call ; its Versus intro is this animation of its base's instead (optional;
+IntroSpeed=1.2           ; the Jedi Brute's twirl), at this speed (optional; 1)
 Side=Hero                ; Hero or Villain: its side in Heroes vs Villains by default
 Speaker=Luke             ; its name in subtitles (optional; the name's first word)
 Code=                    ; whose lines it says, a dialogue speaker code such as AKN or OBW (optional; the base's)
@@ -182,6 +184,15 @@ functions are added to the base class's own when the class is set up (src/game/c
 own, before its end marker, so each gets a record as the class's own do; they are handed a scratch class object,
 since the handle slot they write would be one of the base's own), its animations are declared in the base class's
 animation folder (the class finds its animations only there), and the duel asks for the duelist's name.
+
+With `IntroAnimation=` its intro is one of its base's own animations instead (Darth Maul: the Jedi Brute's saber
+twirl, `GBguard_Atk_CombinedV1_Call`, which the brute plays as its "Flourish"), played as a duelist's intro is: a
+sequence `<costume>_Intro` of the port's (on duel maps only, like the duelists' own), whose first frame does what
+Vader's intro's does and says the intro line. It is no attack (no attack-table row, no hit): the character stays where
+it stands. The outro and the cameras stay `Intro=`'s.
+
+A duelist's intro and outro change the character's size (Vader's grows him to 1.1 and back, 0x178FD0): a custom
+character's changes are relative to its `Scale=`, so it keeps its own size.
 
 Its line in them is its `INT` line (intro) or `WIN` line (outro) when it has them, else a `TNT` or `KIL` line of its
 own, else the base speaker's: with `Intro=`, the base's speaker has no lines for the Versus context, so the line is

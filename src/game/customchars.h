@@ -41,6 +41,8 @@ struct CustomCharacter {
     int forcePowers = -1;    // bits: 1 push, 2 grip, 4 saber throw, 8 lightning, 16 heal; -1 the defaults
     int intro = -1;          // whose Versus intro and outro it plays (Intro=, a duelist: its animations, line timing and
                              // cameras), an index into the port's duelists; -1 the base's own
+    std::string introAnimation; // its intro is this animation of its base's instead (IntroAnimation=, e.g. the Jedi
+    float introSpeed = 1.0f;    // Brute's twirl), played as a duelist's intro is (no attack), at this speed
     int side = 0;            // 0 hero, 1 villain (Heroes vs Villains' default side)
     std::string hudFace;     // the HUD portrait shown for it (a donor's path, its picture served: see customchars.cpp)
     std::string face;        // its HUD portrait's path (interfc\hud_b\hud_face_<costume>01), when the mod has one

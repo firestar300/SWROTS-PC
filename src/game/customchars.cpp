@@ -333,6 +333,28 @@ bool __fastcall JediSetupHook(uint8_t* character, void*)
     return result;
 }
 
+// A script's size change of its character (0x178FD0, cdecl (scale, frames): at once (+0x194) or eased over the frames
+// (+0x2C0 the target, +0x2C4 the time)): Vader's duel intro grows him to 1.1 and back to 1. A custom character's
+// size (Scale=) is its 1: the change is relative to it, so another duelist's intro keeps its size.
+constexpr uint32_t kScriptSetScale = 0x00178FD0;
+constexpr uint8_t kScriptSetScaleBytes[] = { 0x8B, 0x44, 0x24, 0x08, 0x85, 0xC0 };
+
+void __cdecl ScriptSetScale(float scale, int frames)
+{
+    uint8_t* scripts = *reinterpret_cast<uint8_t**>(uintptr_t(0x006943CC)); // [..] +0x68: the script's character
+    uint8_t* character = scripts ? *reinterpret_cast<uint8_t**>(scripts + 0x68) : nullptr;
+    if (!character)
+        return;
+    if (const CustomCharacter* custom = CustomCharacterOf(character))
+        scale *= custom->scale;
+    if (!frames) {
+        *reinterpret_cast<float*>(character + kObjectScale) = scale;
+        return;
+    }
+    *reinterpret_cast<float*>(character + 0x2C0) = scale;
+    *reinterpret_cast<float*>(character + 0x2C4) = float(frames) * *reinterpret_cast<const float*>(uintptr_t(0x00645EA4));
+}
+
 // Force controls for a base without them. Every Jedi script class has the Force sequences (the shared Jedi set-up:
 // their handles at the same places in every class object, e.g. Force push's at +0x119E), but a class's player rules
 // decide what the buttons do: each class's StateManager calls its own (cdecl (script instance, class object)); the
@@ -567,28 +589,83 @@ template <int... K> constexpr std::array<ClassSequenceFn, sizeof...(K)> IntroFns
 }
 constexpr auto kIntroFns = IntroFns(std::make_integer_sequence<int, kMaxIntroFns>());
 
+// A custom character's own intro (IntroAnimation=): a sequence "<costume>_Intro" playing one of its base's animations
+// the way a duelist's intro does (Vader_Intro, 0x48A990: optional, required on duel maps ("DuelMap"); at its first
+// frame 0x38A140 (instance, class object, 2, 2)), its line said as it starts. Nothing else: an attack's animation
+// played so is no attack (no attack-table row, no hit).
+struct OwnIntro {
+    std::string name, animation;
+    float speed = 1.0f;
+    uint16_t handle = 0;
+};
+constexpr int kMaxOwnIntros = 8;
+OwnIntro g_OwnIntros[kMaxOwnIntros];
+constexpr uint32_t kSetup = 0x006965D8;
+const char kDuelMapTag[] = "DuelMap";
+
+template <int K> bool __fastcall OwnIntroFn(uint8_t* self, void*, uint32_t, uint32_t)
+{
+    auto* setup = reinterpret_cast<uint8_t*>(uintptr_t(kSetup));
+    OwnIntro& own = g_OwnIntros[K];
+    const bool declared = reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint16_t*, const char*, const char*, float, uint32_t)>(
+        uintptr_t(0x001F5B20))(setup, nullptr, &own.handle, own.name.c_str(), own.animation.c_str(), own.speed, 0x0055FB60);
+    if (declared) {
+        *reinterpret_cast<uint8_t*>(uintptr_t(0x00696531)) = 1;
+        *reinterpret_cast<const char**>(uintptr_t(0x006964B8)) = kDuelMapTag;
+    }
+    if (reinterpret_cast<bool(__fastcall*)(uint8_t*, void*)>(uintptr_t(0x001F62D0))(setup, nullptr)) { // first frame
+        uint8_t* instance = *reinterpret_cast<uint8_t**>(uintptr_t(0x006964C0));
+        reinterpret_cast<void(__cdecl*)(uint8_t*, uint8_t*, int, int)>(uintptr_t(0x0038A140))(instance, self, 2, 2);
+        reinterpret_cast<int(__cdecl*)(const char*, const char*, int, int, int)>(uintptr_t(kSayEvent))("TNT", "Versus", 1, 0, 0);
+    }
+    return reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, const char*, uint32_t)>(uintptr_t(0x001F6C00))(
+        setup, nullptr, reinterpret_cast<const char*>(uintptr_t(0x0059C07C)), 0x7E00 + K);
+}
+
+template <int... K> constexpr std::array<ClassSequenceFn, sizeof...(K)> OwnIntroFns(std::integer_sequence<int, K...>)
+{
+    return { &OwnIntroFn<K>... };
+}
+constexpr auto kOwnIntroFns = OwnIntroFns(std::make_integer_sequence<int, kMaxOwnIntros>());
+
+std::string IntroPrefix(const CustomCharacter& c)
+{
+    return c.costume.empty() ? c.className.substr(1) : c.costume;
+}
+
 int __cdecl IntroSequences(const char* shortName, ClassSequenceFn* fns, int max)
 {
     // only where intros play (a Versus duel, Heroes vs Villains): the added sequences' animations become the class's
     // required ones, which another level need not have
     if (!BootIsMatch())
         return 0;
-    int count = 0;
-    bool added[std::size(kDuelists)] = {};
+    int count = 0, owns = 0;
+    bool added[std::size(kDuelists)][2] = {};
     for (const CustomCharacter& c : g_Customs) {
-        if (c.intro < 0 || added[c.intro] || c.base.size() < 2 || _stricmp(c.base.c_str() + 1, shortName) != 0)
+        if ((c.intro < 0 && c.introAnimation.empty()) || c.base.size() < 2 || _stricmp(c.base.c_str() + 1, shortName) != 0)
             continue;
-        if (count + 2 > max || count + 2 > kMaxIntroFns)
-            break;
-        added[c.intro] = true;
+        if (!c.introAnimation.empty() && owns < kMaxOwnIntros && count < max) {
+            OwnIntro& own = g_OwnIntros[owns];
+            own.name = IntroPrefix(c) + "_Intro";
+            own.animation = c.introAnimation;
+            own.speed = c.introSpeed;
+            own.handle = 0;
+            fns[count++] = kOwnIntroFns[size_t(owns++)];
+            LOG_INFO("Custom characters: %s's duel intro is %s", c.className.c_str(), c.introAnimation.c_str());
+        }
+        if (c.intro < 0)
+            continue;
         const Duelist& d = kDuelists[c.intro];
-        g_IntroTargets[count] = d.intro;
-        fns[count] = kIntroFns[size_t(count)];
-        ++count;
-        g_IntroTargets[count] = d.outro;
-        fns[count] = kIntroFns[size_t(count)];
-        ++count;
-        LOG_INFO("Custom characters: %s plays %s's duel intro and outro", c.className.c_str(), d.className);
+        for (int outro = c.introAnimation.empty() ? 0 : 1; outro < 2; ++outro) {
+            if (added[c.intro][outro] || count >= max || count >= kMaxIntroFns)
+                continue;
+            added[c.intro][outro] = true;
+            g_IntroTargets[count] = outro ? d.outro : d.intro;
+            fns[count] = kIntroFns[size_t(count)];
+            ++count;
+        }
+        LOG_INFO("Custom characters: %s plays %s's duel %s", c.className.c_str(), d.className,
+            c.introAnimation.empty() ? "intro and outro" : "outro");
     }
     return count;
 }
@@ -597,16 +674,22 @@ constexpr uint32_t kIntroName = 0x0027B5A2;
 constexpr uint8_t kIntroNameBytes[] = { 0x50, 0x57, 0x8D, 0x44, 0x24, 0x1C };
 const char* g_IntroName = nullptr;
 
-const char* __stdcall IntroName(const uint8_t* character, const char* name)
+const char* __stdcall IntroName(const uint8_t* character, const char* name, const char* kind)
 {
     const CustomCharacter* custom = CustomCharacterOf(character);
-    return custom && custom->intro >= 0 ? kDuelists[custom->intro].prefix : name;
+    if (!custom)
+        return name;
+    if (!custom->introAnimation.empty() && kind && _stricmp(kind, "Intro") == 0)
+        if (const char* own = PooledString(IntroPrefix(*custom)))
+            return own;
+    return custom->intro >= 0 ? kDuelists[custom->intro].prefix : name;
 }
 
 __declspec(naked) void IntroNameEntry()
 {
     __asm {
         pushad
+        push eax
         push edi
         push esi
         call IntroName
@@ -842,6 +925,9 @@ void ReadCharacters(const std::wstring& mods)
                         c.forcePowers |= p.bit;
             }
         }
+        c.introAnimation = Profile(file, L"IntroAnimation");
+        if (const std::string speed = Profile(file, L"IntroSpeed"); !speed.empty() && std::atof(speed.c_str()) > 0)
+            c.introSpeed = float(std::atof(speed.c_str()));
         if (const std::string intro = Profile(file, L"Intro"); !intro.empty()) {
             for (size_t i = 0; i < std::size(kDuelists); ++i)
                 if (_stricmp(intro.c_str(), kDuelists[i].className) == 0 && _stricmp(intro.c_str(), c.base.c_str()) != 0)
@@ -1079,6 +1165,9 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         PatchJump(kStartEntry, reinterpret_cast<const void*>(&StartEntryHook));
     }
     g_DuelLine = {};
+    if (std::any_of(g_Customs.begin(), g_Customs.end(), [](const CustomCharacter& c) { return c.scale != 1.0f; }) &&
+        std::memcmp(reinterpret_cast<const void*>(uintptr_t(kScriptSetScale)), kScriptSetScaleBytes, sizeof kScriptSetScaleBytes) == 0)
+        PatchJump(kScriptSetScale, reinterpret_cast<const void*>(&ScriptSetScale));
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kSayEvent)), kSayEventBytes, sizeof kSayEventBytes) == 0) {
         static uint8_t* sayStub = [] { // once: the port's memory outlives the game's reboots
             uint8_t* stub = AllocStub(sizeof kSayEventBytes + 5);
@@ -1151,7 +1240,8 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
         g_OriginalJediSetup = reinterpret_cast<JediSetupFn>(jediStub);
         PatchJump(kJediSetup, reinterpret_cast<const void*>(&JediSetupHook));
     }
-    if (std::any_of(g_Customs.begin(), g_Customs.end(), [](const CustomCharacter& c) { return c.intro >= 0; })) {
+    if (std::any_of(g_Customs.begin(), g_Customs.end(),
+            [](const CustomCharacter& c) { return c.intro >= 0 || !c.introAnimation.empty(); })) {
         if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kIntroName)), kIntroNameBytes, sizeof kIntroNameBytes) == 0) {
             AddClassSequences(&IntroSequences);
             PatchJump(kIntroName, reinterpret_cast<const void*>(&IntroNameEntry));
