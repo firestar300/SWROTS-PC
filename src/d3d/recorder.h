@@ -33,6 +33,11 @@ void SetScreenshotDirectory(const std::wstring& directory);
 void RequestScreenshot(const std::string& name);
 // Saves a requested screenshot from the window's back buffer (call before drawing the debug menu).
 void SavePendingScreenshot(IDirect3DSurface9* windowBuffer);
+// A developer tool's look at every presented frame (the window's back buffer as screenshots take it, before the
+// debug menu): called on the render thread; null for none.
+using FrameTap = void (*)(IDirect3DSurface9* windowBuffer);
+void SetFrameTap(FrameTap tap);
+void TapFrame(IDirect3DSurface9* windowBuffer);
 // Frees GPU resources (device teardown).
 void FlightReleaseResources();
 

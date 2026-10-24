@@ -22,5 +22,8 @@ bool GameRenderedView(float view[16], float& fov);
 // with the game's placement and the field of view; true when it changed `rows`. Null for none.
 using CameraAdjuster = bool (*)(float rows[16], float fov);
 void SetCameraAdjuster(CameraAdjuster adjuster);
+// A developer tool's placement of the camera outside a flight, after any adjustment (same form; true when it placed
+// it). Null for none.
+void SetCameraDirector(CameraAdjuster director);
 
 } // namespace swrots::game

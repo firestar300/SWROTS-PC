@@ -111,6 +111,7 @@ bool g_HaveGameView = false;
 Matrix g_GameView = {};             // the master camera's latest placement from the game
 Matrix g_ShownView = {};            // the same as shown (adjusted, see SetCameraAdjuster)
 CameraAdjuster g_Adjuster = nullptr;
+CameraAdjuster g_Director = nullptr;
 bool g_Adjusted = false;            // g_ShownView was adjusted last time
 float g_GameFov = 0.0f;             // the field of view the game gave the renderer (below)
 bool g_HaveGameFov = false;
@@ -193,7 +194,10 @@ void __fastcall SetTransformHook(void* camera, void* edx, const Matrix* transfor
         if (transform && !again)
             g_ShownView = *transform;
         g_Adjusted = false;
-        if (transform && !again && g_Adjuster && g_Adjuster(&g_ShownView.m[0][0], g_HaveGameFov ? g_GameFov : 0.0f)) {
+        bool adjusted = transform && !again && g_Adjuster && g_Adjuster(&g_ShownView.m[0][0], g_HaveGameFov ? g_GameFov : 0.0f);
+        if (transform && !again && g_Director && g_Director(&g_ShownView.m[0][0], g_HaveGameFov ? g_GameFov : 0.0f))
+            adjusted = true;
+        if (adjusted) {
             g_Adjusted = true;
             g_OriginalSetTransform(camera, edx, &g_ShownView);
             return;
@@ -296,6 +300,11 @@ bool GameRenderedView(float view[16], float& fov)
     std::memcpy(view, g_RenderedView.m, sizeof(g_RenderedView.m));
     fov = g_HaveGameFov ? g_GameFov : 0.0f;
     return true;
+}
+
+void SetCameraDirector(CameraAdjuster director)
+{
+    g_Director = director;
 }
 
 void SetCameraAdjuster(CameraAdjuster adjuster)

@@ -52,6 +52,11 @@ struct FreeCameraControls {
 };
 // Reads them (nothing while the game window is inactive or the debug menu is open).
 FreeCameraControls ReadFreeCameraControls();
+// A developer tool's scripted player 1 (on top of the real input): buttons held for that long ("A", "B", "X", "Y",
+// "Black", "White", "LT", "RT", "Start", "Back", "Up", "Down", "Left", "Right", several joined with '+'), and the left
+// stick held at (x, y) (-1..1) for that long. Any thread.
+void ScriptButtons(const char* buttons, double seconds);
+void ScriptStick(float x, float y, double seconds);
 // Whether player 1's input is held back from the game (the free camera has it).
 void HoldPlayerInput(bool hold);
 // While it is held back: whether player 1 pressed A or Start since the last call (to skip what holds it, an intro).

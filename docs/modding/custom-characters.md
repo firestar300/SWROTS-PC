@@ -148,7 +148,8 @@ On Serra Keto's class (`Base=ISerra`) a character can fight with moves of other 
 - `Grapples=IDooku`: her grab becomes the generic one, and its throws Count Dooku's knock-down and launch with his
   palm blast;
 - `ForceStorm=1`: block + stun (LT + Black; Shift + R) calls lightning down on every enemy near it, five strikes,
-  for 400 Force, one every 15 seconds and not in a round's first 8 seconds; the computer's uses it too.
+  for 500 Force, one every 15 seconds and not in a round's first 8 seconds; the computer's uses it too. It hits enemies
+  only.
 
 How: the game swaps sequences per character (0x173AB0, in the character's script turn: what its script asks for,
 another plays; every class's Init makes its own, e.g. Dooku's throws instead of the generic ones), so the port makes
@@ -158,7 +159,7 @@ written out again as the port's own sequences on Serra's class (his own write fi
 end of Serra's): the same animations, events and frame codes, his palm blast from effect slots of the port's; their
 victims play `Dooku_Grab_KD_GR` / `Dooku_Grab_Launch_GR`, which every class has. Dooku's lightning and grapple sounds
 are added to Serra's event tree (entries she never plays) and his grapple rows to her attack table for the computer.
-The storm's strikes are the game's own explosion objects with its lightning impact and Force shock effects: a column
+The storm's strikes are the game's own explosion objects with its electric explosion and Force shock effects: a column
 of lightning comes down on each enemy, then hits ("Electrified" damage, every class's hit reaction).
 
 ## How it works

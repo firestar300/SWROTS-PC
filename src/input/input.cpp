@@ -505,6 +505,69 @@ static void ReadTestButtons(XGamepad& g)
     }
 }
 
+// A developer tool's scripted player 1 (ScriptButtons, ScriptStick).
+struct ScriptedHold {
+    int analog;
+    WORD digital;
+    ULONGLONG until;
+};
+static std::mutex g_ScriptLock;
+static std::vector<ScriptedHold> g_ScriptHolds;
+static float g_ScriptStick[2] = {};
+static ULONGLONG g_ScriptStickUntil = 0;
+
+void ScriptButtons(const char* buttons, double seconds)
+{
+    static const struct { const char* name; int analog; WORD digital; } kButtons[] = {
+        { "A", 0, 0 }, { "B", 1, 0 }, { "X", 2, 0 }, { "Y", 3, 0 }, { "Start", -1, 0x10 }, { "Back", -1, 0x20 },
+        { "Up", -1, 0x1 }, { "Down", -1, 0x2 }, { "Left", -1, 0x4 }, { "Right", -1, 0x8 }, { "Black", 4, 0 },
+        { "White", 5, 0 }, { "LT", 6, 0 }, { "RT", 7, 0 } };
+    const ULONGLONG until = GetTickCount64() + ULONGLONG(seconds * 1000.0);
+    std::string list = buttons ? buttons : "";
+    std::lock_guard<std::mutex> lock(g_ScriptLock);
+    size_t from = 0;
+    while (from <= list.size()) {
+        size_t to = list.find('+', from);
+        if (to == std::string::npos)
+            to = list.size();
+        const std::string name = list.substr(from, to - from);
+        for (const auto& b : kButtons)
+            if (_stricmp(name.c_str(), b.name) == 0)
+                g_ScriptHolds.push_back({ b.analog, b.digital, until });
+        from = to + 1;
+    }
+}
+
+void ScriptStick(float x, float y, double seconds)
+{
+    std::lock_guard<std::mutex> lock(g_ScriptLock);
+    g_ScriptStick[0] = std::clamp(x, -1.0f, 1.0f);
+    g_ScriptStick[1] = std::clamp(y, -1.0f, 1.0f);
+    g_ScriptStickUntil = GetTickCount64() + ULONGLONG(seconds * 1000.0);
+}
+
+static void ReadScripted(XGamepad& g)
+{
+    std::lock_guard<std::mutex> lock(g_ScriptLock);
+    if (g_ScriptHolds.empty() && !g_ScriptStickUntil)
+        return;
+    const ULONGLONG now = GetTickCount64();
+    g_ScriptHolds.erase(std::remove_if(g_ScriptHolds.begin(), g_ScriptHolds.end(),
+        [&](const ScriptedHold& h) { return now >= h.until; }), g_ScriptHolds.end());
+    for (const ScriptedHold& h : g_ScriptHolds) {
+        if (h.analog >= 0)
+            g.bAnalogButtons[h.analog] = 0xFF;
+        else
+            g.wButtons |= h.digital;
+    }
+    if (g_ScriptStickUntil && now < g_ScriptStickUntil) {
+        g.sThumbLX = SHORT(g_ScriptStick[0] * 32767.0f);
+        g.sThumbLY = SHORT(g_ScriptStick[1] * 32767.0f);
+    } else {
+        g_ScriptStickUntil = 0;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Free camera
 // ---------------------------------------------------------------------------
@@ -678,6 +741,7 @@ static DWORD __stdcall XbInputGetState(HANDLE device, XInputState* state)
             ReadKeyboard(g);
             ReadTestInput(g);
             ReadTestButtons(g);
+            ReadScripted(g);
             const double now = TestPad2Seconds(); // SWROTS_TEST_PAD2's ":start": player 1 pauses
             if (TestPad2Spec().on && TestPad2Spec().pause >= 0 && now >= TestPad2Spec().pause && now < TestPad2Spec().pause + 0.2)
                 g.wButtons |= XB_START;

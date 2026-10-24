@@ -266,6 +266,19 @@ void RequestScreenshot(const std::string& name)
     g_ShotRequests.push_back(name);
 }
 
+static FrameTap g_FrameTap = nullptr;
+
+void SetFrameTap(FrameTap tap)
+{
+    g_FrameTap = tap;
+}
+
+void TapFrame(IDirect3DSurface9* windowBuffer)
+{
+    if (g_FrameTap && windowBuffer)
+        g_FrameTap(windowBuffer);
+}
+
 void SavePendingScreenshot(IDirect3DSurface9* windowBuffer)
 {
     std::vector<std::string> requests;

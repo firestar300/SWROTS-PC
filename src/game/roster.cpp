@@ -533,6 +533,19 @@ void BuildDuelClasses()
         }
     }
     g_DuelClasses[count] = nullptr;
+    // a chosen fighter the duel does not have (a custom character no longer installed, named by a config): the
+    // game's own fighter of that player's side stands in (the duel would find no fighter and stop)
+    for (int player = 0; launch && player < 2; ++player) {
+        const char*& chosen = *reinterpret_cast<const char**>(launch + 4 + player * 4);
+        bool known = false;
+        for (int slot = 0; slot < count && chosen; ++slot)
+            known = known || (g_DuelClasses[slot] && _stricmp(g_DuelClasses[slot], chosen) == 0);
+        if (!known && g_DuelClasses[player]) {
+            LOG_WARN("Roster: player %d's fighter %s is not installed; %s fights instead", player + 1,
+                chosen ? chosen : "(none)", g_DuelClasses[player]);
+            chosen = g_DuelClasses[player];
+        }
+    }
 }
 
 // The fighter a player chose: the fighter creation (0x27B7D0, ebx the duel slot) keeps a slot's fighter for the

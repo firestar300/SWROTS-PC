@@ -8,8 +8,10 @@
 
 #include <windows.h>
 #include <xaudio2.h>
+#include <xapo.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <string>
 #include <cmath>
@@ -19,6 +21,7 @@
 #include <mutex>
 #include <vector>
 
+#include "audio/audio.h"
 #include "core/log.h"
 #include "core/window.h"
 #include "kernel/kernel.h"
@@ -194,6 +197,117 @@ struct Listener {
 
 static bool g_AudioFailed = false; // no audio device or engine: buffers keep time silently
 
+// --- Mix tap (SetMixTap) ------------------------------------------------------------
+// An in-place effect on the mastering voice that hands each processed buffer to the tap. The voice's volume comes
+// first, so in a silent background run the voice keeps its volume and the effect silences the mix after the tap.
+static std::atomic<MixTap> g_MixTap = nullptr;
+static bool g_MixTapInstalled = false;
+static std::atomic<bool> g_MixTapMutes = false;
+
+// (IXAPO written out: the SDK's helper base class comes in a library built for the dynamic C runtime.)
+class __declspec(uuid("5B3F6E2A-9C41-4D7B-8E52-0A6F1C3D9B17")) MixTapEffect : public IXAPO {
+public:
+    STDMETHOD(QueryInterface)(REFIID riid, void** out) override
+    {
+        if (riid == __uuidof(IXAPO) || riid == __uuidof(IUnknown)) {
+            *out = static_cast<IXAPO*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    STDMETHOD_(ULONG, AddRef)() override { return ULONG(++m_Refs); }
+    STDMETHOD_(ULONG, Release)() override
+    {
+        const long left = --m_Refs;
+        if (!left)
+            delete this;
+        return ULONG(left);
+    }
+    STDMETHOD(GetRegistrationProperties)(XAPO_REGISTRATION_PROPERTIES** out) override
+    {
+        auto* p = static_cast<XAPO_REGISTRATION_PROPERTIES*>(CoTaskMemAlloc(sizeof(XAPO_REGISTRATION_PROPERTIES)));
+        if (!p)
+            return E_OUTOFMEMORY;
+        *p = {};
+        p->clsid = __uuidof(MixTapEffect);
+        wcscpy_s(p->FriendlyName, L"SWROTS mix tap");
+        p->MajorVersion = 1;
+        p->Flags = XAPO_FLAG_INPLACE_REQUIRED | XAPO_FLAG_CHANNELS_MUST_MATCH | XAPO_FLAG_FRAMERATE_MUST_MATCH |
+            XAPO_FLAG_BITSPERSAMPLE_MUST_MATCH | XAPO_FLAG_BUFFERCOUNT_MUST_MATCH | XAPO_FLAG_INPLACE_SUPPORTED;
+        p->MinInputBufferCount = p->MaxInputBufferCount = p->MinOutputBufferCount = p->MaxOutputBufferCount = 1;
+        *out = p;
+        return S_OK;
+    }
+    STDMETHOD(IsInputFormatSupported)(const WAVEFORMATEX*, const WAVEFORMATEX* requested, WAVEFORMATEX** supported) override
+    {
+        if (supported)
+            *supported = nullptr;
+        return requested ? S_OK : E_POINTER;
+    }
+    STDMETHOD(IsOutputFormatSupported)(const WAVEFORMATEX*, const WAVEFORMATEX* requested, WAVEFORMATEX** supported) override
+    {
+        if (supported)
+            *supported = nullptr;
+        return requested ? S_OK : E_POINTER;
+    }
+    STDMETHOD(Initialize)(const void*, UINT32) override { return S_OK; }
+    STDMETHOD_(void, Reset)() override {}
+    STDMETHOD(LockForProcess)(UINT32 inputCount, const XAPO_LOCKFORPROCESS_BUFFER_PARAMETERS* inputs, UINT32,
+        const XAPO_LOCKFORPROCESS_BUFFER_PARAMETERS*) override
+    {
+        if (inputCount && inputs && inputs[0].pFormat) {
+            m_Channels = inputs[0].pFormat->nChannels;
+            m_Rate = inputs[0].pFormat->nSamplesPerSec;
+        }
+        return S_OK;
+    }
+    STDMETHOD_(void, UnlockForProcess)() override {}
+    STDMETHOD_(void, Process)(UINT32 inputCount, const XAPO_PROCESS_BUFFER_PARAMETERS* inputs, UINT32,
+        XAPO_PROCESS_BUFFER_PARAMETERS*, BOOL) override
+    {
+        const MixTap tap = g_MixTap;
+        if (!tap || !inputCount)
+            return;
+        const bool valid = inputs[0].BufferFlags == XAPO_BUFFER_VALID;
+        tap(valid ? static_cast<const float*>(inputs[0].pBuffer) : nullptr, inputs[0].ValidFrameCount, m_Channels, m_Rate);
+        if (valid && g_MixTapMutes)
+            std::memset(inputs[0].pBuffer, 0, size_t(inputs[0].ValidFrameCount) * m_Channels * sizeof(float));
+    }
+    STDMETHOD_(UINT32, CalcInputFrames)(UINT32 frames) override { return frames; }
+    STDMETHOD_(UINT32, CalcOutputFrames)(UINT32 frames) override { return frames; }
+
+private:
+    std::atomic<long> m_Refs = 1;
+    unsigned m_Channels = 2, m_Rate = 48000;
+};
+
+static void InstallMixTap()
+{
+    if (g_MixTapInstalled || !g_Master || !g_MixTap)
+        return;
+    XAUDIO2_VOICE_DETAILS details = {};
+    g_Master->GetVoiceDetails(&details);
+    MixTapEffect* effect = new MixTapEffect();
+    XAUDIO2_EFFECT_DESCRIPTOR descriptor = { static_cast<IXAPO*>(effect), TRUE, details.InputChannels };
+    XAUDIO2_EFFECT_CHAIN chain = { 1, &descriptor };
+    const HRESULT hr = g_Master->SetEffectChain(&chain);
+    effect->Release(); // the voice keeps its own reference
+    g_MixTapInstalled = SUCCEEDED(hr);
+    if (g_MixTapInstalled && RunningInBackground()) { // silent after the tap instead
+        g_MixTapMutes = true;
+        g_Master->SetVolume(1.0f);
+    }
+    LOG_INFO("Audio: mix tap %s (%08lX)", g_MixTapInstalled ? "on" : "failed", hr);
+}
+
+void SetMixTap(MixTap tap)
+{
+    g_MixTap = tap;
+    InstallMixTap();
+}
+
 static bool EnsureEngine()
 {
     if (g_XAudio)
@@ -239,6 +353,7 @@ static bool EnsureEngine()
         master.InputSampleRate, layout);
     if (RunningInBackground()) // a background test run (core/window.h) is silent
         g_Master->SetVolume(0.0f);
+    InstallMixTap();
     LOG_INFO("Audio: XAudio2 ready (48 kHz stereo)");
     return true;
 }

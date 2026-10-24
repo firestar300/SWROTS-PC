@@ -596,6 +596,7 @@ static void PresentFrame()
     if (!menu && debug::OverlayShown())
         DrawMenu();
     SavePendingScreenshot(g_SwapChainBuffer);
+    TapFrame(g_SwapChainBuffer);
     if (menu)
         DrawMenu();
     HRESULT presented = g_WindowChain->Present(nullptr, nullptr, nullptr, nullptr, 0);
