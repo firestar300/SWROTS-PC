@@ -16,6 +16,7 @@
 #include "debug/console.h"
 #include "game/characters.h"
 #include "game/cody.h"
+#include "game/revan.h"
 #include "game/coop.h"
 #include "game/custommaps.h"
 #include "game/devmap.h"
@@ -1102,6 +1103,7 @@ void MenuAfterFrame()
     game::PlayerFrame();
     game::CoopFrame();
     game::CodyFrame();
+    game::RevanFrame();
     game::HvvFrame();
 }
 

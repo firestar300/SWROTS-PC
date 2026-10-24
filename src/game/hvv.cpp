@@ -17,6 +17,7 @@
 #include "core/patch.h"
 #include "core/settings.h"
 #include "game/characters.h"
+#include "game/cody.h"
 #include "game/coop.h"
 #include "game/customchars.h"
 #include "game/custommaps.h"
@@ -343,10 +344,12 @@ int AttackerOf(uint8_t* attacker)
 {
     if (!attacker)
         return -1;
+    if (uint8_t* owner = BlastOwner(attacker); owner && FighterOf(attacker) < 0) // a blast of a special's (Cody's shells, Force Storm)
+        attacker = owner;
     for (int i = 0; i < g_Count; ++i) {
-        uint8_t* f = g_Fighters[i].object;
-        if (!f)
+        if (!Placed(g_Fighters[i])) // a body taken away (a fighter's old one after a respawn)
             continue;
+        uint8_t* f = g_Fighters[i].object;
         if (f == attacker || Field<uint8_t*>(f, kCharacterScript) == attacker)
             return i;
         for (uint32_t at = kWeaponsFrom; at < kWeaponsTo; at += 4)
@@ -357,7 +360,7 @@ int AttackerOf(uint8_t* attacker)
         for (uint32_t at = 4; at < kOwnerSearch; at += 4) {
             uint8_t* p = Field<uint8_t*>(attacker, at);
             for (int i = 0; i < g_Count; ++i)
-                if (p && g_Fighters[i].object && (p == g_Fighters[i].object ||
+                if (p && Placed(g_Fighters[i]) && (p == g_Fighters[i].object ||
                         p == Field<uint8_t*>(g_Fighters[i].object, kCharacterScript)))
                     return i;
         }

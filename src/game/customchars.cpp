@@ -336,7 +336,8 @@ void __cdecl ApplyBlades(uint8_t* character)
     // which the +0xF20 override does not cover (the Jedi Brute's is the green key colour)
     if (custom->hasSaber)
         for (int i = 0; i < 2; ++i)
-            std::memcpy(first + i * kWeaponRecordSize + 8, SaberColourOf(character, *custom), sizeof custom->saber);
+            std::memcpy(first + i * kWeaponRecordSize + 8, i == 1 && custom->hasSaberLeft ? custom->saberLeft
+                : SaberColourOf(character, *custom), sizeof custom->saber);
     // its own hilt (a single blade's: a double-bladed one keeps the double hilt the blades need)
     if (!custom->hilt.empty() && custom->blades != 2 && !first[0])
         AssignString(first + 4, custom->hilt.c_str());
@@ -885,6 +886,12 @@ __declspec(naked) void SpeakerNameStore()
 // The custom characters made this start (to find a saber's owner; a removed one no longer has a custom list).
 std::vector<uint8_t*> g_Made;
 
+bool IsLiveObject(uint8_t* object)
+{
+    // an object still in the level: the instance id at +4 finds it again (0xA31F0)
+    return reinterpret_cast<uint8_t*(__cdecl*)(uint32_t)>(uintptr_t(0x000A31F0))(*reinterpret_cast<uint32_t*>(object + 4)) == object;
+}
+
 // A saber's colour is set through its class's SetColor (vtable +0x604: 0x286180 for the single-bladed classes,
 // 0x2864F0 for the double-bladed one), by the equip, the power-up switch and some moves (the Jedi Brute's specials
 // light its saber in its own green): a custom character's sabers keep its colour.
@@ -898,12 +905,14 @@ const float* OwnColour(uint8_t* weapon)
 {
     __try {
         for (uint8_t* c : g_Made) {
+            if (!IsLiveObject(c)) // one taken away (a Heroes vs Villains fighter's old body)
+                continue;
             const CustomCharacter* custom = CustomCharacterOf(c);
             if (!custom || !custom->hasSaber)
                 continue;
             for (int i = 0; i < 4; ++i)
                 if (*reinterpret_cast<uint8_t**>(c + kCharacterWeapons + i * 0x20) == weapon)
-                    return SaberColourOf(c, *custom);
+                    return i == 1 && custom->hasSaberLeft ? custom->saberLeft : SaberColourOf(c, *custom);
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
@@ -1070,6 +1079,15 @@ void ReadCharacters(const std::wstring& mods)
             c.saber2[1] = g / 255.0f;
             c.saber2[2] = b / 255.0f;
         }
+        if (std::sscanf(Profile(file, L"SaberLeft").c_str(), "%d %d %d", &r, &g, &b) == 3) {
+            c.hasSaberLeft = true;
+            c.saberLeft[0] = r / 255.0f;
+            c.saberLeft[1] = g / 255.0f;
+            c.saberLeft[2] = b / 255.0f;
+        }
+        c.lightning = std::atoi(Profile(file, L"Lightning").c_str()) != 0;
+        c.grapples = Profile(file, L"Grapples");
+        c.forceStorm = std::atoi(Profile(file, L"ForceStorm").c_str()) != 0;
         c.side = _stricmp(Profile(file, L"Side", L"Hero").c_str(), "villain") == 0 ? 1 : 0;
         c.scale = std::clamp(float(atof(Profile(file, L"Scale", L"1").c_str())), 0.5f, 2.0f);
         const std::string force = Profile(file, L"Force");

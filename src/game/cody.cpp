@@ -424,7 +424,7 @@ void CallSquad(uint8_t* cody, const Kind& kind, bool enemy, ULONGLONG now)
         if (rappel || !kind.rappel) // a droid drops in from the same height
             m[13] += kRappelHeight;
         std::string error;
-        uint8_t* clone = SpawnHelper(kind.helper, kind.helperSkin, cody, enemy, m, error);
+        uint8_t* clone = SpawnHelper(kind.helper, std::string(), cody, enemy, m, error, kind.helperSkin);
         if (!clone) {
             LOG_WARN("Cody: a clone of his could not come (%s)", error.c_str());
             continue;
@@ -450,7 +450,12 @@ constexpr uint32_t kExplosionClass = 0x0068E760;
 constexpr const char* kShellEffects[] = { "IDS_FX_explosion_med", "IDS_FX_explosion_large06", "IDS_FX_explosion_barrel_small",
     "IDS_FX_explosion_large05", "IDS_FX_flak_explosion01", "IDS_FX_explosion_large", "IDS_FX_Homing_Rocket_Explosion",
     "IDS_FX_electric_explosion_small", "IDS_FX_flak_explosion03", "IDS_FX_flak_explosion02", "IDS_FX_dust_burst_explosion09" };
-std::unordered_map<uint8_t*, uint8_t*> g_ShellOwners; // shell -> his Cody
+struct ShellOf {
+    uint8_t* owner;
+    const char* damageType; // null: the shell's by distance (EXPLOSION_MEDIUM / _LIGHT)
+    float damage;
+};
+std::unordered_map<uint8_t*, ShellOf> g_ShellOwners; // shell -> who called it, how it hurts
 
 bool IsCharacter(uint8_t* object)
 {
@@ -461,7 +466,8 @@ void __cdecl ShellHit(uint8_t* shell, uint8_t* target, void*)
 {
     __try {
         const auto owner = g_ShellOwners.find(shell);
-        uint8_t* cody = owner == g_ShellOwners.end() ? nullptr : owner->second;
+        uint8_t* cody = owner == g_ShellOwners.end() ? nullptr : owner->second.owner;
+        const char* type = owner == g_ShellOwners.end() ? nullptr : owner->second.damageType;
         if (!target || !IsCharacter(target) || target == cody || IsHelper(target))
             return;
         if (cody && HvvActive() && HvvSameSide(target, cody))
@@ -470,14 +476,14 @@ void __cdecl ShellHit(uint8_t* shell, uint8_t* target, void*)
             uintptr_t(0x000F2280))(shell, nullptr) + 0x30);
         const float* p = Position(target);
         const float d = std::hypot(p[0] - centre[0], p[2] - centre[2]);
-        float damage = d < 60 ? 60.0f : d < 110 ? 40.0f : 20.0f;
+        float damage = type ? owner->second.damage : d < 60 ? 60.0f : d < 110 ? 40.0f : 20.0f;
         const auto isA = reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint32_t)>(
             (*reinterpret_cast<void* const* const*>(target))[1]);
         if (isA(target, nullptr, 0x00249950) && At<uint8_t>(target, 0x1060)) // a Jedi blocking (as the canister)
             damage /= 2;
         const float from[4] = { centre[0], centre[1] + 720.0f, centre[2], 1.0f };
         reinterpret_cast<int(__cdecl*)(uint8_t*, uint8_t*, const char*, const float*, int, float, bool)>(uintptr_t(0x000A6720))(
-            target, shell, d < 60 ? "EXPLOSION_MEDIUM" : "EXPLOSION_LIGHT", from, 0, damage, true);
+            target, shell, type ? type : d < 60 ? "EXPLOSION_MEDIUM" : "EXPLOSION_LIGHT", from, 0, damage, true);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
 }
@@ -490,9 +496,10 @@ void AssignText(uint8_t* field, const char* text)
     reinterpret_cast<void(__fastcall*)(void*, void*, const char*)>(uintptr_t(0x00225A10))(field, nullptr, text);
 }
 
-bool SetEffect(uint8_t* field)
+bool SetEffect(uint8_t* field, const char* const* effects, size_t count)
 {
-    for (const char* key : kShellEffects) { // the effect manager's check (0x1B3B00): one this level has
+    for (size_t i = 0; i < count; ++i) { // the effect manager's check (0x1B3B00): one this level has
+        const char* key = effects[i];
         void* name = nullptr; // held, never released: the interned name lives on, as the canister's holder's does
         reinterpret_cast<void*(__cdecl*)(void*, const char*)>(uintptr_t(0x00222FA0))(&name, key);
         if (name && reinterpret_cast<bool(__cdecl*)(void*)>(uintptr_t(0x001B3B00))(&name)) {
@@ -503,30 +510,50 @@ bool SetEffect(uint8_t* field)
     return false;
 }
 
+} // namespace
+
+bool FireBlast(uint8_t* owner, const float at[3], const BlastLook& look)
+{
+    float m[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, at[0], at[1], at[2], 1 };
+    uint8_t* shell = reinterpret_cast<uint8_t*(__cdecl*)(uint32_t)>(uintptr_t(0x000A2DB0))(kExplosionClass);
+    if (!shell)
+        return false;
+    uint8_t* props = shell + 0x1E0; // as its constructor left them (its texts made), the port's values set
+    const bool seen = SetEffect(props + 0x10, look.effects, look.effectCount);
+    *reinterpret_cast<void**>(props + 0x20) = reinterpret_cast<void*>(&ShellHit);
+    AssignText(props + 0x24, look.sound);
+    At<float>(props, 0x28) = 0;            // start radius
+    At<float>(props, 0x2C) = look.radius;  // end radius
+    At<float>(props, 0x30) = look.push;    // push
+    At<float>(props, 0x34) = 60;           // damage (ours: the callback's)
+    At<float>(props, 0x38) = 20;
+    At<float>(props, 0x3C) = 0.4f;         // lifetime
+    props[0x40] = 1;                       // explode once (removed at the end)
+    g_ShellOwners[shell] = { owner, look.damageType, look.damage };
+    if (!reinterpret_cast<bool(__cdecl*)(uint8_t*, void*, const float*, int)>(uintptr_t(0x000A2DE0))(shell, nullptr, m, 1))
+        return false;
+    reinterpret_cast<void(__fastcall*)(uint8_t*, void*)>((*reinterpret_cast<void* const* const*>(shell))[0xA4 / 4])(shell, nullptr);
+    return seen;
+}
+
+uint8_t* BlastOwner(const uint8_t* object)
+{
+    const auto it = g_ShellOwners.find(const_cast<uint8_t*>(object));
+    return it == g_ShellOwners.end() ? nullptr : it->second.owner;
+}
+
+namespace {
+
 void FireShell(uint8_t* cody, uint8_t* target)
 {
     const float* p = Position(target);
     const ULONGLONG r = GetTickCount64();
     const float angle = float(r % 628) / 100.0f, distance = float((r / 7) % 100) / 100.0f * kShellSpread;
-    float m[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, p[0] + std::cos(angle) * distance, p[1], p[2] + std::sin(angle) * distance, 1 };
-    uint8_t* shell = reinterpret_cast<uint8_t*(__cdecl*)(uint32_t)>(uintptr_t(0x000A2DB0))(kExplosionClass);
-    if (!shell)
-        return;
-    uint8_t* props = shell + 0x1E0; // as its constructor left them (its texts made), the port's values set
-    const bool seen = SetEffect(props + 0x10);
-    *reinterpret_cast<void**>(props + 0x20) = reinterpret_cast<void*>(&ShellHit);
-    AssignText(props + 0x24, "exp_canister_small");
-    At<float>(props, 0x28) = 0;     // start radius
-    At<float>(props, 0x2C) = 150;   // end radius
-    At<float>(props, 0x30) = 200;   // push
-    At<float>(props, 0x34) = 60;    // damage (ours: the callback's)
-    At<float>(props, 0x38) = 20;
-    At<float>(props, 0x3C) = 0.4f;  // lifetime
-    props[0x40] = 1;                // explode once (removed at the end)
-    g_ShellOwners[shell] = cody;
-    if (!reinterpret_cast<bool(__cdecl*)(uint8_t*, void*, const float*, int)>(uintptr_t(0x000A2DE0))(shell, nullptr, m, 1))
-        return;
-    reinterpret_cast<void(__fastcall*)(uint8_t*, void*)>((*reinterpret_cast<void* const* const*>(shell))[0xA4 / 4])(shell, nullptr);
+    const float at[3] = { p[0] + std::cos(angle) * distance, p[1], p[2] + std::sin(angle) * distance };
+    BlastLook look;
+    look.effects = kShellEffects;
+    look.effectCount = std::size(kShellEffects);
+    const bool seen = FireBlast(cody, at, look);
     static bool noted = false;
     if (!noted) {
         noted = true;
@@ -1178,7 +1205,8 @@ std::vector<CodyHelper> CodyHelpers()
 {
     std::vector<CodyHelper> out;
     for (const Helper& h : g_Helpers)
-        out.push_back({ h.object, h.master, h.enemy, h.label });
+        if (Live(h.object, h.id))
+            out.push_back({ h.object, h.master, h.enemy, h.label });
     return out;
 }
 

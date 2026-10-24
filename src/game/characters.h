@@ -139,9 +139,10 @@ bool RemoveSpawnedCharacter(uint8_t* character);
 
 // A character fighting for another (a fighter's reinforcement, e.g. Commander Cody's clones): created and placed at
 // `place` (a transform) in any running level, Versus too, on its master's side (its teams; `againstPlayer` when the
-// master is the computer's); removed as a spawned character. Null with `error` when it cannot.
+// master is the computer's); removed as a spawned character. Null with `error` when it cannot. `costume`: one of
+// its class's (empty: the usual).
 uint8_t* SpawnHelper(const char* className, const std::string& skin, uint8_t* master, bool againstPlayer,
-    const float* place, std::string& error);
+    const float* place, std::string& error, const std::string& costume = std::string());
 
 // Changes the running level's player at once, where it stands, to the current choice (class, costume,
 // texture set, body; the player's own class when none is chosen): a new character takes over the

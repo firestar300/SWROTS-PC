@@ -1823,7 +1823,7 @@ bool SetCharacterSide(uint8_t* character, SpawnSide side)
 }
 
 uint8_t* SpawnHelper(const char* className, const std::string& skin, uint8_t* master, bool againstPlayer,
-    const float* place, std::string& error)
+    const float* place, std::string& error, const std::string& costume)
 {
     const char* name = RegisteredClassName(className);
     if (!name || !master || !place) {
@@ -1832,7 +1832,7 @@ uint8_t* SpawnHelper(const char* className, const std::string& skin, uint8_t* ma
     }
     char who[96];
     sprintf_s(who, "helper %s #%d", name, ++g_Spawned);
-    uint8_t* object = CreateCharacter(name, std::string(), skin, std::string(), who, error);
+    uint8_t* object = CreateCharacter(name, costume, skin, std::string(), who, error);
     if (!object)
         return nullptr;
     if (BodyBoundToAnotherClass(object)) {

@@ -31,6 +31,8 @@ struct CustomCharacter {
     float saber[3] = {};     // its saber's colour (0-1), when it has one of its own
     bool hasSaber2 = false;
     float saber2[3] = {};    // player 2's in a Versus mirror (both chose it; Saber2=), as the game's dark Anakin's
+    bool hasSaberLeft = false;
+    float saberLeft[3] = {}; // its second saber's colour, the one in its left hand (SaberLeft=), on a base with two
     int blades = 0;          // its saber (Blades=): 0 the base's, 1 single, 2 double-bladed, 3 dual (two sabers)
     std::string hilt;        // its saber's hilt (Hilt=): a weapon mesh, "Meshes\Weapons\<folder>\<file>"; empty: the base's
     float scale = 1.0f;      // its size (Scale=), 1 the base's
@@ -49,6 +51,12 @@ struct CustomCharacter {
     float outroSpeed = 1.0f;
     std::string introLine, outroLine; // the line said in them (IntroLine=, OutroLine=: a dialogue line id, e.g. CMC951)
     int side = 0;            // 0 hero, 1 villain (Heroes vs Villains' default side)
+    // moves of other duelists on a base of Serra Keto's class (ISerra, revan.cpp): Force lightning instead of her stun
+    // (Lightning=1), Count Dooku's grapple throws instead of hers (Grapples=IDooku), the Force Storm special
+    // (ForceStorm=1: lightning striking the enemies near it, for a part of its Force)
+    bool lightning = false;
+    std::string grapples;
+    bool forceStorm = false;
     std::string hudFace;     // the HUD portrait shown for it (a donor's path, its picture served: see customchars.cpp)
     std::string face;        // its HUD portrait's path (interfc\hud_b\hud_face_<costume>01), when the mod has one
     std::string source;      // the file it came from

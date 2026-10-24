@@ -39,6 +39,7 @@ Costume=Luke             ; its costume's name
 Mesh=luke\luke           ; its body, under meshes\chars, without .msh
 Saber=0 255 0            ; its saber's colour, 0-255 each (optional; 0 255 0 is the game's own green)
 Saber2=255 0 0           ; player 2's when both Versus players pick it (optional; as the game's dark Anakin)
+SaberLeft=255 0 0        ; its second saber's colour, the one in its left hand (optional; on a two-saber base)
 Blades=single            ; its saber: single, double (double-bladed) or dual (two sabers) (optional; the base's)
 Hilt=LsaberObi\LsaberObi ; its hilt, a weapon mesh under meshes\weapons, without .msh (optional; the base's)
 Scale=1                  ; its size (optional; 0.86 makes a Jedi Brute body about as tall as Vader)
@@ -51,6 +52,9 @@ Intro=IVader             ; whose Versus intro and outro it plays (optional; the 
                          ; IMace, IObiwan, IOldObiwan, ISerra or IVader
 IntroAnimation=GBguard_Atk_CombinedV1_Call ; its Versus intro is this animation of its base's instead (optional;
 IntroSpeed=1.2           ; the Jedi Brute's twirl), at this speed (optional; 1)
+Lightning=1              ; on Serra Keto's class (Base=ISerra): Force lightning instead of her stun (optional)
+Grapples=IDooku          ; on Serra Keto's class: Count Dooku's grapple throws instead of hers (optional)
+ForceStorm=1             ; on Serra Keto's class: the Force Storm special (optional; see "Other duelists' moves")
 Side=Hero                ; Hero or Villain: its side in Heroes vs Villains by default
 Speaker=Luke             ; its name in subtitles (optional; the name's first word)
 Code=                    ; whose lines it says, a dialogue speaker code such as AKN or OBW (optional; the base's)
@@ -95,6 +99,8 @@ has the format); a double-bladed saber keeps the double hilt its blades need. Th
 - `dual`: two sabers, the second like the first. Only a base whose moves use the off hand (Serra Keto, `ISerra`)
   wields it; with the others the second saber hangs at the side.
 
+`SaberLeft=` colours the second saber (the left hand's) on its own, e.g. a purple and a red one.
+
 The Jedi classes' Init fills up to four weapon records (character +0x1064, 0x20 bytes each: +0 the double-bladed
 flag, +4 the hilt mesh, +8 its colour) before their weapon setup (0x2814C0) makes a saber of each record that has a
 mesh (0x280480; a flagged one becomes the double-bladed saber class). The port changes a custom character's records
@@ -124,6 +130,27 @@ its moves by name) gives each move its range, facing and odds. The Jedi Brute's 
 `ForceFrom=` class's are added to it as it loads (`a_vader.csv`'s ForcePush, ForceGrasp, ForceLightning, ForceHeal
 and ForceSaberThrow rows, those it lacks). The game's own Jedi Brutes share that table but their rules never offer a
 Force move, and they hold no Force: they fight as before.
+
+## Other duelists' moves
+
+On Serra Keto's class (`Base=ISerra`) a character can fight with moves of other duelists while Serra keeps hers:
+
+- `Lightning=1`: her stun (the Black button, R) becomes Force lightning, and her stun grip lightning in a grip;
+- `Grapples=IDooku`: her grab becomes the generic one, and its throws Count Dooku's knock-down and launch with his
+  palm blast;
+- `ForceStorm=1`: block + stun (LT + Black; Shift + R) calls lightning down on every enemy near it, five strikes,
+  for 400 Force, one every 15 seconds and not in a round's first 8 seconds; the computer's uses it too.
+
+How: the game swaps sequences per character (0x173AB0, in the character's script turn: what its script asks for,
+another plays; every class's Init makes its own, e.g. Dooku's throws instead of the generic ones), so the port makes
+the swaps in the character's first turn (after Serra's rules, at 0x479228). The lightning sequences are every Jedi
+class's (its lightning is the IJedi's); its lightning is enabled (script instance +0x2DD). Dooku's throws are
+written out again as the port's own sequences on Serra's class (his own write fields of his script instance past the
+end of Serra's): the same animations, events and frame codes, his palm blast from effect slots of the port's; their
+victims play `Dooku_Grab_KD_GR` / `Dooku_Grab_Launch_GR`, which every class has. Dooku's lightning and grapple sounds
+are added to Serra's event tree (entries she never plays) and his grapple rows to her attack table for the computer.
+The storm's strikes are the game's own explosion objects with its lightning impact and Force shock effects: a column
+of lightning comes down on each enemy, then hits ("Electrified" damage, every class's hit reaction).
 
 ## How it works
 
