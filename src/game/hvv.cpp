@@ -116,6 +116,15 @@ constexpr uint32_t kCharacterInvincible = 0x5D6; // byte, "Invincible?"
 constexpr uint32_t kCharacterAI = 0x9FC;       // its AI controller
 constexpr uint32_t kAITarget = 0x41C;          // the controller's target
 constexpr uint32_t kAISetTarget = 0x00193D90;  // thiscall on the controller (target)
+constexpr uint32_t kAIOff = 0x28;              // byte on the controller: its AI switched off
+// Battlefront's ways to the posts: the game's own goto (ICharacter::Goto, thiscall (character, marker, may fight):
+// a goto controller walks it there, fighting what it meets) to the level's goto markers (ICharacterGoto, never a
+// character), and whether one is still on its way (ICharacter::ExecutingGoto, thiscall (character, marker)).
+constexpr uint32_t kCharacterGoto = 0x00151400;
+constexpr uint32_t kExecutingGoto = 0x001513E0;
+constexpr uint32_t kGotoMarkerVtable = 0x00598970;
+constexpr float kFightRange = 800.0f;          // Battlefront: an enemy this near is fought, the post waits
+constexpr float kMarkerReach = 150.0f;         // a marker counts as reached this near (well inside kPostRadius)
 // A hit's attacker (the health change's last argument) is the character, its script instance, one of its
 // weapons (+0x1080.. +0x10A0: its sabers, ILightSaber) or a projectile of its (IScriptProjectile), which points
 // back at it.
@@ -139,6 +148,7 @@ struct Fighter {
     int score = 0, defeats = 0, falls = 0, assists = 0, streak = 0;
     float damage = 0;
     float stillAt[3] = {};   // where it was when it last moved on (stuck: see Unstick)
+    int post = -1;           // Battlefront: the post it walks to (-1: none, fighting or there)
     ULONGLONG stillSince = 0;
     ULONGLONG lastBlow = 0;  // when it last dealt or took an enemy's hit (idle beside its target: see Unstick)
     std::string troopClass;  // Battlefront: its trooper's class (it is a hero while `hero`)
@@ -194,6 +204,7 @@ struct Post {
     float hold = 0;     // -1 the clones' to +1 the droids'
 };
 std::vector<Post> g_Posts;
+std::vector<uint8_t*> g_PostMarkers; // each post's goto marker (a level object: lives as long as the level)
 float g_TeamStart[2][2] = {};
 std::vector<std::string> g_HeroPool[2];
 int g_HeroOf[2] = { -1, -1 }; // the fighter that is its side's hero, or -1
@@ -485,12 +496,73 @@ void Shield(Fighter& f, ULONGLONG now)
 
 // --- Fighting ----------------------------------------------------------------------------------------------------
 
+// Battlefront's troopers have a post to see to: one in three of a side holds one of its posts (a defender), the rest
+// go for the nearest post their side does not hold (attackers; defending when it holds them all, attacking when it
+// holds none). An enemy within kFightRange is fought first; with none, the fighter walks to its post (the game's
+// goto, which fights what it meets on the way) and waits there. Heroes hunt (Engage's way). False: not for this one.
+bool SeeToPost(int i)
+{
+    Fighter& f = g_Fighters[i];
+    if (!g_Conquest || g_PostMarkers.size() != g_Posts.size() || f.hero)
+        return false;
+    uint8_t* brain = Field<uint8_t*>(f.object, kCharacterAI);
+    f.post = -1;
+    if (!brain || Field<uint8_t>(brain, kAIOff))
+        return true;
+    const int side = SideOf(i);
+    const float* p = Position(f.object);
+    // an enemy near: fought (the one it fights already, while it stays near)
+    const int current = FighterOf(Field<uint8_t*>(brain, kAITarget));
+    int nearest = -1;
+    float nearestDistance = kFightRange;
+    for (int k = 0; k < g_Count; ++k) {
+        if (SideOf(k) == side || !Standing(g_Fighters[k]) || (k == g_Player && (g_PlayerFell || g_Fighters[k].out)))
+            continue;
+        const float* q = Position(g_Fighters[k].object);
+        const float d = std::hypot(p[0] - q[0], p[2] - q[2]) * (k == current ? 0.75f : 1.0f);
+        if (d < nearestDistance) {
+            nearestDistance = d;
+            nearest = k;
+        }
+    }
+    if (nearest >= 0) {
+        if (nearest != current)
+            reinterpret_cast<void(__fastcall*)(uint8_t*, void*, uint8_t*)>(uintptr_t(kAISetTarget))(
+                brain, nullptr, g_Fighters[nearest].object);
+        return true;
+    }
+    // its post
+    const bool defender = (i - SideStart(side)) % 3 == 2;
+    std::vector<size_t> owned, others;
+    for (size_t k = 0; k < g_Posts.size(); ++k)
+        (g_Posts[k].owner == side ? owned : others).push_back(k);
+    size_t goal = 0;
+    if ((defender && !owned.empty()) || others.empty()) {
+        goal = owned[size_t(i) % owned.size()];
+    } else {
+        goal = others[0];
+        for (size_t k : others)
+            if (std::hypot(g_Posts[k].x - p[0], g_Posts[k].z - p[2]) < std::hypot(g_Posts[goal].x - p[0], g_Posts[goal].z - p[2]))
+                goal = k;
+    }
+    if (std::hypot(g_Posts[goal].x - p[0], g_Posts[goal].z - p[2]) <= kMarkerReach)
+        return true; // there: holds it
+    f.post = int(goal);
+    uint8_t* marker = g_PostMarkers[goal];
+    if (!reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint8_t*)>(uintptr_t(kExecutingGoto))(f.object, nullptr, marker))
+        reinterpret_cast<void(__fastcall*)(uint8_t*, void*, uint8_t*, bool)>(uintptr_t(kCharacterGoto))(
+            f.object, nullptr, marker, true);
+    return true;
+}
+
 // A fighter of the AI's that has no enemy to fight (none, or one that fell) is set on the nearest standing enemy,
 // as the AI's own target choice would once provoked: a fighter that came back, or one that stood waiting.
 void Engage(int i)
 {
     Fighter& f = g_Fighters[i];
     if (i == g_Player || !Standing(f))
+        return;
+    if (SeeToPost(i))
         return;
     uint8_t* brain = Field<uint8_t*>(f.object, kCharacterAI);
     if (!brain)
@@ -525,6 +597,7 @@ void Engage(int i)
 }
 
 bool LineOfSight(const float a[3], const float b[3]); // below, with the cameras
+std::string PostName(size_t k);
 
 // A fighter of the AI's that cannot reach its target (see kStuckFor): moved to a place near the target that sees it
 // and is clear of the map's boxes.
@@ -542,16 +615,36 @@ void Unstick(int i, ULONGLONG now)
     if (now - f.stillSince < kStuckFor)
         return;
     uint8_t* brain = Field<uint8_t*>(f.object, kCharacterAI);
-    const int target = brain ? FighterOf(Field<uint8_t*>(brain, kAITarget)) : -1;
-    if (target < 0 || !Standing(g_Fighters[target]))
+    // Battlefront: one walking to its post (with no path there: a wall or a rock between) is brought near the post
+    const bool toPost = f.post >= 0 && size_t(f.post) < g_Posts.size();
+    const int target = toPost || !brain ? -1 : FighterOf(Field<uint8_t*>(brain, kAITarget));
+    if (!toPost && (target < 0 || !Standing(g_Fighters[target])))
         return;
-    const float* t = Position(g_Fighters[target].object);
+    float t[3];
+    if (toPost) {
+        t[0] = g_Posts[f.post].x;
+        t[1] = p[1];
+        t[2] = g_Posts[f.post].z;
+    } else {
+        std::memcpy(t, Position(g_Fighters[target].object), sizeof t);
+    }
+    const std::string goal = toPost ? "command post " + PostName(size_t(f.post)) : ShownName(target);
+    if (!g_PostMarkers.empty() && !toPost && std::hypot(p[0] - t[0], p[2] - t[2]) > kFightRange) { // waiting at its post
+        f.stillSince = now;
+        return;
+    }
     auto setTarget = [&] {
-        reinterpret_cast<void(__fastcall*)(uint8_t*, void*, uint8_t*)>(uintptr_t(kAISetTarget))(
-            brain, nullptr, g_Fighters[target].object);
+        if (!toPost) // (one going to a post: its way is given anew at the next Engage)
+            reinterpret_cast<void(__fastcall*)(uint8_t*, void*, uint8_t*)>(uintptr_t(kAISetTarget))(
+                brain, nullptr, g_Fighters[target].object);
     };
-    if (std::hypot(p[0] - t[0], p[2] - t[2]) < kStuckReach) {
-        // near its target and not fighting: out of its reach (on a platform the AI cannot climb), brought beside it
+    if (toPost && std::hypot(p[0] - t[0], p[2] - t[2]) < kStuckReach) {
+        f.stillSince = now;
+        return;
+    }
+    // near its target and not fighting: out of its reach (on a platform the AI cannot climb), brought beside it; in
+    // Battlefront at any distance (troopers stand still to shoot: still is stuck only when no blow lands either way)
+    if (std::hypot(p[0] - t[0], p[2] - t[2]) < kStuckReach || !g_PostMarkers.empty()) {
         const ULONGLONG last = std::max(f.lastBlow, g_Fighters[target].lastBlow);
         if (now - std::max(last, f.stillSince) < kIdleFor)
             return;
@@ -594,14 +687,14 @@ void Unstick(int i, ULONGLONG now)
         }
     }
     if (!found) {
-        LOG_INFO("HvV: %s cannot reach %s, and no place near it is clear", ShownName(i).c_str(), ShownName(target).c_str());
+        LOG_INFO("HvV: %s cannot reach %s, and no place near it is clear", ShownName(i).c_str(), goal.c_str());
         return;
     }
     float m[16];
     Transform(bestX, bestZ, std::atan2(t[0] - bestX, t[2] - bestZ), m);
     VirtualOf<void(__fastcall*)(uint8_t*, void*, const float*)>(f.object, kPlace)(f.object, nullptr, m);
     setTarget(); // its walk was cut short: set on the target anew
-    LOG_INFO("HvV: %s could not reach %s; brought nearer", ShownName(i).c_str(), ShownName(target).c_str());
+    LOG_INFO("HvV: %s could not reach %s; brought nearer", ShownName(i).c_str(), goal.c_str());
 }
 
 void EngageAll()
@@ -994,6 +1087,17 @@ void PlayIntro(uint8_t* character)
     const int count = Field<int>(list, 8);
     uint8_t** items = Field<uint8_t**>(list, 0xC);
     uint8_t* flavour = nullptr; // for one without an intro (Yoda): its first "flavour" idle (Idle_Flavor_v1...)
+    // a custom character's own first (<costume>_Intro): its base's class may hold other fighters' intros too
+    const CustomCharacter* custom = CustomCharacterOf(character);
+    const std::string own = custom ? custom->costume + "_Intro" : std::string();
+    for (int i = 0; i < count && !own.empty(); ++i) {
+        const char* name = items[i] ? Field<const char*>(items[i], 0xC) : nullptr;
+        if (name && _stricmp(name, own.c_str()) == 0) {
+            reinterpret_cast<bool(__fastcall*)(uint8_t*, void*, uint8_t*, float, int, int, float)>(kPlaySequence)(
+                character, nullptr, items[i], 0.0f, 0, 0, 1.0f);
+            return;
+        }
+    }
     for (int i = 0; i < count; ++i) {
         const char* name = items[i] ? Field<const char*>(items[i], 0xC) : nullptr;
         const size_t length = name ? strlen(name) : 0;
@@ -1487,6 +1591,7 @@ void InstallHvv()
         f = {};
     g_Conquest = false;
     g_Posts.clear();
+    g_PostMarkers.clear();
     g_HeroPool[0].clear();
     g_HeroPool[1].clear();
     g_HeroOf[0] = g_HeroOf[1] = -1;
@@ -1629,6 +1734,9 @@ void InstallHvv()
             for (const std::string& hero : g_HeroPool[side])
                 layout.characters.push_back({ hero, kDevMapFirstId + kLoaderIds + loader++,
                     kDevMapMiddleX + 7000.0f + 200.0f * float(loader), kDevMapMiddleZ - 4500.0f, 0.0f });
+        for (const Post& post : g_Posts) // the posts' goto markers
+            layout.markers.push_back({ post.x, post.z });
+        layout.markerReach = kMarkerReach;
     }
     SetDevMapLayout(layout);
     SavePlayerChoice();
@@ -1898,6 +2006,16 @@ void HvvFrame()
         g_Woken = true;
         Track(g_Fighters[g_Player], player);
         FullHealth(player);
+        for (size_t k = 0; g_Conquest && k < g_Posts.size(); ++k) { // the posts' goto markers (all, or none used)
+            uint8_t* marker = reinterpret_cast<uint8_t*(__cdecl*)(uint32_t)>(uintptr_t(kObjectById))(
+                kDevMapFirstMarkerId + uint32_t(k));
+            if (!marker || Field<uint32_t>(marker, 0) != kGotoMarkerVtable) {
+                LOG_WARN("HvV: post %zu has no goto marker; the AI hunts instead", k);
+                g_PostMarkers.clear();
+                break;
+            }
+            g_PostMarkers.push_back(marker);
+        }
         for (int i = 0; i < g_Count; ++i) {
             Fighter& f = g_Fighters[i];
             if (i == g_Player)

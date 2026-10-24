@@ -23,7 +23,11 @@ and hold, tickets, and heroes for points. It is in the game's own main menu: **M
   Each side starts with the post nearest its start.
 - **Tickets**: every trooper that comes back costs its side one. A side holding fewer posts than the other loses a
   ticket every 5 seconds (every 2 seconds holding none while the other holds all). A side out of tickets loses.
-- **Coming back**: after a fall you come back at one of your side's posts (at its start without one).
+- **Coming back**: after a fall you come back at one of your side's posts or its start, one with no enemy near
+  (picked at random among those).
+- **The computer's troopers** have a job: about one in three of a side defends one of its posts, the others attack
+  the nearest post their side does not hold. They fight any enemy that comes near, then go back to their post.
+  Heroes hunt the enemy.
 - **Points**: damage, defeats, assists and posts taken. Hold Tab (Back) for the leaderboard.
 - **Heroes**: 500 points buy a hero: when "HERO READY" shows, press **B** (Circle; on the keyboard the critical
   attack key, E). You become one of your side's heroes where you stand, until you fall; then you come back as a
@@ -40,7 +44,9 @@ with White/L1/Q, and strike with the fast attack; no reinforcements or bombardme
 Battlefront is Heroes vs Villains (`src/game/hvv.cpp`) with `bf:1`: its fighters are placed in the level (so their
 classes load with it, sounds and all), the troopers in groups at their sides' starts; the heroes' classes are placed
 too, far off and never woken, so a hero called later has its sounds. Lives become tickets, the respawn place a post of
-the side's, the computer's target the enemy nearest the post it goes for (the nearest its side does not hold). The
+the side's. The computer's troopers walk to their posts with the game's own goto (`ICharacter::Goto` to an
+`ICharacterGoto` marker; the dev map builder copies the level's marker to every post) and are given the nearest enemy
+within 800 units to fight; one that cannot get through to its post (no path nodes on these maps) is moved near it. The
 player's trooper gets Cody's kit (`cody.cpp`, a trooper kind: no specials). A battle droid's first costume has no
 body, so its placed droids carry the plain droid's (`Mesh Choice`). Launch arguments (as the menu writes them):
 `hvv:<troopers> hvvheroes:<a side> hvvplayer:<n> hvvlives:<tickets> bf:1 bfhealth:<trooper>,<hero>

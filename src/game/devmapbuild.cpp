@@ -895,7 +895,38 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
             return fail("the level's music");
         say("music %s; ", layout->music.c_str());
     }
+    // the goto marker the layout's markers copy: the level's plain one (no character of its own, no trigger)
     std::vector<Object> keptObjects;
+    if (layout && !layout->markers.empty()) {
+        const Object* marker = nullptr;
+        for (Object& o : objects)
+            if (o.cls == "ICharacterGoto" && !Find(o.props, "Character") && Find(o.props, "Transform"))
+                marker = &o;
+        if (!marker)
+            return fail("the goto marker");
+        for (size_t k = 0; k < layout->markers.size(); ++k) {
+            Object copy = *marker;
+            Writer id, name;
+            id.U32(kDevMapFirstMarkerId + uint32_t(k));
+            name.String("ICharacterGoto_dev" + std::to_string(k));
+            const float m[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, layout->markers[k].first, float(kFloorY + kStandLift),
+                layout->markers[k].second };
+            const float reach[1] = { layout->markerReach };
+            for (Property& p : copy.props) {
+                if (p.name == "ID")
+                    p.data = id.out;
+                else if (p.name == "Name")
+                    p.data = name.out;
+            }
+            SetFloats(Find(copy.props, "Transform"), m);
+            SetFloats(Find(copy.props, "Close Enough"), reach);
+            // an attacked AI keeps its way (the port gives it the fight when an enemy is near)
+            if (Property* p = Find(copy.props, "Cancel Goto If Attacked"); p && p->data.size() >= 4)
+                std::memset(p->data.data(), 0, 4);
+            keptObjects.push_back(std::move(copy));
+        }
+        say("%zu goto markers; ", layout->markers.size());
+    }
     for (Object& o : objects) {
         const bool keep = std::any_of(std::begin(kKeep), std::end(kKeep), [&](const char* c) { return o.cls == c; }) ||
             // the sky (Utapau's): not around a map of its own (a closed room; outside it, nothing)
