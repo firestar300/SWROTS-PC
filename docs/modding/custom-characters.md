@@ -100,7 +100,10 @@ the texture, and black behind a cut-out shows as a dark fringe.
 `Saber=` sets the colour, `Blades=` the kind and `Hilt=` the hilt; all keep the base's when left out, and they work
 on any Jedi or Sith base. `Hilt=` names a weapon mesh: one of the game's (`LsaberObi\LsaberObi`, `LSaberDooku\LSaberDooku`,
 `LsaberMace\LsaberMace`, ...) or the pack's own under `mods\meshes\weapons\` ([replacing weapons](replacing-weapons.md)
-has the format); a double-bladed saber keeps the double hilt its blades need. The kinds:
+has the format); a double-bladed saber keeps the double hilt its blades need. A pack's own hilt needs, beside its mesh
+and textures, its attachment points and bounds under the mesh's name (`<name>.gat`, `<name>.gin`, e.g. a game saber's
+`.xbl_gat` and `.xbl_gin` renamed): the blade runs from `ATT_saber_base` to `ATT_sabertip`, and without them it comes
+out of the hand across the hilt and hits nothing. The kinds:
 
 - `single`: one blade (a base with a double-bladed saber gets the Jedi Knights' hilt);
 - `double`: the Jedi Brute's double-bladed saber (Darth Maul: `Base=IJDBrute`, whose moves are made for it, needs
