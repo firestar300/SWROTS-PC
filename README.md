@@ -233,5 +233,8 @@ The game itself is not included and is not distributed by this project; you must
   ([#2](../../issues/2), [#3](../../issues/3)), [weapon modding](docs/modding/replacing-weapons.md) (the
   guide, the weapon mesh layout and the tools in `tools/weapons/`) and
   [music modding](docs/modding/replacing-music.md) (the guide and `tools/audio/hwx.py`).
+- [@firestar300](https://github.com/firestar300): custom character fixes found while building a character pack
+  ([#60](../../pull/60)): any number of custom voice lines, a pack's own dialogue archive and saber hilts, and live
+  swaps to a mod's character.
 - [@QTG128](https://github.com/QTG128): the first bug report, which found the missing sound at startup
   ([#1](../../issues/1)).
