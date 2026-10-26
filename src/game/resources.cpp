@@ -25,6 +25,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -929,24 +930,33 @@ bool IsCharacterContent(const std::string& path)
 }
 
 // The loose textures (.stx) of a folder under mods\ (e.g. "meshes\chars\luke\"), declared to the level when it has
-// not: a mod's new character's.
+// not: a mod's new character's. With them its attachment points (.gat) and bounds (.gin): a weapon's loader asks
+// only for declared ones, and a saber without its .gat draws its blade from the hand, across the hilt.
 constexpr int kTextureType = 0;
+constexpr int kAttachmentType = 33;
+constexpr int kBoundsType = 34;
 
 void DeclareLooseTextures(uint8_t* scene, const std::string& folder)
 {
-    for (const std::string& texture : LooseResourceNames(folder)) {
-        if (texture.size() < 4 || texture.compare(texture.size() - 4, 4, ".stx") != 0)
+    static const struct { const char* extension; int typeId; } kCompanions[] = {
+        { ".stx", kTextureType }, { ".gat", kAttachmentType }, { ".gin", kBoundsType } };
+    for (const std::string& file : LooseResourceNames(folder)) {
+        if (file.size() < 4)
+            continue;
+        const auto companion = std::find_if(std::begin(kCompanions), std::end(kCompanions),
+            [&](const auto& c) { return file.compare(file.size() - 4, 4, c.extension) == 0; });
+        if (companion == std::end(kCompanions))
             continue;
         alignas(4) uint8_t path[0x100] = {};
-        PathFromText(path, nullptr, texture.c_str(), 1);
+        PathFromText(path, nullptr, file.c_str(), 1);
         auto* enginePath = reinterpret_cast<const EnginePath*>(path);
-        if (SceneIsDeclared(scene, nullptr, enginePath, kTextureType))
+        if (SceneIsDeclared(scene, nullptr, enginePath, companion->typeId))
             continue;
-        const std::string full = "d:\\" + texture;
+        const std::string full = "d:\\" + file;
         WIN32_FILE_ATTRIBUTE_DATA loose{};
         if (GetFileAttributesExW(LooseHostPath(full.c_str()).c_str(), GetFileExInfoStandard, &loose) &&
-            Declare(scene, enginePath, kTextureType, loose.nFileSizeLow))
-            LOG_INFO("Declare: %s (type 0), loose, with its mesh", full.c_str());
+            Declare(scene, enginePath, companion->typeId, loose.nFileSizeLow))
+            LOG_INFO("Declare: %s (type %d), loose, with its mesh", full.c_str(), companion->typeId);
     }
 }
 
