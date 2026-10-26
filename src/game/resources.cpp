@@ -774,9 +774,11 @@ EngineObject* __fastcall OpenManualHook(uint8_t* packer, void* edx, EnginePath* 
     for (char& c : wanted)
         c = char(tolower(static_cast<unsigned char>(c)));
     if (!reader || *reinterpret_cast<uint32_t*>(packer + 0x1D0) != 2) {
-        // Not streaming (a character spawned once the level has loaded): the engine opens the disc file,
-        // which for a PAK-only binding does not exist (its file reader then crashes, 0x232190). Those
-        // are served from a copy like the ones the stream lacks.
+        // Not streaming (a character spawned once the level has loaded): the engine parses an entry
+        // header from the packer's reader (0x51600), gone with the level's stream, and faults in its
+        // file reader (0x232190) without end. Those are served from a copy like the ones the stream
+        // lacks; with none (a mod's body never worn yet: no binding rebuilt in cache\disc\) the answer
+        // is the engine's own "not there" (null), and the caller (0x4B0BD) has the binding rebuilt.
         std::wstring onDisc = g_GameData;
         for (const char* c = full + 2; *c; ++c)
             onDisc += wchar_t(static_cast<unsigned char>(*c));
@@ -784,7 +786,8 @@ EngineObject* __fastcall OpenManualHook(uint8_t* packer, void* edx, EnginePath* 
             return g_OriginalOpenManual(packer, edx, path);
         if (EngineObject* copy = OpenManualCopy(full, wanted, g_LevelIndex))
             return copy;
-        return g_OriginalOpenManual(packer, edx, path);
+        LOG_INFO("PAK: %s (manual) is nowhere yet: built by the engine", wanted.c_str());
+        return nullptr;
     }
     char pakPath[512] = {};
     BuildPath(reinterpret_cast<EnginePath*>(packer + 0x174), nullptr, pakPath, 0);
