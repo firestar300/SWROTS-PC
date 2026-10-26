@@ -1356,8 +1356,9 @@ bool ReadWhole(const std::wstring& path, std::vector<uint8_t>& data)
 // The game's generic dialogue archive (Dialogue\gen_dialogue.rpx, mounted in every level) with the custom lines
 // added, served in its place for this start. The archive: u32 1, u32 count, 0x18 bytes, then `count` 0x2C-byte
 // records {name[0x20] (lower case, sorted), u32 offset, u32 size, u32 (the same in all)}, free room up to the first
-// line's data, the lines (2048-aligned). The new records go in their sorted places (the offsets are absolute: no
-// line moves), their lines at the end. Rebuilt in cache\voice\ when its inputs change.
+// line's data, the lines (2048-aligned). The new records go in their sorted places, their lines at the end; when the
+// room before the first line is too small for the records (the game's archive has room for some 20 more), every line
+// moves down by whole sectors (the offsets are absolute). Rebuilt in cache\voice\ when its inputs change.
 void BuildVoiceArchive(const std::wstring& gameData, const std::wstring& cache)
 {
     static const std::string kArchive = "\\dialogue\\gen_dialogue.rpx";
@@ -1419,9 +1420,12 @@ void BuildVoiceArchive(const std::wstring& gameData, const std::wstring& cache)
             archive.insert(archive.end(), line.begin(), line.end());
             ++added;
         }
-        if (0x20 + records.size() * 0x2C > firstData) {
-            LOG_WARN("Custom characters: the dialogue archive has no room for %zu more lines", added);
-            return;
+        const size_t table = 0x20 + records.size() * 0x2C;
+        if (table > firstData) {
+            const uint32_t shift = uint32_t((table - firstData + 2047) & ~size_t(2047));
+            archive.insert(archive.begin() + firstData, shift, 0);
+            for (Record& r : records)
+                r.offset += shift;
         }
         archive.resize((archive.size() + 2047) & ~size_t(2047), 0);
         std::sort(records.begin(), records.end(), [](const Record& a, const Record& b) { return _stricmp(a.name.c_str(), b.name.c_str()) < 0; });
