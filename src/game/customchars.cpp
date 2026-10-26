@@ -1358,18 +1358,22 @@ bool ReadWhole(const std::wstring& path, std::vector<uint8_t>& data)
 // records {name[0x20] (lower case, sorted), u32 offset, u32 size, u32 (the same in all)}, free room up to the first
 // line's data, the lines (2048-aligned). The new records go in their sorted places, their lines at the end; when the
 // room before the first line is too small for the records (the game's archive has room for some 20 more), every line
-// moves down by whole sectors (the offsets are absolute). Rebuilt in cache\voice\ when its inputs change.
-void BuildVoiceArchive(const std::wstring& gameData, const std::wstring& cache)
+// moves down by whole sectors (the offsets are absolute). Made from a mod's own archive when there is one
+// (mods\Dialogue\gen_dialogue.rpx: its replaced lines stay), and rebuilt in cache\voice\ when its inputs change.
+void BuildVoiceArchive(const std::wstring& mods, const std::wstring& gameData, const std::wstring& cache)
 {
     static const std::string kArchive = "\\dialogue\\gen_dialogue.rpx";
     kernel::SetDiscFileOverride(kArchive, L"");
     g_VoiceServed = false;
     if (g_VoiceLines.empty())
         return;
-    const std::wstring source = gameData + L"\\Dialogue\\gen_dialogue.rpx";
+    std::wstring source = mods + L"\\Dialogue\\gen_dialogue.rpx";
+    const bool modsArchive = GetFileAttributesW(source.c_str()) != INVALID_FILE_ATTRIBUTES;
+    if (!modsArchive)
+        source = gameData + L"\\Dialogue\\gen_dialogue.rpx";
     const std::wstring folder = cache + L"\\voice", target = folder + L"\\gen_dialogue.rpx";
     // its inputs: the archive's size and every line's file and size
-    std::string stamp;
+    std::string stamp = modsArchive ? "mods;" : "game;";
     WIN32_FILE_ATTRIBUTE_DATA info;
     auto describe = [&](const std::wstring& path) {
         if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &info))
@@ -1474,7 +1478,7 @@ void InstallCustomCharacters(const std::wstring& mods, const std::wstring& gameD
     g_PictureCopies.clear();
     AddBuiltInCharacters();
     RegisterResourceGenerator(&CopyPicture);
-    BuildVoiceArchive(gameData, cache);
+    BuildVoiceArchive(mods, gameData, cache);
     if (g_Customs.empty())
         return;
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kClassLookup)), kClassLookupBytes, sizeof(kClassLookupBytes)) != 0) {

@@ -272,7 +272,8 @@ its own (`Speaker=`).
 With a `[Voice]` section it says its own lines for those events: the files `mods\characters\<name>\voice\<line>.xadpcm`
 (headerless Xbox ADPCM, mono, 22050 Hz, as the game's), their texts in `[Subtitles]`. The port serves the generic
 archive (`Dialogue\gen_dialogue.rpx`, mounted in every level) with the lines added (built in `cache\voice\` when
-they change) and, when the dialogue engine starts one of the character's entries for such an event (StartEntry,
+they change, from a pack's own `mods\Dialogue\gen_dialogue.rpx` when there is one, so the lines it replaces stay;
+any number of lines fit) and, when the dialogue engine starts one of the character's entries for such an event (StartEntry,
 0x90330), gives the entry the character's line for that call: the voice, the subtitle and the line's length follow
 it. Its other sounds (grunts) stay the base's. The lines take turns per event (a turn passes only when the
 engine starts or queues one). Subtitles show with the game's subtitles on (the Settings menu, or `set subtitles true`).
