@@ -56,6 +56,7 @@ IntroSpeed=1.2           ; the Jedi Brute's twirl), at this speed (optional; 1)
 Lightning=1              ; on Serra Keto's class (Base=ISerra): Force lightning instead of her stun (optional)
 Grapples=IDooku          ; on Serra Keto's class: Count Dooku's grapple throws instead of hers (optional)
 ForceStorm=1             ; on Serra Keto's class: the Force Storm special (optional; see "Other duelists' moves")
+Breathing=0              ; on Darth Vader's class (Base=IVader): without his breathing (optional; 1)
 Side=Hero                ; Hero or Villain: its side in Heroes vs Villains by default
 Speaker=Luke             ; its name in subtitles (optional; the name's first word)
 Code=                    ; whose lines it says, a dialogue speaker code such as AKN or OBW (optional; the base's)
