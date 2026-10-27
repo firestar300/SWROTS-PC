@@ -18,7 +18,10 @@ struct CustomMap {
     std::string modelFolder;   // under meshes\, e.g. "maps\cantina\"
     std::string modelName;     // e.g. "cantina"
     uint32_t vertices = 0;     // the model's vertex count (its baked light has one entry per vertex)
+    std::string skyFolder, skyName; // its sky's model (Sky=), drawn as the level's sky backdrop; empty: none
     float floor = 0;           // the height of the model's floor (its own y)
+    bool hasKillHeight = false;
+    float killHeight = 0;      // a fighter below it (its own y) dies, as in a fall into the void (KillHeight=)
     float heroes[2] = {}, villains[2] = {}; // the lines' middles (x, z)
     float lineGap = 150;
     std::vector<DevMapBox> boxes;           // in the map's own coordinates (cy from its y 0), yaw in radians

@@ -1108,6 +1108,7 @@ void MenuAfterFrame()
     game::CodyFrame();
     game::RevanFrame();
     game::HvvFrame();
+    game::DevMapFrame();
 }
 
 } // namespace swrots::debug

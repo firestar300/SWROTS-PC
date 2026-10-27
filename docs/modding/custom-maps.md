@@ -43,7 +43,9 @@ Name=Mos Eisley Cantina          ; as shown
 Music=mus_m13_templebattle01_lp  ; its music (optional): a music slot of the game, the track beside map.ini
 Model=maps\cantina\cantina       ; its model under meshes\, without .msh
 Vertices=10234                   ; the model's vertex count (all its parts)
+Sky=maps\cantina\cantina_sky     ; its sky's model (optional), about the sky's origin (see below)
 Floor=0                          ; the height (y) of its floor: it stands there on the dev map's floor
+KillHeight=-200                  ; a fighter below this height (y) dies, as in a fall into the void (optional)
 HeroesLine=0 -350                ; Heroes vs Villains: the middle of the heroes' line (x z)
 VillainsLine=0 350               ; and of the villains'; the lines run across the line between them
 LineGap=150                      ; between fighters in a line
@@ -96,6 +98,16 @@ it is.
 
 The level's load stops in the game's error handler (in `IStaticManager`, as the static's meshes are set up) when
 the model is too large: a model of 19786 vertices loads, one of 30101 does not, whatever its textures.
+
+## Sky and pits
+
+Without `Sky=` a map of its own has no sky around it. With it, the level's sky backdrop (Utapau's `backdrop`, an
+`IStatic` drawn about the `ISectorSkybox` before the rest, lit by its ambient light alone) draws the map's sky model
+instead, turned as the map is; Utapau's cloud domes and its sky dome go. The model is a static one, as the map's,
+in the sky's own units: Utapau's backdrop is some 600 units across and the converter's sky box is 1000 units wide.
+
+`KillHeight=` kills a character that falls below it (the character's instant kill, as in the game's own falls into
+the void: in Heroes vs Villains the fighter comes back as after any defeat). It is checked once a frame.
 
 ## Light
 
@@ -192,4 +204,4 @@ Utapau one, with `devmap:1 versus:1 custommap:<map>`.
 
 - The camera's line of sight (Versus) and the AI's moves (Heroes vs Villains) know the boxes only, not `Brushes=`.
 - Paths for the AI (a map's own navigation).
-- The map's own point lights and sky (its light so far: baked, ambient, and the level's lights scaled).
+- The map's own point lights (its light so far: baked, ambient, and the level's lights scaled).
