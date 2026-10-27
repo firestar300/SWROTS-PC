@@ -22,6 +22,7 @@ struct CustomMap {
     float heroes[2] = {}, villains[2] = {}; // the lines' middles (x, z)
     float lineGap = 150;
     std::vector<DevMapBox> boxes;           // in the map's own coordinates (cy from its y 0), yaw in radians
+    std::vector<uint8_t> brushes;           // its Brushes file: BSP trees in the level's format, its own coordinates
     std::vector<std::pair<float, float>> spawns;
     // Battlefront ([Battlefront]): its command posts and where each team starts (its own coordinates, x z)
     std::vector<std::pair<float, float>> commandPosts;
