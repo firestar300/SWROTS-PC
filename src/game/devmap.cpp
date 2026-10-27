@@ -332,6 +332,25 @@ void InstallDevMap(const std::wstring& gameData, const std::wstring& mods)
 
 bool DevMapActive() { return g_Active; }
 
+// A fall below a custom map's KillHeight= (its pits): the character's instant kill (ICharacter's slot 0xC8, 0x152D30),
+// as the game's own falls into the void; Heroes vs Villains' guard on it keeps the player's fall to the match's own.
+void DevMapFrame()
+{
+    if (!g_Active || !g_Map || !g_Map->hasKillHeight)
+        return;
+    constexpr uint32_t kHealth = 0x130, kDead = 0x12C, kTransform = 0x150, kInstantKillSlot = 0xC8;
+    const float killY = kDevMapFloorY + g_Map->killHeight - g_Map->floor;
+    for (uint8_t* c : LevelCharacters()) {
+        if (*reinterpret_cast<const float*>(c + kHealth) <= 0 || c[kDead])
+            continue;
+        if (reinterpret_cast<const float*>(c + kTransform + 48)[1] >= killY)
+            continue;
+        using InstantKill = void(__fastcall*)(uint8_t*, void*, uint32_t);
+        const auto kill = reinterpret_cast<InstantKill>((*reinterpret_cast<void* const* const*>(c))[kInstantKillSlot / 4]);
+        kill(c, nullptr, 0);
+    }
+}
+
 const CustomMap* DevMapCustomMap() { return g_Active ? g_Map : nullptr; }
 
 bool BootArgument(const char* name, std::string& value)

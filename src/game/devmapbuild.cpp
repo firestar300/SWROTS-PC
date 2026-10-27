@@ -602,7 +602,7 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
             floorHandle = U32Of(Find(g, "MGR___lighthandle"));
             haveFloor = true;
             kept.push_back(g);
-        } else if (model == kSkyMesh) {
+        } else if (model == kSkyMesh && !(layout && !layout->skyName.empty())) {
             kept.push_back(g);
         }
     }
@@ -974,14 +974,39 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
         }
         say("%zu goto markers; ", layout->markers.size());
     }
+    // A map's own sky: Utapau's backdrop (an IStatic drawn about the ISectorSkybox, "MeshName" its model's name and
+    // folder) draws the map's sky model, turned as the map is; the cloud domes go.
+    const bool ownSky = layout && !layout->skyName.empty();
+    auto skyBackdrop = [&](Object& o) {
+        Property* mesh = Find(o.props, "MeshName");
+        if (!mesh)
+            return false;
+        Reader r{ mesh->data };
+        if (r.String() != "backdrop")
+            return false;
+        Writer w;
+        w.String(layout->skyName);
+        w.String(layout->skyFolder);
+        mesh->data = w.out;
+        if (Property* t = Find(o.props, "Transform"); t && t->data.size() >= 48) {
+            const float c = std::cos(layout->modelYaw), s = std::sin(layout->modelYaw);
+            const float turn[9] = { c, 0, -s, 0, 1, 0, s, 0, c };
+            SetFloats(t, turn);
+        }
+        return true;
+    };
+    bool skyPlaced = false;
     for (Object& o : objects) {
+        const bool sky = o.cls == "IStatic" && Find(o.props, "Skybox Render Priority");
         const bool keep = std::any_of(std::begin(kKeep), std::end(kKeep), [&](const char* c) { return o.cls == c; }) ||
-            // the sky (Utapau's): not around a map of its own (a closed room; outside it, nothing)
-            (o.cls == "IStatic" && Find(o.props, "Skybox Render Priority") && !(layout && !layout->modelName.empty())) ||
+            // the sky (Utapau's): not around a map of its own (a closed room; outside it, nothing), unless it has one
+            (sky && !(layout && !layout->modelName.empty())) || (sky && ownSky && skyBackdrop(o) && (skyPlaced = true)) ||
             (music && (U32Of(Find(o.props, "ID")) == sequencerId || U32Of(Find(o.props, "ID")) == trackId));
         if (keep)
             keptObjects.push_back(std::move(o));
     }
+    if (ownSky)
+        say("sky %s%s%s; ", layout->skyFolder.c_str(), layout->skyName.c_str(), skyPlaced ? "" : " (no backdrop)");
     say("%zu of %zu objects kept", keptObjects.size(), objects.size());
     // a duel: "Head to head arena?" (ILevelProperties +0xCC: the game's Versus start, rounds, HUD and cameras), not a
     // bonus mission, and the two fighters' spawn points (IVaderMultiSpawnPoint, an IPointSpawnPlayer by descent:

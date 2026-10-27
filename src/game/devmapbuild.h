@@ -36,6 +36,7 @@ struct DevMapLayout {
     // A map of a mod's own (custommaps.h): its model under meshes\ (folder and name) in the place of the floor's,
     // where it stands on the floor, its vertex count (its baked light), and its collision boxes.
     std::string modelFolder, modelName;
+    std::string skyFolder, skyName; // its sky: the model the level's sky backdrop draws (the other sky parts go)
     uint32_t modelVertices = 0;
     float modelX = 0, modelY = 0, modelZ = 0, modelYaw = 0; // modelY: from the floor
     std::vector<DevMapBox> boxes;

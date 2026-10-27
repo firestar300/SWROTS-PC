@@ -97,6 +97,16 @@ bool ReadMap(const std::wstring& file, const std::string& id, CustomMap& m)
     }
     m.modelFolder = model.substr(0, slash + 1);
     m.modelName = model.substr(slash + 1);
+    // Sky=maps\cantina\cantina_sky: a model about the sky's origin (the level's backdrop is some 600 units across)
+    const std::string sky = Profile(file, L"Map", L"Sky");
+    if (const size_t skySlash = sky.find_last_of('\\'); skySlash != std::string::npos && skySlash + 1 < sky.size()) {
+        m.skyFolder = sky.substr(0, skySlash + 1);
+        m.skyName = sky.substr(skySlash + 1);
+    }
+    if (const std::string kill = Profile(file, L"Map", L"KillHeight"); !kill.empty()) {
+        m.hasKillHeight = true;
+        m.killHeight = std::strtof(kill.c_str(), nullptr);
+    }
     m.vertices = uint32_t(std::strtoul(Profile(file, L"Map", L"Vertices").c_str(), nullptr, 10));
     if (!m.vertices) {
         LOG_WARN("Custom maps: %s needs Vertices (its model's vertex count)", id.c_str());
@@ -334,6 +344,8 @@ void ApplyCustomMap(const CustomMap& map, DevMapLayout& layout)
 {
     layout.modelFolder = map.modelFolder;
     layout.modelName = map.modelName;
+    layout.skyFolder = map.skyFolder;
+    layout.skyName = map.skyName;
     layout.modelVertices = map.vertices;
     CustomMapToWorld(map, 0, 0, layout.modelX, layout.modelZ);
     layout.modelY = -map.floor;
