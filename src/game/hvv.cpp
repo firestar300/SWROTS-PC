@@ -1759,6 +1759,8 @@ void InstallHvv()
 
 bool HvvActive() { return g_Active; }
 
+bool HvvFighting() { return g_Active && g_Phase == Phase::Fight; }
+
 bool HvvSameSide(const uint8_t* a, const uint8_t* b)
 {
     const int i = FighterOf(a), k = FighterOf(b);
