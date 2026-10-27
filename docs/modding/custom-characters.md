@@ -200,8 +200,9 @@ mods\interfc\front_end\s_selduel_fb_<costume>_v2.stx     player 2's (optional)
 ```
 
 (`<costume>` in lower case, e.g. `s_selduel_lukehead.stx`.) Any number of custom characters get their slots (up to
-seven after Yoda). The full bodies show under the strip and on the arena screen, as the game's fighters'; without
-them the arena screen shows the bust in the full body's frame.
+nineteen after Yoda, Commander Cody and the Droid Commander among them; the strip scrolls). The full bodies show
+under the strip and on the arena screen, as the game's fighters'; without them the arena screen shows the bust in
+the full body's frame.
 
 The menus use only pictures read with the shared PAK (`res_null.pak`; a picture under `mods\` that no PAK has is
 refused: its pre-cache finds no image, 0x210B6B), so a custom character's entries in the screens' picture sets name
