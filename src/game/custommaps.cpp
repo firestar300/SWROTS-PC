@@ -154,6 +154,13 @@ bool ReadMap(const std::wstring& file, const std::string& id, CustomMap& m)
             break;
         m.boxes.push_back({ v[0], v[1], v[2], v[3], v[4], v[5], v.size() > 6 ? v[6] * kPi / 180 : 0.0f });
     }
+    // Brushes=<file in the map's folder>: its collision as convex volumes (BSP trees in the level file's format)
+    const std::string brushes = Profile(file, L"Collision", L"Brushes");
+    if (!brushes.empty()) {
+        const std::wstring path = file.substr(0, file.find_last_of(L'\\') + 1) + std::wstring(brushes.begin(), brushes.end());
+        if (!ReadAll(path, m.brushes))
+            LOG_WARN("Custom maps: %s's brushes %s are missing", id.c_str(), brushes.c_str());
+    }
     // its light: one number (grey) or three (red, green, blue) each
     auto colour = [&](const wchar_t* key, float (&out)[3]) {
         const std::vector<float> c = Numbers(Profile(file, L"Lighting", key));
@@ -247,8 +254,9 @@ void InstallCustomMaps(const std::wstring& mods)
         CustomMap m;
         if (!ReadMap(file, Narrow(found.cFileName), m))
             continue;
-        LOG_INFO("Custom maps: %s (%s), model meshes\\%s%s, %zu collision boxes, %zu spawns", m.id.c_str(),
-            m.name.c_str(), m.modelFolder.c_str(), m.modelName.c_str(), m.boxes.size(), m.spawns.size());
+        LOG_INFO("Custom maps: %s (%s), model meshes\\%s%s, %zu collision boxes, %zu bytes of brushes, %zu spawns",
+            m.id.c_str(), m.name.c_str(), m.modelFolder.c_str(), m.modelName.c_str(), m.boxes.size(), m.brushes.size(),
+            m.spawns.size());
         g_Maps.push_back(std::move(m));
     } while (FindNextFileW(find, &found));
     FindClose(find);
@@ -335,6 +343,7 @@ void ApplyCustomMap(const CustomMap& map, DevMapLayout& layout)
     layout.lightScale = map.lightScale;
     layout.bakedLight = map.bakedLight;
     layout.music = map.music;
+    layout.brushes = map.brushes;
     layout.boxes.clear();
     for (const DevMapBox& b : map.boxes) {
         DevMapBox w = b;

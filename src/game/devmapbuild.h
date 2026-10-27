@@ -39,6 +39,9 @@ struct DevMapLayout {
     uint32_t modelVertices = 0;
     float modelX = 0, modelY = 0, modelZ = 0, modelYaw = 0; // modelY: from the floor
     std::vector<DevMapBox> boxes;
+    // Its own brushes: BSP trees in the level file's format (convex volumes, their planes), in the model's
+    // coordinates, placed as the model is. With them the floor goes down under the map's lower parts.
+    std::vector<uint8_t> brushes;
     // Its light: the model's ambient (negative: the floor's), its baked light (one colour a vertex, 0xAARRGGBB; with
     // none, white), the characters' ambient (negative: the dev map's) and the point lights' intensity scale.
     float modelAmbient[3] = { -1, -1, -1 };
