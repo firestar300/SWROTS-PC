@@ -107,7 +107,9 @@ instead, turned as the map is; Utapau's cloud domes and its sky dome go. The mod
 in the sky's own units: Utapau's backdrop is some 600 units across and the converter's sky box is 1000 units wide.
 
 `KillHeight=` kills a character that falls below it (the character's instant kill, as in the game's own falls into
-the void: in Heroes vs Villains the fighter comes back as after any defeat). It is checked once a frame.
+the void: in Heroes vs Villains the fighter comes back as after any defeat), once a fall: checked every frame, it
+kills a character again only after it has been above the line. In Heroes vs Villains and Battlefront it applies while
+the fight is on (not during the line-up or the intro).
 
 ## Light
 
