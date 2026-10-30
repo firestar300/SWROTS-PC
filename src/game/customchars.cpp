@@ -28,6 +28,7 @@
 #include "game/menus.h"
 #include "kernel/kernel.h"
 #include "game/resources.h"
+#include "kernel/clock.h"
 
 namespace swrots::game {
 
@@ -229,7 +230,7 @@ ForcedLine g_Forced;
 
 int __fastcall StartEntryHook(uint8_t* engine, void*, uint8_t* speaker, int entry, int a, int b, int c)
 {
-    if (speaker && speaker == g_Forced.speaker && entry >= 0 && g_Forced.id && GetTickCount64() < g_Forced.until) {
+    if (speaker && speaker == g_Forced.speaker && entry >= 0 && g_Forced.id && kernel::GameTickCount64() < g_Forced.until) {
         uint8_t* e = *reinterpret_cast<uint8_t**>(engine + kDialogueEntries) + size_t(entry) * kDialogueEntrySize;
         const char* name = *reinterpret_cast<const char**>(e + 0x14);
         if (name && _strnicmp(name, g_Forced.event, 3) == 0) {
@@ -251,7 +252,7 @@ int __fastcall StartEntryHook(uint8_t* engine, void*, uint8_t* speaker, int entr
     uint8_t* e = *reinterpret_cast<uint8_t**>(engine + kDialogueEntries) + size_t(entry) * kDialogueEntrySize;
     const char* name = *reinterpret_cast<const char**>(e + 0x14);
     const char* duel = nullptr; // this entry answers the duel's line: its INT / WIN lines first
-    if (g_DuelLine.speaker == speaker && name && GetTickCount64() < g_DuelLine.until &&
+    if (g_DuelLine.speaker == speaker && name && kernel::GameTickCount64() < g_DuelLine.until &&
         _strnicmp(name, g_DuelLine.event, 3) == 0)
         duel = g_DuelLine.own;
     for (int pass = duel ? 0 : 1; pass < 2; ++pass)
@@ -298,7 +299,7 @@ int __cdecl SayEventHook(const char* event, const char* context, int a, int b, i
     if (!custom)
         return g_SayEvent(event, context, a, b, c);
     const bool intro = _strnicmp(event, "TNT", 3) == 0;
-    g_DuelLine = { character, intro ? "TNT" : "KIL", intro ? "INT" : "WIN", GetTickCount64() + 4000 };
+    g_DuelLine = { character, intro ? "TNT" : "KIL", intro ? "INT" : "WIN", kernel::GameTickCount64() + 4000 };
     // a borrowed or own intro (Intro=, IntroAnimation=): its speaker has no Versus lines of its own (the base never
     // dueled), so the line is asked without the context
     const bool ownIntro = custom->intro >= 0 || !custom->introAnimation.empty() || !custom->outroAnimation.empty();
@@ -1632,7 +1633,7 @@ void ForceNextLine(const uint8_t* speaker, const char* event, const char* lineId
     g_Forced.speaker = speaker;
     strncpy_s(g_Forced.event, event, 3);
     g_Forced.id = id;
-    g_Forced.until = GetTickCount64() + 3000;
+    g_Forced.until = kernel::GameTickCount64() + 3000;
 }
 
 const char* IntroCameras(const CustomCharacter& custom)
