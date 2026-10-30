@@ -46,6 +46,7 @@
 #include "kernel/kernel.h"
 #include "kernel/mm.h"
 #include "kernel/reboot.h"
+#include "net/rollback.h"
 #include "xapi/xapi.h"
 #include "version.h"
 
@@ -214,6 +215,7 @@ static void StartGame(const void* launchData)
 // In-process reboot, once the old instance's threads are gone.
 static void ResetRuntime()
 {
+    net::ResetRollbackForReboot();
     audio::ResetForReboot();
     d3d::ResetForReboot();
     input::ResetPortsForReboot();
