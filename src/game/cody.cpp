@@ -950,7 +950,7 @@ void InstallCody()
         if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kDroidStateManager)), kStateManagerBytes, sizeof kStateManagerBytes) == 0) {
             static uint8_t* stub = Trampoline(kDroidStateManager, kStateManagerBytes, sizeof kStateManagerBytes);
             g_OriginalDroidStateManager = reinterpret_cast<StateManagerFn>(stub);
-            PatchJump(kDroidStateManager, reinterpret_cast<const void*>(&DroidStateManagerHook));
+            PatchHook(kDroidStateManager, reinterpret_cast<const void*>(&DroidStateManagerHook));
         } else {
             LOG_WARN("Cody: unexpected code at the battle droid's turn; the droid commander has no kit");
         }
@@ -960,7 +960,7 @@ void InstallCody()
         // the stub lives in the port's memory and survives reboots; the jump goes into every new image
         static uint8_t* stub = Trampoline(kReactionCall, kReactionCallBytes, sizeof kReactionCallBytes);
         g_OriginalReactionCall = reinterpret_cast<ReactionCallFn>(stub);
-        PatchJump(kReactionCall, reinterpret_cast<const void*>(&ReactionCallHook));
+        PatchHook(kReactionCall, reinterpret_cast<const void*>(&ReactionCallHook));
     } else {
         LOG_WARN("Cody: unexpected code at the hit reaction; his rolls do not dodge reactions");
     }
