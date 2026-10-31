@@ -949,7 +949,7 @@ void InstallCody()
     AddClassSequences(&MoveSequences);
     if (FindCustomCharacter("IDroidCommander")) {
         if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kDroidStateManager)), kStateManagerBytes, sizeof kStateManagerBytes) == 0) {
-            static uint8_t* stub = Trampoline(kDroidStateManager, kStateManagerBytes, sizeof kStateManagerBytes);
+            uint8_t* stub = Trampoline(kDroidStateManager, kStateManagerBytes, sizeof kStateManagerBytes);
             g_OriginalDroidStateManager = reinterpret_cast<StateManagerFn>(stub);
             PatchHook(kDroidStateManager, reinterpret_cast<const void*>(&DroidStateManagerHook));
         } else {
@@ -959,7 +959,7 @@ void InstallCody()
     }
     if (std::memcmp(reinterpret_cast<const void*>(uintptr_t(kReactionCall)), kReactionCallBytes, sizeof kReactionCallBytes) == 0) {
         // the stub lives in the port's memory and survives reboots; the jump goes into every new image
-        static uint8_t* stub = Trampoline(kReactionCall, kReactionCallBytes, sizeof kReactionCallBytes);
+        uint8_t* stub = Trampoline(kReactionCall, kReactionCallBytes, sizeof kReactionCallBytes);
         g_OriginalReactionCall = reinterpret_cast<ReactionCallFn>(stub);
         PatchHook(kReactionCall, reinterpret_cast<const void*>(&ReactionCallHook));
     } else {
