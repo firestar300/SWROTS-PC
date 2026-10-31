@@ -26,6 +26,7 @@
 #include "game/hvvmenu.h"
 #include "debug/gamefont.h"
 #include "debug/hvvhud.h"
+#include "debug/onlinehud.h"
 #include "game/game.h"
 #include "imgui.h"
 #include "kernel/kernel.h"
@@ -1092,6 +1093,7 @@ void RenderMenu()
     }
     ImGui::NewFrame();
     DrawHvvHud();
+    DrawOnlineHud();
     if (g_Open)
         BuildMenu();
     ImGui::Render();
