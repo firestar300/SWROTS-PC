@@ -1088,7 +1088,7 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
         command != "findrefs" && command != "despawn" && command != "characters" && command != "scale" &&
         command != "screenshot" && command != "coop" &&
         command != "devmap" && command != "hvv" && command != "versus" && command != "synctest" && command != "nettest" &&
-        command != "online" && command != "duelrec")
+        command != "online" && command != "duelrec" && command != "duelsnap")
         return false;
     Print(LineKind::Output, "> %s", line.c_str());
     if (command == "duelist") {
@@ -1117,6 +1117,9 @@ bool RunPortCommand(uint8_t* console, const std::string& line)
         else if (words.size() == 2)
             net::StartDuelRecorder("", 0);
         Print(LineKind::Output, "  %s", net::DuelRecorderStatus().c_str());
+    } else if (command == "duelsnap") { // duelsnap save | load [full|fields|pos] | test <a> <b> | mode <m>
+        auto word = [&](size_t i) { return i < words.size() ? words[i] : std::string(); };
+        Print(LineKind::Output, "  %s", net::DuelSnapCommand(word(1), word(2), word(3)).c_str());
     } else if (command == "saber") {
         Saber(words);
     } else if (command == "spawn") {
