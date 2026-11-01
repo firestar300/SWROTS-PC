@@ -383,8 +383,12 @@ void RestartMission()
 static std::vector<uint8_t> g_LaunchRequest;
 static std::string g_BootArguments;
 
-void LaunchGame(const std::string& arguments)
+static LaunchFilter g_LaunchObserverEarly = nullptr; // set with the observer below (it is declared after)
+void LaunchGame(const std::string& launchArguments)
 {
+    std::string arguments = launchArguments;
+    if (g_LaunchObserverEarly) // online play: the host's own starts go to the guest too
+        g_LaunchObserverEarly(arguments);
     g_LaunchRequest.assign(4096, 0);
     const uint32_t certificate = *reinterpret_cast<const uint32_t*>(uintptr_t(0x10118));
     const uint32_t title = *reinterpret_cast<const uint32_t*>(uintptr_t(certificate + 8));
@@ -424,14 +428,23 @@ void StartRebootTest(unsigned seconds)
 
 static LaunchFilter g_LaunchFilter = nullptr;
 void SetLaunchFilter(LaunchFilter filter) { g_LaunchFilter = filter; }
+static LaunchFilter g_LaunchObserver = nullptr;
+void SetLaunchObserver(LaunchFilter observer)
+{
+    g_LaunchObserver = observer;
+    g_LaunchObserverEarly = observer;
+}
 
 void XBAPI HalReturnToFirmware(ULONG Routine)
 {
-    if (Routine == 2 && LaunchDataPage && g_LaunchFilter) {
+    if (Routine == 2 && LaunchDataPage && (g_LaunchFilter || g_LaunchObserver)) {
         char* text = static_cast<char*>(LaunchDataPage) + 0x400;
         std::string arguments(text, strnlen(text, 3072));
         const std::string before = arguments;
-        g_LaunchFilter(arguments);
+        if (g_LaunchFilter)
+            g_LaunchFilter(arguments);
+        if (g_LaunchObserver)
+            g_LaunchObserver(arguments);
         if (arguments != before) {
             std::memset(text, 0, 3072);
             std::memcpy(text, arguments.data(), std::min<size_t>(arguments.size(), 3071));
