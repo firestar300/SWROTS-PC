@@ -30,8 +30,8 @@ constexpr const char* kLevelArgument = "map:u107_uta_grievoussurvival";
 constexpr const char* kDevMapArgument = "devmap:1 playlicensemovie:0 allowskipmovie:1 detectDirectLaunch:0";
 // A Versus duel on the dev map: the game's Versus starts its Utapau arena (a duel level; its PAK brings the duel's
 // fighters, sounds, cameras and HUD art), whose level file is served as the dev map built for a duel.
-constexpr const char* kDuelArena = "levels\\u107_uta_grievous_01.slp";
-constexpr const char* kDuelArgument = "map:u107_uta_grievous_01";
+// (a custom map's own Arena= instead: its props are that arena's objects)
+constexpr const char* kDuelArena = "u107_uta_grievous_01";
 
 bool g_Active = false;
 DevMapLayout g_Layout;
@@ -324,7 +324,15 @@ void InstallDevMap(const std::wstring& gameData, const std::wstring& mods)
     // the dev map by itself (no mode on it): the player is Anakin, not Grievous Survival's Grievous
     SetLevelPlayerDefault(g_Active && !g_Duel && !BootArgument("hvv", value) ? "IAnakin" : nullptr);
     RegisterResourcePatch(kDevMapSource, &BuildLevel);
-    RegisterResourcePatch(kDuelArena, &BuildDuel);
+    { // the arena this duel starts (map:): its level file is the duel's
+        std::string arena = kDuelArena;
+        if (g_Duel && BootArgument("map", value) && !value.empty()) {
+            arena = value;
+            for (char& c : arena)
+                c = char(tolower(static_cast<unsigned char>(c)));
+        }
+        RegisterResourcePatch("levels\\" + arena + ".slp", &BuildDuel);
+    }
     if (g_Duel && g_Map)
         SetCameraAdjuster(&DuelCamera);
     RegisterResourcePatch(kDevMapFloorModel, &BuildFloor);
@@ -424,7 +432,8 @@ void SetDevMapLayout(const DevMapLayout& layout)
 void StartDuel(const std::string& first, const std::string& second, const std::string& map, int rounds,
     const std::string& more)
 {
-    kernel::LaunchGame(std::string(kDuelArgument) + " " + kDevMapArgument + " versus:1" +
+    const CustomMap* custom = map.empty() ? nullptr : FindCustomMap(map);
+    kernel::LaunchGame("map:" + (custom ? custom->arena : std::string(kDuelArena)) + " " + kDevMapArgument + " versus:1" +
         (map.empty() ? "" : " custommap:" + map) + " v_versusMode:1 v_c1:" + first + " v_c2:" + second +
         " v_p1:0 v_p2:-1 v_roundcount:" + std::to_string(rounds > 0 ? rounds : 3) + more);
 }

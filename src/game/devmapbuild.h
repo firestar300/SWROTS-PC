@@ -90,6 +90,13 @@ struct DevMapLayout {
     std::vector<float> markerLifts; // each marker's height above the floor (none: on it)
     float markerReach = 175.0f;
     std::vector<DevMapObject> objects;
+    // a duel's props: objects of the duel arena's own (its breakables, explosive canisters...), by name, placed on
+    // the map (the dev map's coordinates; y above the floor)
+    struct Prop {
+        std::string name;
+        float x, y, z, yaw;
+    };
+    std::vector<Prop> props;
 };
 // The ids of the objects the dev map adds for a duel.
 constexpr uint32_t kDevMapDuelId = 0x00300100;
@@ -98,6 +105,8 @@ constexpr uint32_t kDevMapFirstId = 0x00300001;
 constexpr uint32_t kDevMapFirstBoxId = 0x00380001; // the collision boxes' brush handles
 constexpr uint32_t kDevMapFirstMarkerId = 0x00390001; // the layout's goto markers
 constexpr uint32_t kDevMapFirstLightHandle = 0x0000F000; // the layout's statics' light records
+constexpr uint32_t kDevMapFirstPropId = 0x003A0001;       // a duel's props (copies of the arena's objects)
+constexpr uint32_t kDevMapFirstPropLight = 0x0000F800;    // and their light records
 // The floor's middle and its height (the characters stand there).
 constexpr float kDevMapMiddleX = 12750.0f, kDevMapMiddleZ = 8100.0f, kDevMapFloorY = -2557.5f;
 

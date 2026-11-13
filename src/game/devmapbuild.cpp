@@ -1061,6 +1061,8 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
     // a duel: "Head to head arena?" (ILevelProperties +0xCC: the game's Versus start, rounds, HUD and cameras), not a
     // bonus mission, and the two fighters' spawn points (IVaderMultiSpawnPoint, an IPointSpawnPlayer by descent:
     // "Player ID" absent for player 1, 'Player 2' for player 2), on the floor (the game sets them down on it)
+    Writer propLights; // the duel's props' light records (copies of the arena's)
+    uint32_t propLightRecords = 0;
     if (layout && layout->versus) {
         Object* properties = FindObject(keptObjects, "ILevelProperties");
         Object* first = FindObject(keptObjects, "IPointSpawnPlayer");
@@ -1169,6 +1171,93 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
                 say(" with the arena's camera (%zu objects)", camera.size());
             }
         }
+        // the duel's props: the arena's own objects (a statue to throw with the Force, an explosive canister...),
+        // copied by name onto the map, each with an id, a name, a place and a light record of its own (a copy of
+        // the arena's); the PAK of the arena the duel starts holds their models
+        for (size_t k = 0; k < layout->props.size(); ++k) {
+            const DevMapLayout::Prop& placed = layout->props[k];
+            std::vector<Object> found = ObjectsOfClasses(layout->duelArena, { "IVaderBreakable", "IBreakable",
+                "ISmallExplosiveCanister", "ILargeExplosiveCanister", "IStatic" });
+            Object* source = nullptr;
+            for (Object& o : found) {
+                const Property* name = Find(o.props, "Name");
+                if (name && name->data.size() == 4 + placed.name.size() &&
+                    _strnicmp(reinterpret_cast<const char*>(name->data.data() + 4), placed.name.c_str(), placed.name.size()) == 0) {
+                    source = &o;
+                    break;
+                }
+            }
+            if (!source) {
+                say(", no prop %s in the arena", placed.name.c_str());
+                continue;
+            }
+            Object o = std::move(*source);
+            std::vector<Property> props;
+            for (Property& q : o.props)
+                if (q.name != "Tie to sector of..." && q.name != "Destroyed Static" && q.name != "Unit")
+                    props.push_back(std::move(q));
+            o.props = std::move(props);
+            Writer id, name;
+            id.U32(kDevMapFirstPropId + uint32_t(k));
+            name.String(placed.name + "_prop" + std::to_string(k + 1));
+            if (Property* q = Find(o.props, "ID"))
+                q->data = id.out;
+            if (Property* q = Find(o.props, "Name"))
+                q->data = name.out;
+            if (Property* t = Find(o.props, "Transform"); t && t->data.size() >= 48) {
+                double scale[3];
+                for (int row = 0; row < 3; ++row)
+                    scale[row] = std::sqrt(double(GetF(t->data, row * 12)) * GetF(t->data, row * 12) +
+                        double(GetF(t->data, row * 12 + 4)) * GetF(t->data, row * 12 + 4) +
+                        double(GetF(t->data, row * 12 + 8)) * GetF(t->data, row * 12 + 8));
+                const double c = std::cos(placed.yaw), s = std::sin(placed.yaw);
+                const double m[12] = { c * scale[0], 0, -s * scale[0], 0, scale[1], 0, s * scale[2], 0, c * scale[2],
+                    placed.x, kFloorY + placed.y, placed.z };
+                for (int i = 0; i < 12; ++i)
+                    PutF(t->data, i * 4, m[i]);
+            }
+            // its light record: the arena's (its handle, its mesh, 0xFFFF, the handle again, its light), the handles
+            // made its own
+            if (Property* light = Find(o.props, "__lighthandle"); light && light->data.size() == 4) {
+                const uint32_t old = U32Of(light), handle = kDevMapFirstPropLight + uint32_t(k);
+                const std::vector<uint8_t>& arena = layout->duelArena;
+                bool copied = false;
+                for (size_t at = 0; !copied && at + 10 < arena.size(); ++at) {
+                    uint32_t h, length;
+                    std::memcpy(&h, arena.data() + at, 4);
+                    if (h != old)
+                        continue;
+                    std::memcpy(&length, arena.data() + at + 4, 4);
+                    if (length < 8 || length > 255 || at + 10 + length > arena.size() ||
+                        _strnicmp(reinterpret_cast<const char*>(arena.data() + at + 8), "meshes\\", 7) != 0)
+                        continue;
+                    uint16_t own;
+                    std::memcpy(&own, arena.data() + at + 8 + length, 2);
+                    if (own != 0xFFFF)
+                        continue;
+                    Reader lr{ arena };
+                    lr.p = at;
+                    Instance instance;
+                    ReadInstance(lr, instance);
+                    if (!lr.ok || !instance.lit)
+                        continue;
+                    std::vector<uint8_t> record(arena.begin() + at, arena.begin() + lr.p);
+                    PutU32(record, 0, handle);
+                    PutU32(record, 8 + length + 2, handle);
+                    propLights.Raw(record.data(), record.size());
+                    ++propLightRecords;
+                    copied = true;
+                }
+                Writer w;
+                w.U32(handle);
+                light->data = w.out;
+                if (!copied)
+                    say(", prop %s without its light", placed.name.c_str());
+            }
+            keptObjects.push_back(std::move(o));
+        }
+        if (!layout->props.empty())
+            say(", %zu props", layout->props.size());
     }
     // the layout's characters: an id, a name, a place (rows right, up, forward, position) and the 8 bytes after
     // the properties, as the level's own characters
@@ -1249,6 +1338,8 @@ bool BuildDevMapLevel(std::vector<uint8_t>& level, std::string& report, const De
         staticLights.U32(0);
         ++lightRecords;
     }
+    staticLights.Raw(propLights.out.data(), propLights.out.size());
+    lightRecords += propLightRecords;
     if (lightRecords) {
         uint32_t cap, count;
         std::memcpy(&cap, d.data() + instancesCap, 4);

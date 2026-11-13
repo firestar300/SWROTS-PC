@@ -225,7 +225,7 @@ constexpr const char* kDuelArenas[] = { "u103_sep_throneroom_01", "u103_sep_thro
 // The arena list (ArenaList, vtable 0x5D63D8): slot 5 (0x2D2AB0) builds its entries from the mission list's Duel rows
 // (+0x5C {cap, count +0x60, data +0x64} of 16-byte entries {TString map, wide text (length first), TString, bool
 // unlocked}, added by 0x2D29A0 (thiscall on +0x5C, the entry copied); +0x58 Random's row); the port adds one a custom
-// map, the duel's level (u107_uta_grievous_01) with the map's name, after the open arenas and Random: the cursor
+// map, the duel's level (its Arena=, u107_uta_grievous_01 by default) with the map's name, after the open arenas and Random: the cursor
 // (0x2C69F0) does not move onto a locked row, and the game opens its arenas in order (the locked ones last). A row's
 // picture is SmallArenaTextSet[row] (0x2D2460: item +0x3C, set while it draws; a custom row's place in the set is
 // swapped in for that draw), the large one LargeArenaTextSet[...] (0x2D2500, slot 0x8C: the cursor +0x20, the picture
@@ -238,7 +238,6 @@ constexpr uint32_t kArenaBuildSlot = 0x14, kArenaChosenSlot = 0x88, kArenaCursor
 constexpr uint32_t kArenaBuild = 0x002D2AB0, kArenaChosen = 0x002D21A0, kArenaCursor = 0x002D2500, kArenaRow = 0x002D2460;
 constexpr uint32_t kArenaAdd = 0x002D29A0;
 constexpr uint32_t kStringInit = 0x00225100, kStringAssign = 0x00225A10, kStringFree = 0x00225230;
-constexpr const char* kArenaLevel = "u107_uta_grievous_01";
 int g_FirstCustomRow = -1; // the arena list's first custom map's row, -1 none
 int g_VersusMap = 0;
 
@@ -280,7 +279,7 @@ void __fastcall ArenaBuildHook(uint8_t* list, void*)
         reinterpret_cast<void(__fastcall*)(uint32_t*, void*)>(uintptr_t(kStringInit))(&entry.map, nullptr);
         reinterpret_cast<void(__fastcall*)(uint32_t*, void*)>(uintptr_t(kStringInit))(&entry.spare, nullptr);
         reinterpret_cast<void(__fastcall*)(uint32_t*, void*, const char*)>(uintptr_t(kStringAssign))(&entry.map, nullptr,
-            kArenaLevel);
+            maps[i]->arena.c_str());
         entry.text = MenuTextBuffer(id.c_str());
         entry.unlocked = 1;
         reinterpret_cast<void(__fastcall*)(uint8_t*, void*, const void*)>(uintptr_t(kArenaAdd))(list + 0x5C, nullptr, &entry);
@@ -393,7 +392,7 @@ void VersusLaunch(std::string& arguments)
         const size_t at = lower.find(token);
         if (at == std::string::npos)
             continue;
-        words.replace(at, token.size(), " map:u107_uta_grievous_01 ");
+        words.replace(at, token.size(), " map:" + map->arena + " ");
         arguments = words.substr(1, words.size() - 2) + " devmap:1 versus:1 custommap:" + map->id;
         LOG_INFO("Versus: the duel on %s", map->name.c_str());
         return;

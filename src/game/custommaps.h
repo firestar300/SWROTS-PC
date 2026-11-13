@@ -31,6 +31,14 @@ struct CustomMap {
     std::vector<DevMapBox> boxes;           // in the map's own coordinates (cy from its y 0), yaw in radians
     std::vector<uint8_t> brushes;           // its Brushes file: BSP trees in the level's format, its own coordinates
     std::vector<std::pair<float, float>> spawns;
+    // Versus: the game's arena its duel starts (Arena=, e.g. u110_cor_training_00; Utapau's when left out): its PAK
+    // brings the duel's fighters and HUD, and the props ([Props]) are its own objects, copied onto the map
+    std::string arena = "u107_uta_grievous_01";
+    struct Prop {
+        std::string name; // the arena's object (its Name, e.g. IVaderBreakable_2129524)
+        float x, z, yaw, lift; // its own coordinates (yaw in radians), its height above the floor
+    };
+    std::vector<Prop> props;
     // Battlefront ([Battlefront]): its command posts (x z, and the height of the floor they stand on: its own y,
     // Floor= when not given) and where each team starts (its own coordinates, x z)
     std::vector<std::array<float, 3>> commandPosts;

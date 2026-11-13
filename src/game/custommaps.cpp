@@ -189,6 +189,26 @@ bool ReadMap(const std::wstring& file, const std::string& id, CustomMap& m)
             break;
         m.boxes.push_back({ v[0], v[1], v[2], v[3], v[4], v[5], v.size() > 6 ? v[6] * kPi / 180 : 0.0f });
     }
+    // Versus: the arena its duel starts, and its props: Prop<n>=<the arena's object> x z [heading] [lift]
+    if (std::string arena = Profile(file, L"Map", L"Arena"); !arena.empty()) {
+        for (char& c : arena)
+            c = char(tolower(static_cast<unsigned char>(c)));
+        m.arena = arena;
+    }
+    for (int i = 1; i <= 64; ++i) {
+        const std::wstring key = L"Prop" + std::to_wstring(i);
+        const std::string text = Profile(file, L"Props", key.c_str());
+        if (text.empty())
+            continue;
+        const size_t space = text.find(' ');
+        const std::vector<float> p = Numbers(space == std::string::npos ? std::string() : text.substr(space));
+        if (p.size() < 2) {
+            LOG_WARN("Custom maps: %s's Prop%d has no x z", id.c_str(), i);
+            continue;
+        }
+        m.props.push_back({ text.substr(0, space), p[0], p[1], p.size() > 2 ? p[2] * kPi / 180 : 0.0f,
+            p.size() > 3 ? p[3] : 0.0f });
+    }
     // Brushes=<file in the map's folder>: its collision as convex volumes (BSP trees in the level file's format)
     const std::string brushes = Profile(file, L"Collision", L"Brushes");
     if (!brushes.empty()) {
@@ -425,6 +445,12 @@ void ApplyCustomMap(const CustomMap& map, DevMapLayout& layout)
         w.cy = b.cy - map.floor;
         w.yaw = b.yaw + map.yaw;
         layout.boxes.push_back(w);
+    }
+    layout.props.clear();
+    for (const CustomMap::Prop& p : map.props) {
+        DevMapLayout::Prop w{ p.name, 0, p.lift, 0, p.yaw + map.yaw };
+        CustomMapToWorld(map, p.x, p.z, w.x, w.z);
+        layout.props.push_back(w);
     }
 }
 

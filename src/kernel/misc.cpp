@@ -551,8 +551,16 @@ void BootInit(const void* launchData)
         std::string lower = " " + g_BootArguments + " ";
         for (char& c : lower)
             c = char(tolower(static_cast<unsigned char>(c)));
+        // (a duel: on one of the Versus arenas, a custom map's Arena=)
+        static const char* const kArenas[] = { "u103_sep_throneroom_01", "u103_sep_throneroom_02", "u107_uta_grievous_01",
+            "u107_uta_grievous_02", "u108_cor_palpatine_01", "u108_cor_palpatine_02", "u110_cor_training_00",
+            "u110_cor_training_01", "u110_cor_training_02", "u140_mus_theduel_01", "u140_mus_theduel_02",
+            "u150_mus_theduel_01", "u150_mus_theduel_02", "u170_ep4_deathstar_02" };
+        bool duelArena = false;
+        for (const char* arena : kArenas)
+            duelArena = duelArena || lower.find(std::string(" map:") + arena + " ") != std::string::npos;
         const bool devMapLevel = lower.find(" map:u107_uta_grievoussurvival ") != std::string::npos || // (not previousmap:)
-            (lower.find(" map:u107_uta_grievous_01 ") != std::string::npos && lower.find(" versus:1 ") != std::string::npos);
+            (duelArena && lower.find(" versus:1 ") != std::string::npos);
         if (!devMapLevel) {
             std::string kept, word;
             for (size_t i = 0; i <= g_BootArguments.size(); ++i) {
