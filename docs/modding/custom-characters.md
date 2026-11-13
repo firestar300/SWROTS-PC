@@ -209,6 +209,8 @@ mods\interfc\front_end\s_selduel_<costume>head.stx       the strip's cell, 64x64
 mods\interfc\front_end\s_selduel_<costume>bust.stx       the bust above the strip, 256x128 DXT5
 mods\interfc\front_end\s_selduel_fb_<costume>_v1.stx     its full body, player 1's (optional), 128x256 DXT5
 mods\interfc\front_end\s_selduel_fb_<costume>_v2.stx     player 2's (optional)
+mods\interfc\front_end\s_selduel_<costume>bust_v2.stx    player 2's bust when both players chose it (optional;
+                                                         as the game's evil Anakin's), 256x128 DXT5
 ```
 
 (`<costume>` in lower case, e.g. `s_selduel_lukehead.stx`.) Any number of custom characters get their slots (up to

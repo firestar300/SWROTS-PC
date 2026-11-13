@@ -46,8 +46,8 @@ struct ExtraFighter {
     const char* meshes;  // the textures' folder, whose player 2 look (the engine's <texture>_duel,
                          // see DarkLookGenerator) is made when the disc has none, or null
     // its own pictures, loaded from their files (paths without .stx; null: none, or the disc's above): the head, the
-    // bust, player 1's and player 2's full body (see Pictures below)
-    const char* files[4];
+    // bust, player 1's and player 2's full body, and player 2's bust when both players chose it (see Pictures below)
+    const char* files[5];
 };
 
 // Yoda: a planned fighter (the disc has his select head, bust and HUD portrait, and his name in
@@ -408,9 +408,12 @@ constexpr uint8_t kSetBodiesPrologue[] = { 0x56, 0x8B, 0xF1, 0x57, 0x8B, 0x7E, 0
 using SetBodiesFn = void(__fastcall*)(uint8_t* screen, void* edx);
 SetBodiesFn g_OriginalSetBodies = nullptr;
 
+uint8_t* g_Screen = nullptr; // the select screen whose players' pictures were last set
+
 void __fastcall BodiesHook(uint8_t* screen, void* edx)
 {
     g_OriginalSetBodies(screen, edx);
+    g_Screen = screen;
     for (int player = 0; player < 2; ++player) {
         const ExtraFighter* extra = Extra(*reinterpret_cast<int*>(screen + 0x2C + player * 4));
         if (extra && !extra->files[2 + player])
@@ -757,6 +760,10 @@ void BuildExtras()
             if (present(body))
                 extra.files[2 + player] = Keep("interfc\\front_end\\" + body);
         }
+        // player 2's bust when both players chose it (its player 2 look, as the game's evil Anakin's), if the pack
+        // has one
+        if (present(bust + "_v2"))
+            extra.files[4] = Keep("interfc\\front_end\\" + bust + "_v2");
         extra.nameId = Keep("IDS_PORT_" + upper + "_NAME");
         extra.titleId = Keep("IDS_PORT_" + upper + "_TITLE");
         SetMenuText(extra.nameId, Wide(custom.name));
@@ -794,8 +801,8 @@ void BuildExtras()
 // shows its bust in the arena screen (the stand-in entry), scaled into the full body's frame.
 constexpr uint32_t kTextureItemVtable = 0x005D3F78;
 constexpr uint32_t kTextureItemDraw = 0x002C7790;
-void* g_Pictures[kMaxExtras][4];
-bool g_PicturesTried[kMaxExtras][4];
+void* g_Pictures[kMaxExtras][5];
+bool g_PicturesTried[kMaxExtras][5];
 
 void* ExtraPicture(int extra, int kind)
 {
@@ -877,8 +884,14 @@ void __fastcall TextureItemDrawHook(uint8_t* item, void*, void* context)
         draw(item, nullptr, context);
         return;
     }
+    // player 2's bust (the select screen's item at +0x6C; player 1's is at +0x68) when both players chose this
+    // fighter: its player 2 bust if it has one
+    if (kind == 1 && g_Screen && g_Extras[size_t(extra)].files[4] &&
+        *reinterpret_cast<uint8_t**>(g_Screen + 0x6C) == item &&
+        *reinterpret_cast<int*>(g_Screen + 0x2C) == *reinterpret_cast<int*>(g_Screen + 0x30))
+        kind = 4;
     void* own = ExtraPicture(extra, kind);
-    const bool bustInFrame = kind >= 2 && !g_Extras[size_t(extra)].files[kind]; // (Yoda's: the disc's bust)
+    const bool bustInFrame = kind >= 2 && kind <= 3 && !g_Extras[size_t(extra)].files[kind]; // (Yoda's: the disc's bust)
     if (bustInFrame)
         own = ExtraPicture(extra, 1);
     if (!own && !bustInFrame) {
@@ -1100,6 +1113,7 @@ void InstallRoster()
 {
     BuildExtras();
     std::memset(g_Pictures, 0, sizeof g_Pictures); // the textures of the last start are gone with it
+    g_Screen = nullptr;
     g_RecordPictures.clear();
     g_StripArrow = nullptr;
     g_StripArrowTried = false;
