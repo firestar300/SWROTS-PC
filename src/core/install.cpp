@@ -28,20 +28,7 @@ const wchar_t* kTitle = L"Star Wars: Episode III - Revenge of the Sith";
 
 // --- Progress window ------------------------------------------------------------------------
 
-struct Progress {
-    std::mutex lock;
-    std::wstring status;
-    std::atomic<uint64_t> done = 0, total = 0;
-    std::atomic<bool> cancel = false, finished = false;
-    bool ok = false;
-    std::wstring error;
-
-    void SetStatus(const std::wstring& s)
-    {
-        std::lock_guard<std::mutex> g(lock);
-        status = s;
-    }
-};
+using Progress = InstallProgress;
 
 Progress* g_Progress = nullptr;
 
@@ -71,11 +58,7 @@ LRESULT CALLBACK ProgressProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         HFONT font = CreateFontIndirectW(&ncm.lfMessageFont);
         HGDIOBJ oldFont = SelectObject(mem, font);
         SetBkMode(mem, TRANSPARENT);
-        std::wstring status;
-        {
-            std::lock_guard<std::mutex> g(g_Progress->lock);
-            status = g_Progress->status;
-        }
+        const std::wstring status = g_Progress->Status();
         RECT text = { S(16), S(14), client.right - S(16), S(60) };
         DrawTextW(mem, status.c_str(), -1, &text, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
         RECT bar = { S(16), S(64), client.right - S(16), S(84) };
@@ -176,6 +159,22 @@ uint64_t FileSize(const std::wstring& path)
     if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &a))
         return 0;
     return (uint64_t(a.nFileSizeHigh) << 32) | a.nFileSizeLow;
+}
+
+// Free bytes on the drive of `dir` (an existing folder) for this user; UINT64_MAX when unknown.
+uint64_t FreeSpace(const std::wstring& dir)
+{
+    ULARGE_INTEGER available = {};
+    if (!GetDiskFreeSpaceExW(dir.c_str(), &available, nullptr, nullptr))
+        return UINT64_MAX;
+    return available.QuadPart;
+}
+
+std::wstring Gigabytes(uint64_t bytes)
+{
+    wchar_t text[32];
+    swprintf_s(text, L"%.1f GB", double(bytes) / 1e9);
+    return text;
 }
 
 // Runs Windows' tar.exe (libarchive: reads 7z, zip, rar, ...). `output`
@@ -297,7 +296,9 @@ std::wstring UnpackArchive(const std::wstring& archive, const std::wstring& dir,
     std::string listing;
     if (!RunTar(L"-tvf \"" + archive + L"\"", &listing, p, nullptr)) {
         if (!p.cancel)
-            p.error = L"Could not read the archive. Unpack it yourself and choose the .iso inside.";
+            p.Fail(InstallError::ArchiveUnreadable,
+                L"Windows could not read this archive (it may be damaged, incomplete or protected by a password). "
+                L"Unpack it yourself and choose the .iso inside.");
         return {};
     }
     // bsdtar -tv: "mode links uid gid size month day year|time name"
@@ -330,13 +331,17 @@ std::wstring UnpackArchive(const std::wstring& archive, const std::wstring& dir,
         }
     }
     if (name.empty()) {
-        p.error = L"The archive does not contain an .iso disc image.";
+        p.Fail(InstallError::ArchiveWithoutImage,
+            L"The archive does not contain an .iso disc image. If the image inside has another format, convert it "
+            L"to an .iso first.");
         return {};
     }
     std::wstring wname(name.begin(), name.end());
     if (!ArchiveImageIsXbox(archive, wname, p)) {
         if (!p.cancel)
-            p.error = L"The disc image in this archive is not an Xbox disc.";
+            p.Fail(InstallError::NotAnXboxImage,
+                L"The disc image in this archive (" + wname + L") is not an Xbox disc. The port needs the Xbox "
+                L"version of the game, not the PlayStation 2 one.");
         return {};
     }
     std::wstring out = dir + L"\\" + wname;
@@ -344,10 +349,18 @@ std::wstring UnpackArchive(const std::wstring& archive, const std::wstring& dir,
     p.done = 0;
     p.total = size;
     CreateDirectoryW(dir.c_str(), nullptr);
+    if (const uint64_t space = FreeSpace(dir); space < size) {
+        p.Fail(InstallError::NotEnoughSpace, L"Not enough free space to unpack the archive: the disc image takes "
+            + Gigabytes(size) + L" and the game files about 2.5 GB more, and the drive has " + Gigabytes(space)
+            + L" free.");
+        return {};
+    }
     if (!RunTar(L"-xf \"" + archive + L"\" -C \"" + dir + L"\" \"" + wname + L"\"", nullptr, p,
             [&] { p.done = FileSize(out); })) {
         if (!p.cancel)
-            p.error = L"Could not unpack the disc image from the archive.";
+            p.Fail(InstallError::ArchiveUnpackFailed,
+                L"The disc image could not be unpacked from the archive (the archive may be damaged, or the drive "
+                L"full). Unpack it yourself and choose the .iso inside.");
         return {};
     }
     return out;
@@ -371,12 +384,22 @@ public:
             CloseHandle(m_file);
     }
 
-    bool Open(const std::wstring& path)
+    enum class Kind {
+        Xbox,       // opened: an Xbox game partition
+        Unreadable, // the file cannot be opened
+        Iso9660,    // a standard CD/DVD image without an Xbox game partition
+        Unknown,    // anything else
+    };
+
+    Kind Open(const std::wstring& path)
     {
         m_file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
             FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
         if (m_file == INVALID_HANDLE_VALUE)
-            return false;
+            return Kind::Unreadable;
+        LARGE_INTEGER size = {};
+        GetFileSizeEx(m_file, &size);
+        m_size = uint64_t(size.QuadPart);
         // The game partition starts at 0 (XISO) or after the video partition (full disc images).
         for (uint64_t base : { 0ull, 0x18300000ull, 0xFD90000ull, 0x2080000ull }) {
             char magic[20];
@@ -386,11 +409,18 @@ public:
                 Read(base + 32 * kSector + 20, root, 8);
                 m_rootSector = root[0];
                 m_rootSize = root[1];
-                return true;
+                return Kind::Xbox;
             }
         }
-        return false;
+        // ISO 9660's volume descriptor ("CD001" in sector 16): a PC, PlayStation 2 or video disc, or
+        // only the video partition of an Xbox disc.
+        char cd[5];
+        if (Read(16 * kSector + 1, cd, 5) && memcmp(cd, "CD001", 5) == 0)
+            return Kind::Iso9660;
+        return Kind::Unknown;
     }
+
+    uint64_t Size() const { return m_size; }
 
     bool Read(uint64_t offset, void* out, uint32_t bytes)
     {
@@ -456,39 +486,134 @@ private:
     }
 
     HANDLE m_file = INVALID_HANDLE_VALUE;
-    uint64_t m_base = 0;
+    uint64_t m_base = 0, m_size = 0;
     uint32_t m_rootSector = 0, m_rootSize = 0;
 };
+
+// Which game and release a default.xbe is, from its certificate: the supported one is known by its
+// MD5; for any other, the error says what the disc is instead.
+bool CheckExecutable(const std::vector<uint8_t>& xbe, Progress& p)
+{
+    if (Md5Hex(xbe.data(), xbe.size()) == game::kRetailMd5)
+        return true;
+    uint32_t titleId = 0, region = 0;
+    std::wstring title;
+    if (xbe.size() < sizeof(XbeHeader) || memcmp(xbe.data(), "XBEH", 4) != 0) {
+        p.Fail(InstallError::DamagedImage,
+            L"The disc's default.xbe is not an Xbox executable: the image is damaged. Make or get the image again.");
+        return false;
+    }
+    {
+        XbeHeader header;
+        memcpy(&header, xbe.data(), sizeof(header));
+        const uint64_t at = uint64_t(header.CertificateAddress) - header.BaseAddress;
+        if (header.Magic == 'HEBX' && header.CertificateAddress >= header.BaseAddress
+            && at + sizeof(XbeCertificate) <= xbe.size()) {
+            XbeCertificate certificate;
+            memcpy(&certificate, xbe.data() + size_t(at), sizeof(certificate));
+            titleId = certificate.TitleId;
+            region = certificate.GameRegion;
+            for (wchar_t c : certificate.TitleName) {
+                if (!c)
+                    break;
+                title += c >= 32 ? c : L' ';
+            }
+        }
+    }
+    if (titleId != game::kTitleId) {
+        p.Fail(InstallError::OtherGame, title.empty()
+            ? std::wstring(L"This Xbox disc image is not Star Wars: Episode III - Revenge of the Sith.")
+            : L"This is the disc of another Xbox game: \"" + title + L"\". The port needs Star Wars: Episode III - "
+              L"Revenge of the Sith.");
+        return false;
+    }
+    // The certificate's region flags: 1 North America, 2 Japan, 4 the rest of the world (PAL).
+    std::wstring regions;
+    if (region & 1)
+        regions += L"North America";
+    if (region & 2)
+        regions += regions.empty() ? L"Japan" : L", Japan";
+    if (region & 4)
+        regions += regions.empty() ? L"Europe / PAL" : L", Europe / PAL";
+    if ((region & 7) == 1)
+        p.Fail(InstallError::OtherRelease,
+            L"This is Revenge of the Sith, but its executable is not the one the port supports: the image is a "
+            L"different revision of the North American release, or it was modified (patched or trained). Use an "
+            L"unmodified image of the North American (USA, NTSC) release.");
+    else
+        p.Fail(InstallError::OtherRelease, L"This is Revenge of the Sith, but another release of it"
+            + (regions.empty() ? std::wstring() : L" (" + regions + L")")
+            + L". Only the North American (USA, NTSC) release is supported.");
+    return false;
+}
 
 bool ExtractIso(const std::wstring& image, const std::wstring& target, Progress& p)
 {
     p.SetStatus(L"Reading the disc image...");
     Iso iso;
     std::vector<IsoFile> files;
-    if (!iso.Open(image) || !iso.List(files)) {
-        p.error = L"This file is not an Xbox disc image.";
+    switch (iso.Open(image)) {
+    case Iso::Kind::Xbox:
+        break;
+    case Iso::Kind::Unreadable:
+        p.Fail(InstallError::ImageNotFound, L"The file could not be opened:\n" + image);
         return false;
+    case Iso::Kind::Iso9660:
+        p.Fail(InstallError::NotAnXboxImage,
+            L"This is a disc image, but not of an Xbox game: it has no Xbox game partition. It may be the "
+            L"PlayStation 2 version of the game, another kind of disc, or an incomplete copy of the Xbox disc. "
+            L"The port needs the Xbox version.");
+        return false;
+    case Iso::Kind::Unknown:
+        p.Fail(InstallError::NotADiscImage,
+            L"This file is not a disc image the port can read. Choose an Xbox .iso / .xiso (an XISO or a full "
+            L"Redump-style image), or a .7z / .zip / .rar archive containing one.");
+        return false;
+    }
+    if (!iso.List(files)) {
+        p.Fail(InstallError::DamagedImage,
+            L"This is an Xbox disc image, but its file table cannot be read: the image is damaged or incomplete. "
+            L"Make or get the image again.");
+        return false;
+    }
+    // Every file must lie inside the image: a download or a copy that stopped early ends before them.
+    for (const IsoFile& f : files) {
+        if (!f.directory && iso.Offset(f.sector) + f.size > iso.Size()) {
+            p.Fail(InstallError::DamagedImage, L"This Xbox disc image is incomplete: it ends before its files do ("
+                + f.path + L" is missing or cut short). The copy or download probably stopped early; make or get "
+                L"the image again.");
+            return false;
+        }
     }
     // The game itself, checked before any file is copied.
     p.SetStatus(L"Checking the game...");
     auto xbe = std::find_if(files.begin(), files.end(),
         [](const IsoFile& f) { return !f.directory && _wcsicmp(f.path.c_str(), L"default.xbe") == 0; });
     std::vector<uint8_t> xbeBytes;
-    if (xbe == files.end() || !iso.ReadFileData(*xbe, xbeBytes)) {
-        p.error = L"The disc image does not contain the game (no default.xbe).";
+    if (xbe == files.end()) {
+        p.Fail(InstallError::NoGameExecutable,
+            L"This Xbox disc image does not contain a game (it has no default.xbe). It may be a data or video disc.");
         return false;
     }
-    if (Md5Hex(xbeBytes.data(), xbeBytes.size()) != game::kRetailMd5) {
-        p.error = L"This disc image is a different version of the game. Only the North American (USA) "
-                  L"release is supported.";
+    if (!iso.ReadFileData(*xbe, xbeBytes)) {
+        p.Fail(InstallError::ReadFailed, L"The game's executable (default.xbe) could not be read from the image.");
         return false;
     }
+    if (!CheckExecutable(xbeBytes, p))
+        return false;
     uint64_t total = 0;
     for (const IsoFile& f : files)
         if (!f.directory)
             total += f.size;
     p.done = 0;
     p.total = total;
+    // The drive must hold the files (and a little more, for the folders and the file system's own records).
+    const std::wstring parent = target.substr(0, target.find_last_of(L"\\/"));
+    if (const uint64_t space = FreeSpace(parent); space < total + (64ull << 20)) {
+        p.Fail(InstallError::NotEnoughSpace, L"Not enough free space: the game files take " + Gigabytes(total)
+            + L", and the drive of\n" + parent + L"\nhas " + Gigabytes(space) + L" free.");
+        return false;
+    }
     CreateDirectoryW(target.c_str(), nullptr);
     std::vector<uint8_t> buffer(4 << 20);
     for (const IsoFile& f : files) {
@@ -502,23 +627,40 @@ bool ExtractIso(const std::wstring& image, const std::wstring& target, Progress&
         p.SetStatus(L"Copying game files...\n" + f.path);
         HANDLE h = CreateFileW(out.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (h == INVALID_HANDLE_VALUE) {
-            p.error = L"Could not write " + out;
+            p.Fail(InstallError::WriteFailed, L"Could not write\n" + out
+                + L"\n(Windows error " + std::to_wstring(GetLastError()) + L"). Check that the game's folder can be "
+                L"written to.");
             return false;
         }
         uint64_t offset = iso.Offset(f.sector);
         uint32_t left = f.size;
-        bool ok = true;
-        while (left && ok && !p.cancel) {
+        bool readOk = true, writeOk = true;
+        DWORD writeError = 0;
+        while (left && readOk && writeOk && !p.cancel) {
             const uint32_t n = std::min<uint32_t>(left, uint32_t(buffer.size()));
             DWORD written = 0;
-            ok = iso.Read(offset, buffer.data(), n) && WriteFile(h, buffer.data(), n, &written, nullptr) && written == n;
+            readOk = iso.Read(offset, buffer.data(), n);
+            if (readOk) {
+                writeOk = WriteFile(h, buffer.data(), n, &written, nullptr) && written == n;
+                if (!writeOk)
+                    writeError = GetLastError();
+            }
             offset += n;
             left -= n;
             p.done += n;
         }
         CloseHandle(h);
-        if (!ok) {
-            p.error = L"Could not copy " + f.path + L" (the disc image may be damaged, or the drive is full).";
+        if (!readOk) {
+            p.Fail(InstallError::ReadFailed, L"Could not read " + f.path + L" from the disc image: the image is "
+                L"damaged, or the drive it is on cannot be read.");
+            return false;
+        }
+        if (!writeOk) {
+            if (writeError == ERROR_DISK_FULL || writeError == ERROR_HANDLE_DISK_FULL)
+                p.Fail(InstallError::NotEnoughSpace, L"The drive is full: " + f.path + L" could not be written.");
+            else
+                p.Fail(InstallError::WriteFailed, L"Could not write " + f.path + L" (Windows error "
+                    + std::to_wstring(writeError) + L").");
             return false;
         }
     }
@@ -527,13 +669,23 @@ bool ExtractIso(const std::wstring& image, const std::wstring& target, Progress&
 
 // --- Shortcuts ----------------------------------------------------------------------------------
 
-void CreateShortcut(REFKNOWNFOLDERID folder, const std::wstring& exe, const std::wstring& dir, const std::wstring& icon)
+// The shortcut's file in a known folder (the Start menu's programs, the desktop); empty when the
+// folder is not there.
+std::wstring ShortcutPath(REFKNOWNFOLDERID folder)
 {
     PWSTR base = nullptr;
     if (FAILED(SHGetKnownFolderPath(folder, 0, nullptr, &base)))
-        return;
+        return {};
     const std::wstring link = std::wstring(base) + L"\\Star Wars Episode III - Revenge of the Sith.lnk";
     CoTaskMemFree(base);
+    return link;
+}
+
+void CreateShortcut(REFKNOWNFOLDERID folder, const std::wstring& exe, const std::wstring& dir, const std::wstring& icon)
+{
+    const std::wstring link = ShortcutPath(folder);
+    if (link.empty())
+        return;
     IShellLinkW* sl = nullptr;
     if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&sl))))
         return;
@@ -550,52 +702,66 @@ void CreateShortcut(REFKNOWNFOLDERID folder, const std::wstring& exe, const std:
     sl->Release();
 }
 
-std::wstring ChooseImage()
+} // namespace
+
+std::wstring ChooseDiscImage(HWND owner)
 {
     wchar_t file[MAX_PATH] = {};
     OPENFILENAMEW ofn = { sizeof(ofn) };
+    ofn.hwndOwner = owner;
     ofn.lpstrTitle = L"Choose your Star Wars: Episode III disc image";
     ofn.lpstrFilter = L"Disc images and archives (*.iso, *.xiso, *.7z, *.zip, *.rar)\0*.iso;*.xiso;*.7z;*.zip;*.rar\0All files\0*.*\0";
     ofn.lpstrFile = file;
     ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+    // The dialog must not change the process's current folder (relative paths are the game's).
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
     return GetOpenFileNameW(&ofn) ? std::wstring(file) : std::wstring();
 }
 
-} // namespace
-
-bool EnsureGameData(const std::wstring& exeDir, const std::wstring& gameData, const std::wstring& imagePath)
+const wchar_t* InstallErrorTitle(InstallError code)
 {
-    if (Exists(gameData + L"\\default.xbe"))
-        return true;
+    switch (code) {
+    case InstallError::None: return L"";
+    case InstallError::Cancelled: return L"Setup was cancelled";
+    case InstallError::ImageNotFound: return L"The file cannot be opened";
+    case InstallError::ArchiveUnreadable: return L"The archive cannot be read";
+    case InstallError::ArchiveWithoutImage: return L"No disc image in the archive";
+    case InstallError::ArchiveUnpackFailed: return L"The archive could not be unpacked";
+    case InstallError::NotADiscImage: return L"Not a disc image";
+    case InstallError::NotAnXboxImage: return L"Not an Xbox disc";
+    case InstallError::DamagedImage: return L"The disc image is damaged or incomplete";
+    case InstallError::NoGameExecutable: return L"No game on this disc";
+    case InstallError::OtherGame: return L"Another game's disc";
+    case InstallError::OtherRelease: return L"Unsupported release of the game";
+    case InstallError::NotEnoughSpace: return L"Not enough free space";
+    case InstallError::FolderInTheWay: return L"The GameData folder is in the way";
+    case InstallError::WriteFailed: return L"The game files could not be written";
+    case InstallError::ReadFailed: return L"The disc image could not be read";
+    }
+    return L"Setup could not finish";
+}
 
-    std::wstring image = imagePath;
-    if (image.empty()) {
-        const int answer = MessageBoxW(nullptr,
-            L"The game files are not installed yet.\n\n"
-            L"Choose your Star Wars: Episode III - Revenge of the Sith (Xbox) disc image: an .iso / .xiso file, "
-            L"or a .7z / .zip / .rar archive containing one. The game files are copied into the GameData folder "
-            L"next to swrots.exe (about 2.5 GB).",
-            kTitle, MB_OKCANCEL | MB_ICONINFORMATION);
-        if (answer != IDOK)
-            return false;
-        image = ChooseImage();
-        if (image.empty())
-            return false;
-    }
-    if (Exists(gameData)) {
-        // An empty or unusable folder from an earlier attempt.
-        if (!RemoveDirectoryW(gameData.c_str())) {
-            MessageBoxW(nullptr, (L"The folder " + gameData + L" exists but does not contain the game. Move or delete "
-                                  L"it, then start the game again.").c_str(), kTitle, MB_OK | MB_ICONERROR);
-            return false;
-        }
-    }
+bool GameDataInstalled(const std::wstring& gameData) { return Exists(gameData + L"\\default.xbe"); }
+
+void InstallGameFiles(const std::wstring& exeDir, const std::wstring& gameData, const std::wstring& image,
+    InstallProgress& p)
+{
+    p.ok = false;
+    p.code = InstallError::None;
+    p.error.clear();
     LOG_INFO("Setup: installing game files from %ls", image.c_str());
-
     const std::wstring partial = gameData + L".partial", unpackDir = exeDir + L"\\cache\\setup";
-    Progress p;
-    RunWithProgress(p, [&] {
+    [&] {
+        if (!Exists(image)) {
+            p.Fail(InstallError::ImageNotFound, L"The file does not exist:\n" + image);
+            return;
+        }
+        // An empty folder from an earlier attempt goes; anything else in it is not ours to delete.
+        if (Exists(gameData) && !RemoveDirectoryW(gameData.c_str())) {
+            p.Fail(InstallError::FolderInTheWay, L"The folder\n" + gameData + L"\nalready exists and is not empty. "
+                L"Uninstall the game files (Installation > Uninstall), or move or delete that folder, then try again.");
+            return;
+        }
         DeleteTree(partial);
         std::wstring iso = image;
         if (!EndsWith(image, L".iso") && !EndsWith(image, L".xiso")) {
@@ -610,42 +776,119 @@ bool EnsureGameData(const std::wstring& exeDir, const std::wstring& gameData, co
         XbeFile xbe;
         std::string error;
         if (!xbe.Load(partial + L"\\default.xbe", error)) {
-            p.error = L"The disc image does not contain the game (no default.xbe).";
+            p.Fail(InstallError::NoGameExecutable, L"The copied game files have no default.xbe.");
             return;
         }
         if (xbe.Md5Hex() != game::kRetailMd5) {
-            p.error = L"This disc image is a different version of the game. Only the North American (USA) "
-                      L"release is supported.";
+            p.Fail(InstallError::ReadFailed, L"The copied default.xbe is not the one read from the image: the "
+                L"image or the drive could not be read reliably. Try again.");
             return;
         }
         p.ok = MoveFileExW(partial.c_str(), gameData.c_str(), 0) != 0;
         if (!p.ok)
-            p.error = L"Could not create " + gameData;
-    });
+            p.Fail(InstallError::WriteFailed, L"Could not create\n" + gameData + L"\n(Windows error "
+                + std::to_wstring(GetLastError()) + L").");
+    }();
     DeleteTree(unpackDir);
     if (!p.ok) {
         DeleteTree(partial);
-        LOG_WARN("Setup did not finish: %ls", p.cancel ? L"cancelled" : p.error.c_str());
-        if (!p.cancel)
-            MessageBoxW(nullptr, (L"Setup could not finish.\n\n" + p.error).c_str(), kTitle, MB_OK | MB_ICONERROR);
-        return false;
+        if (p.cancel && p.code == InstallError::None)
+            p.Fail(InstallError::Cancelled, L"Setup was cancelled.");
+        else if (p.code == InstallError::None)
+            p.Fail(InstallError::WriteFailed, L"Setup could not finish.");
+        LOG_WARN("Setup did not finish (%d): %ls", int(p.code), p.error.c_str());
+        return;
     }
     LOG_INFO("Setup: game files installed");
+}
 
-    // The game's own icon for shortcuts, and the shortcuts themselves.
+void CreateGameShortcuts(const std::wstring& exeDir, const std::wstring& gameData, bool desktop)
+{
     XbeFile xbe;
     std::string error;
     const std::wstring icon = exeDir + L"\\swrots.ico";
-    if (xbe.Load(gameData + L"\\default.xbe", error))
+    if (xbe.Load(gameData + L"\\default.xbe", error) && xbe.Md5Hex() == game::kRetailMd5)
         WriteIconFile(xbe, icon);
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     CreateShortcut(FOLDERID_Programs, exe, exeDir, icon);
-    if (MessageBoxW(nullptr, L"The game is installed and has been added to the Start menu.\n\nAlso add a shortcut "
-                             L"to the desktop?", kTitle, MB_YESNO | MB_ICONINFORMATION) == IDYES)
+    if (desktop)
         CreateShortcut(FOLDERID_Desktop, exe, exeDir, icon);
-    CoUninitialize();
+    if (SUCCEEDED(com))
+        CoUninitialize();
+}
+
+bool UninstallGame(const std::wstring& exeDir, const UninstallOptions& options, std::wstring& error)
+{
+    LOG_INFO("Uninstall: game files%s%s%s", options.saves ? ", saves" : "", options.settings ? ", settings" : "",
+        options.mods ? ", mods" : "");
+    std::vector<std::wstring> folders = { exeDir + L"\\GameData", exeDir + L"\\GameData.partial", exeDir + L"\\cache" };
+    std::vector<std::wstring> files = { exeDir + L"\\swrots.ico" };
+    for (const KNOWNFOLDERID* folder : { &FOLDERID_Programs, &FOLDERID_Desktop })
+        if (const std::wstring link = ShortcutPath(*folder); !link.empty())
+            files.push_back(link);
+    if (options.saves)
+        folders.push_back(exeDir + L"\\saves");
+    if (options.mods)
+        folders.push_back(exeDir + L"\\mods");
+    if (options.settings) {
+        files.push_back(exeDir + L"\\settings.ini");
+        files.push_back(exeDir + L"\\controls.ini");
+    }
+    std::wstring left;
+    for (const std::wstring& folder : folders) {
+        DeleteTree(folder);
+        if (Exists(folder))
+            left += L"\n" + folder;
+    }
+    for (const std::wstring& file : files) {
+        if (Exists(file) && !DeleteFileW(file.c_str()))
+            left += L"\n" + file;
+    }
+    if (!left.empty()) {
+        error = L"These could not be deleted (a file in them may be open in another program):" + left;
+        LOG_WARN("Uninstall: not everything could be deleted:%ls", left.c_str());
+        return false;
+    }
+    LOG_INFO("Uninstall: done");
+    return true;
+}
+
+bool EnsureGameData(const std::wstring& exeDir, const std::wstring& gameData, const std::wstring& imagePath)
+{
+    if (GameDataInstalled(gameData))
+        return true;
+
+    std::wstring image = imagePath;
+    if (image.empty()) {
+        const int answer = MessageBoxW(nullptr,
+            L"The game files are not installed yet.\n\n"
+            L"Choose your Star Wars: Episode III - Revenge of the Sith (Xbox) disc image: an .iso / .xiso file, "
+            L"or a .7z / .zip / .rar archive containing one. The game files are copied into the GameData folder "
+            L"next to swrots.exe (about 2.5 GB).",
+            kTitle, MB_OKCANCEL | MB_ICONINFORMATION);
+        if (answer != IDOK)
+            return false;
+        image = ChooseDiscImage(nullptr);
+        if (image.empty())
+            return false;
+    }
+
+    Progress p;
+    RunWithProgress(p, [&] { InstallGameFiles(exeDir, gameData, image, p); });
+    if (!p.ok) {
+        if (p.code != InstallError::Cancelled)
+            MessageBoxW(nullptr, (std::wstring(L"Setup could not finish: ") + InstallErrorTitle(p.code) + L".\n\n"
+                                  + p.error).c_str(), kTitle, MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    // The game's own icon for shortcuts, and the shortcuts themselves.
+    const bool desktop = MessageBoxW(nullptr, L"The game is installed and will be added to the Start menu.\n\nAlso "
+                                              L"add a shortcut to the desktop?", kTitle, MB_YESNO | MB_ICONINFORMATION)
+        == IDYES;
+    CreateGameShortcuts(exeDir, gameData, desktop);
     return true;
 }
 

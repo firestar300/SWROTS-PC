@@ -20,7 +20,10 @@ The game is 32-bit machine code, and a 64-bit process cannot execute it. The por
    game's fixed address range (`0x10000`-`0x96E000`) belongs to it before Windows puts anything
    there. It also reserves 128 MiB at `0x80000000` for the Xbox's contiguous memory, then loads
    `core.dll` and hands over. Its own code is overwritten by the game.
-2. `core.dll` (`src/core/main.cpp`) reads settings, installs the game files on first run, checks the
+2. `core.dll` (`src/core/main.cpp`) reads settings and shows the launcher (`src/launcher/`), which
+   installs the game files from the player's disc image (`src/core/install.cpp`) and starts the game in
+   a process of its own (`swrots.exe --from-launcher`), so nothing the launcher loaded is in the game's
+   address space. That process checks the
    executable's MD5, and copies the game's sections to their addresses. Windows still needs this
    process's PE headers, so they are moved aside and the game's header area points to them.
 3. It patches the game where it touches Xbox-only hardware (below), creates the window, and starts

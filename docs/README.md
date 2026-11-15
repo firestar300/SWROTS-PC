@@ -3,6 +3,8 @@
 ## Playing
 
 - [Installing](install.md): setup from your disc image, the folder layout, reinstalling
+- [The launcher](launcher.md): installing and what its error messages mean, settings, controls, uninstalling,
+  starting without it
 - [Linux, Steam Deck and handhelds](linux.md): playing through Proton
 - [Settings](settings.md): `settings.ini`: window, graphics, frame rate, developer options
 - [Co-op](coop.md): two players in the story missions: turning it on, controllers, known issues

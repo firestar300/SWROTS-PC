@@ -3,6 +3,22 @@
 What changed in each release of SWROTS-PC, newest first. Downloads are on the
 [releases page](https://github.com/jedijosh920/SWROTS-PC/releases).
 
+## Unreleased
+
+### Added
+
+- **A launcher.** `swrots.exe` now opens a launcher before the game, in the game's colours and, once the game files
+  are installed, with the game's own font and emblem. It installs the game files from your disc image with a
+  progress bar (or a file dropped onto it), changes the settings (`settings.ini`) and the keyboard and mouse
+  controls (`controls.ini`: click a key and press the new one), uninstalls the game files again (saves, settings and
+  mods are kept unless ticked), and starts the game. A controller or the keyboard works in it too. To start the game
+  directly: tick it on the Play page (`[Launcher] Skip=1`), or run `swrots.exe --play`; Shift at start or
+  `swrots.exe --launcher` shows the launcher again. See [the launcher](https://github.com/jedijosh920/SWROTS-PC/blob/main/docs/launcher.md).
+- **Setup says what is wrong with a disc image**: not a disc image, not an Xbox disc (the PlayStation 2 version, for
+  one), a damaged or incomplete image, another game's disc (named), another release of the game (its region named) or
+  a modified copy, an archive that cannot be read or holds no image, and too little free space, checked before
+  anything is copied.
+
 ## [v0.6.0](https://github.com/jedijosh920/SWROTS-PC/releases/tag/v0.6.0) - 2026-11-06
 
 Missions of your own: scripted missions with cutscenes, dialogue and voices.

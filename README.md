@@ -89,12 +89,14 @@ How Yoda was added, for developers: [the versus roster](docs/research/versus-ros
 
 1. Download the latest release and unpack `swrots.exe` and `core.dll` into a folder of your
    choice, e.g. `C:\Games\SWROTS`.
-2. Run `swrots.exe`. The first time, it asks for your disc image: an Xbox `.iso` / `.xiso`, or a
-   `.7z` / `.zip` / `.rar` containing one. It checks that it is the supported release, copies the
-   game files into `GameData\` (about 2.5 GB) and adds a Start menu shortcut.
-3. Play. Settings are in `settings.ini`, key bindings in `controls.ini`, both next to `swrots.exe`.
+2. Run `swrots.exe`. Its launcher opens: choose your disc image, an Xbox `.iso` / `.xiso`, or a
+   `.7z` / `.zip` / `.rar` containing one. It checks that it is the supported release (and says what
+   is wrong with an image it cannot use), copies the game files into `GameData\` (about 2.5 GB) and
+   adds a Start menu shortcut.
+3. Choose **Play**. The launcher also changes the settings and the controls (`settings.ini` and
+   `controls.ini`, next to `swrots.exe`) and uninstalls the game files again.
 
-More: [installing](docs/install.md).
+More: [installing](docs/install.md), [the launcher](docs/launcher.md).
 
 ## Requirements
 
@@ -124,6 +126,7 @@ and controller layouts: [controls](docs/controls.md).
 | | |
 |---|---|
 | [Installing](docs/install.md) | Setup, the folder layout, reinstalling |
+| [The launcher](docs/launcher.md) | Installing from a disc image and its error messages, settings, controls, uninstalling |
 | [Linux and Steam Deck](docs/linux.md) | Playing through Proton (community guide) |
 | [Settings](docs/settings.md) | Window, graphics, frame rate, developer options |
 | [Controls](docs/controls.md) | Keyboard, mouse and controllers |
