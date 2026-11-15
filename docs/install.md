@@ -4,19 +4,23 @@ You need your own copy of *Star Wars: Episode III - Revenge of the Sith* for the
 (North American release). This project contains no game files.
 
 1. Put `swrots.exe` and `core.dll` in a folder of your choice, e.g. `C:\Games\SWROTS`.
-2. Start `swrots.exe`. The first time, it asks for your disc image:
+2. Start `swrots.exe`. Its [launcher](launcher.md) opens; choose **Choose disc image** and pick:
    - an `.iso` (an Xbox disc image: XISO or a full Redump-style image), or
    - a `.7z`, `.zip` or `.rar` archive containing one (unpacked with Windows' built-in `tar`,
      Windows 10 1803 or newer; if that fails, unpack it yourself and choose the `.iso`).
-3. The game files are copied into `GameData\` next to `swrots.exe` (about 2.5 GB, plus the same
-   again temporarily when unpacking an archive). The game checks that it is the supported release.
-4. A Start menu shortcut is created, and optionally a desktop shortcut. Both use the game's own
+3. The image is checked (an Xbox disc, this game, the supported release, complete), then the game files
+   are copied into `GameData\` next to `swrots.exe` (about 2.5 GB, plus the same again temporarily when
+   unpacking an archive). If the image cannot be used, the launcher
+   [says why](launcher.md#installing).
+4. A Start menu shortcut is created, and a desktop shortcut if you ticked it. Both use the game's own
    icon (`swrots.ico`, taken from the game's executable).
 
-The game then starts. From the command line, `swrots.exe --install <image>` skips the file dialog.
+Then choose **Play**. From the command line, `swrots.exe --install <image>` installs that image without
+the file dialog.
 
-To reinstall, delete the `GameData` folder. Saves (`saves\`), settings (`settings.ini`, `controls.ini`)
-and mods (`mods\`) are kept.
+To reinstall, choose **Installation > Uninstall** in the launcher (or delete the `GameData` folder), then
+install again. Saves (`saves\`), settings (`settings.ini`, `controls.ini`) and mods (`mods\`) are kept
+unless you tick them when uninstalling.
 
 ## Folder layout
 

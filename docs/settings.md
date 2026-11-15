@@ -2,7 +2,8 @@
 
 Player settings live in `settings.ini` next to `swrots.exe`. The file is created
 with defaults on first run. Unknown or out-of-range values are corrected when the game starts.
-The game reads it at startup; in-game option menus will write the same file.
+The game reads it at startup; the [launcher](launcher.md)'s Settings page and the in-game option
+menus write the same file, so it never has to be edited by hand.
 
 ```ini
 [Display]
@@ -96,6 +97,14 @@ Two players in the story missions: see the [co-op guide](coop.md) for how it wor
 - `Player2`: a character class (e.g. `IVader`, `ICloneTrooper`) for player 2 where the mission has no
   companion; empty chooses one for player 1's side.
 - The debug console's `coop` shows what co-op is doing and changes these settings while playing.
+
+## The launcher
+
+An optional `[Launcher]` section:
+
+| Key | Effect |
+|---|---|
+| `Skip=1` | `swrots.exe` starts the game directly, without the [launcher](launcher.md) (which still opens while the game files are not installed). Hold Shift while it starts, or run `swrots.exe --launcher`, to see the launcher again |
 
 ## Developer options
 

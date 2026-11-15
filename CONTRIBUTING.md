@@ -32,8 +32,9 @@ way around the code and the game.
    cmake --build build --config Release
    ```
 
-3. Run `build\bin\swrots.exe` and give it your disc image, or copy an already installed `GameData\`
-   folder into `build\bin\` (a real copy; do not link to your game folder).
+3. Run `build\bin\swrots.exe` and give its launcher your disc image, or copy an already installed
+   `GameData\` folder into `build\bin\` (a real copy; do not link to your game folder).
+   `swrots.exe --play` starts the game without the launcher.
 
 Everything the game reads and writes lives next to the executable: `GameData\`, `saves\`, `cache\`,
 `mods\`, `logs\`, `settings.ini`, `controls.ini`.
@@ -56,7 +57,7 @@ In `mods\Default_Xbox.cfg`, `map:<level>` boots straight into a level, skipping 
 names are the PAK names in `GameData\pak` without `res_` and `.pak`), e.g. `map:u112_mus_lava`.
 A versus duel starts directly with `map:u110_cor_training_00` and `v_versusMode:1` on the next line.
 
-Environment variables: `SWROTS_NO_DIALOGS=1` (no message boxes, for unattended runs),
+Environment variables: `SWROTS_NO_DIALOGS=1` (no message boxes and no launcher, for unattended runs),
 `SWROTS_WATCHDOG=<seconds>` (dumps every game thread's stack after that time, for hangs),
 `SWROTS_DRAWLOG_FRAME=<n>` or F11 (logs every draw of one frame), `SWROTS_SHADER_DUMP=<dir>`
 (writes the generated HLSL shaders), `SWROTS_ALL_CORES=1` (lets game threads use every CPU core;
@@ -79,7 +80,7 @@ then, e.g. `9:until30`; `:shoot` makes its attacks heavy attacks, `:still` makes
 then, to walk the menus), `SWROTS_COMMANDS="<seconds>:<command>;..."` (runs debug console
 commands that many seconds after the start, e.g. `"9:player IVader;12:spawn ICloneTrooper enemy;15:despawn"`;
 `screenshot <name>` among them saves what the game shows then to `screenshots\<name>.png`),
-`SWROTS_BACKGROUND=1` (starts the game minimised and silent without taking the focus, so a test run
+`SWROTS_BACKGROUND=1` (starts the game minimised and silent without taking the focus, and without the launcher, so a test run
 leaves the desktop alone; it keeps drawing, and the screenshots work; controllers on the PC are not read),
 `SWROTS_TEST_BUTTONS="<seconds>:<button>;..."` (presses player 1's buttons at those times, each for 0.15 s:
 `A`, `B`, `X`, `Y`, `Start`, `Back`, `Up`, `Down`, `Left`, `Right`; to walk the front-end menus unattended, e.g.
@@ -97,6 +98,7 @@ Read [how it works](docs/architecture.md) first. In short:
 |---|---|
 | `src/loader/` | `swrots.exe`: reserves the game's address range, loads `core.dll` |
 | `src/core/` | Startup, installer, window, settings, logging, crash reports |
+| `src/launcher/` | The launcher: the window before the game (install, settings, controls, uninstall) |
 | `src/kernel/` | The Xbox kernel functions the game imports, on Windows; the in-process reboot |
 | `src/xapi/` | Hooks on the game's statically linked Xbox libraries; traps on everything not replaced |
 | `src/d3d/` | The Xbox Direct3D 8 layer on Direct3D 9, shader translation, the flight recorder |

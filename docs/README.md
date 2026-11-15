@@ -3,6 +3,8 @@
 ## Playing
 
 - [Installing](install.md): setup from your disc image, the folder layout, reinstalling
+- [The launcher](launcher.md): installing and what its error messages mean, settings, controls, uninstalling,
+  starting without it
 - [Linux, Steam Deck and handhelds](linux.md): playing through Proton
 - [Settings](settings.md): `settings.ini`: window, graphics, frame rate, developer options
 - [Co-op](coop.md): two players in the story missions: turning it on, controllers, known issues
@@ -25,6 +27,8 @@
 - [Custom characters](modding/custom-characters.md): new fighters from `mods\characters` (model, voice, sabers,
   Force, intro), in Versus, Heroes vs Villains and the debug menu
 - [Custom maps](modding/custom-maps.md): new maps from `mods\maps` for Versus, Heroes vs Villains and Battlefront
+- [Missions and modes](modding/missions.md): missions and game modes of your own from `mods\missions`, scripted
+  in Lua (cutscenes, cameras, dialogue, objectives, timers, spawning)
 - [How loading works](modding/how-loading-works.md): level archives and what the port changes
 - [File formats](modding/file-formats.md): PAK, STX, MSH and more
 

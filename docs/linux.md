@@ -16,8 +16,8 @@ than an archive: unpacking archives relies on a Windows tool that Proton may not
 2. **Choose Proton.** In Steam, right-click the new `swrots.exe` entry: **Properties → Compatibility →
    Force the use of a specific Steam Play compatibility tool**, and pick **Proton Experimental** (or
    Proton GE).
-3. **Create its Proton folder.** Launch it once. When it says that the game files are not installed yet,
-   close the message with the **X**. Steam has now made the game's own Windows folder (its *prefix*).
+3. **Create its Proton folder.** Launch it once. When its [launcher](launcher.md) opens, close it
+   (**Quit**). Steam has now made the game's own Windows folder (its *prefix*).
 4. **Find the prefix.** A non-Steam game gets a number of its own (its app ID). The Protontricks app lists
    it next to `swrots.exe`; the prefix is then:
 
@@ -32,8 +32,8 @@ than an archive: unpacking archives relies on a Windows tool that Proton may not
      `"/home/<you>/.steam/steam/steamapps/compatdata/<app ID>/pfx/dosdevices/c:/Games/SWROTS/swrots.exe"`
    - **Start In**: the folder it is in, without quotation marks:
      `/home/<you>/.steam/steam/steamapps/compatdata/<app ID>/pfx/dosdevices/c:/Games/SWROTS/`
-7. **Install.** Launch it. At the same message, choose **OK**, and pick your `.iso` in the file dialog. The
-   game files are copied and the game starts.
+7. **Install.** Launch it. In the launcher, choose **Choose disc image** and pick your `.iso` in the file
+   dialog. The game files are copied; then choose **Play**.
 
 Settings and controls are the `.ini` files in that folder ([settings](settings.md), [controls](controls.md)).
 

@@ -34,6 +34,8 @@
 #include "game/fixes.h"
 #include "game/freecam.h"
 #include "game/hvv.h"
+#include "game/missions.h"
+#include "game/missionsmenu.h"
 #include "game/hvvmenu.h"
 #include "game/menus.h"
 #include "game/prompts.h"
@@ -46,6 +48,7 @@
 #include "kernel/kernel.h"
 #include "kernel/mm.h"
 #include "kernel/reboot.h"
+#include "launcher/launcher.h"
 #include "xapi/xapi.h"
 #include "version.h"
 
@@ -192,6 +195,8 @@ static void StartGame(const void* launchData)
     game::InstallDevMap(g_Boot.paths.gameData, g_Boot.paths.mods);
     game::InstallHvv();
     game::InstallHvvMenu();
+    game::InstallMissions(g_Boot.paths.mods);
+    game::InstallMissionsMenu();
     game::InstallResourceHooks(g_Boot.paths.gameData, g_Boot.paths.mods, g_Boot.paths.cache, g_Boot.dumpDir,
         g_Boot.logResources);
     game::InstallFreeCamera();
@@ -244,29 +249,65 @@ static void Run(void* reserveBase, unsigned reserveSize, void* contiguousBase, u
     CreateDirectoryW(logDir.c_str(), nullptr);
     const std::wstring logPath = logDir + L"\\swrots.log";
     const bool relaunch = wcsstr(GetCommandLineW(), L"--relaunch") != nullptr;
-    if (!relaunch)
+    // The command line: `--install <image>` preselects the disc image to install from, `--play`
+    // starts the game without the launcher, `--launcher` shows the launcher even when settings.ini
+    // skips it; `--from-launcher` is the launcher's own, starting the game in this new process.
+    std::wstring installImage;
+    bool fromLauncher = false, playNow = false, forceLauncher = false;
+    {
+        int argc = 0;
+        LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        for (int i = 1; argv && i < argc; ++i) {
+            if (wcscmp(argv[i], L"--install") == 0 && i + 1 < argc)
+                installImage = argv[++i];
+            else if (wcscmp(argv[i], L"--from-launcher") == 0)
+                fromLauncher = true;
+            else if (wcscmp(argv[i], L"--play") == 0)
+                playNow = true;
+            else if (wcscmp(argv[i], L"--launcher") == 0)
+                forceLauncher = true;
+        }
+        LocalFree(argv);
+    }
+    // The launcher's process began this session's log; the game's continues it.
+    const bool continued = relaunch || fromLauncher;
+    if (!continued)
         MoveFileExW(logPath.c_str(), (logDir + L"\\swrots.previous.log").c_str(), MOVEFILE_REPLACE_EXISTING);
-    LogInit(logPath.c_str(), console, relaunch);
+    LogInit(logPath.c_str(), console, continued);
     if (relaunch)
         LOG_INFO("---- The game was restarted to reboot (fallback) ----");
+    if (fromLauncher)
+        LOG_INFO("---- The game, started from the launcher ----");
     LOG_INFO("Star Wars: Episode III - Revenge of the Sith (PC) starting, SWROTS-PC %s", SWROTS_VERSION);
     LogSystem();
     LoadSettings(ini);
 
-    // First run: install the game files from the player's disc image
-    // (`swrots.exe --install <image>` preselects it).
-    std::wstring installImage;
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    for (int i = 1; argv && i + 1 < argc; ++i)
-        if (wcscmp(argv[i], L"--install") == 0)
-            installImage = argv[i + 1];
-    LocalFree(argv);
-    if (!EnsureGameData(exeDir, exeDir + L"\\GameData", installImage))
+    // The launcher (launcher/launcher.h) comes first: it installs the game files from the player's
+    // disc image, edits the settings and the controls, and starts the game in a process of its own
+    // (--from-launcher). Not for a game that restarts itself, an unattended run, --play, or
+    // [Launcher] Skip=1 in settings.ini with the game installed (holding Shift shows it all the same).
+    const std::wstring gameData = exeDir + L"\\GameData";
+    const bool unattended = GetEnvironmentVariableW(L"SWROTS_NO_DIALOGS", nullptr, 0) != 0
+        || GetEnvironmentVariableW(L"SWROTS_BACKGROUND", nullptr, 0) != 0;
+    const bool skip = GetPrivateProfileIntW(L"Launcher", L"Skip", 0, ini.c_str()) != 0
+        && (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0;
+    if (!relaunch && !fromLauncher && !playNow && !unattended
+        && (forceLauncher || !skip || !GameDataInstalled(gameData))) {
+        input::LoadControls(exeDir + L"\\controls.ini"); // makes controls.ini on a first start
+        const LauncherResult result = RunLauncher(exeDir, installImage);
+        if (result == LauncherResult::Play)
+            StartGameProcess(exeDir);
+        if (result != LauncherResult::Unavailable) {
+            LogClose();
+            ExitProcess(0);
+        }
+    }
+    // Without the launcher: setup with Windows' own dialogs, when the game files are not there yet.
+    if (!EnsureGameData(exeDir, gameData, installImage))
         ExitProcess(0);
 
     kernel::Paths paths;
-    paths.gameData = exeDir + L"\\GameData";
+    paths.gameData = gameData;
     paths.saves = exeDir + L"\\saves";
     // Test switch SWROTS_TEST_SAVES=<folder>: the save drive is that folder (unattended menu tests never touch the
     // player's saves). Created when missing.

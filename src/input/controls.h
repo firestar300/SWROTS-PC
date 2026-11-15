@@ -27,6 +27,18 @@ std::vector<int> ActionKeys(const wchar_t* action);
 // Whether the mouse moves the right stick ([Mouse] RightStick).
 bool MouseIsRightStick();
 
+// For the launcher's controls page, which edits controls.ini itself:
+// the actions of [Keyboard] in their order, with their default keys (as written in the file).
+struct ActionInfo {
+    const wchar_t* name;
+    const char* defaults;
+};
+std::vector<ActionInfo> ActionList();
+// A key's name in controls.ini ("W", "Mouse1", "LCtrl"); empty when it has none (it cannot be bound).
+std::string KeyName(int vk);
+// The keys of a controls.ini value ("E, Mouse3"), as virtual keys; names it does not know are left out.
+std::vector<int> ParseKeyList(const std::string& list);
+
 // The on-screen button prompts: true while the player's last input was the keyboard or the mouse (keyboard prompts),
 // false while it was a controller (the game's own). [Controls] ButtonPrompts in settings.ini can hold either;
 // SWROTS_PROMPTS=keyboard|controller forces one for tests.

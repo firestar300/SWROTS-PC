@@ -42,19 +42,24 @@ target_link_libraries(SWROTS PRIVATE kernel32 user32)
 # ---------------------------------------------------------------------------
 file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS
   src/core/*.cpp src/kernel/*.cpp src/xapi/*.cpp src/game/*.cpp src/input/*.cpp src/d3d/*.cpp src/audio/*.cpp
-  src/debug/*.cpp)
+  src/debug/*.cpp src/launcher/*.cpp)
 file(GLOB_RECURSE CORE_HEADERS CONFIGURE_DEPENDS
-  src/core/*.h src/kernel/*.h src/xapi/*.h src/game/*.h src/game/*.inc src/input/*.h src/d3d/*.h src/debug/*.h)
+  src/core/*.h src/kernel/*.h src/xapi/*.h src/game/*.h src/game/*.inc src/input/*.h src/d3d/*.h src/debug/*.h
+  src/launcher/*.h)
 
-# Dear ImGui (third_party/imgui, MIT): the debug menu.
+# Dear ImGui (third_party/imgui, MIT): the debug menu and the launcher.
 set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
 set(IMGUI_SOURCES
   ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp
   ${IMGUI_DIR}/backends/imgui_impl_dx9.cpp ${IMGUI_DIR}/backends/imgui_impl_win32.cpp)
 
-add_library(SWROTSCore SHARED ${CORE_SOURCES} ${CORE_HEADERS} ${IMGUI_SOURCES})
+# Lua (third_party/lua, MIT): the scripting of missions and modes (src/game/missions.cpp).
+file(GLOB LUA_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lua/*.c)
+set_source_files_properties(${LUA_SOURCES} PROPERTIES LANGUAGE C COMPILE_OPTIONS "/W0")
+add_library(SWROTSCore SHARED ${CORE_SOURCES} ${CORE_HEADERS} ${IMGUI_SOURCES} ${LUA_SOURCES})
+source_group(lua FILES ${LUA_SOURCES})
 source_group(imgui FILES ${IMGUI_SOURCES})
-target_include_directories(SWROTSCore PRIVATE src ${IMGUI_DIR} ${CMAKE_BINARY_DIR}/generated)
+target_include_directories(SWROTSCore PRIVATE src ${IMGUI_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lua ${CMAKE_BINARY_DIR}/generated)
 # The version for the log (generated/version.h, from git describe at every build).
 add_custom_target(SWROTSVersion
   COMMAND ${CMAKE_COMMAND} -DSOURCE=${CMAKE_SOURCE_DIR} -DOUTPUT=${CMAKE_BINARY_DIR}/generated/version.h

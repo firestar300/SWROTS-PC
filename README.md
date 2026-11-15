@@ -51,6 +51,10 @@ Things the Xbox release never had:
   sabers, Force powers and intro (`mods\characters`), and new maps for Versus, Heroes vs Villains and Battlefront
   (`mods\maps`). The game is unchanged without them. See [custom characters](docs/modding/custom-characters.md)
   and [custom maps](docs/modding/custom-maps.md).
+- **Missions and modes of your own.** A mission folder in `mods\missions` holds a short Lua script with
+  cutscenes, camera shots, dialogue subtitles, objectives, timers, spawning and its own ending; modes such as
+  survival are written the same way. Installed missions are in the main menu (**Single Player > Custom
+  Missions**). See [missions and modes](docs/modding/missions.md).
 - **Keyboard and mouse button prompts**: the game's prompts show your keys after you use the keyboard or mouse.
 - **Play story levels as anyone, in any costume or body.** Vader in Order 66, Anakin without his
   robe in the Jedi Temple, a 501st clone trooper, Obi-Wan in Anakin's duel outfit: pick a class, a
@@ -85,12 +89,14 @@ How Yoda was added, for developers: [the versus roster](docs/research/versus-ros
 
 1. Download the latest release and unpack `swrots.exe` and `core.dll` into a folder of your
    choice, e.g. `C:\Games\SWROTS`.
-2. Run `swrots.exe`. The first time, it asks for your disc image: an Xbox `.iso` / `.xiso`, or a
-   `.7z` / `.zip` / `.rar` containing one. It checks that it is the supported release, copies the
-   game files into `GameData\` (about 2.5 GB) and adds a Start menu shortcut.
-3. Play. Settings are in `settings.ini`, key bindings in `controls.ini`, both next to `swrots.exe`.
+2. Run `swrots.exe`. Its launcher opens: choose your disc image, an Xbox `.iso` / `.xiso`, or a
+   `.7z` / `.zip` / `.rar` containing one. It checks that it is the supported release (and says what
+   is wrong with an image it cannot use), copies the game files into `GameData\` (about 2.5 GB) and
+   adds a Start menu shortcut.
+3. Choose **Play**. The launcher also changes the settings and the controls (`settings.ini` and
+   `controls.ini`, next to `swrots.exe`) and uninstalls the game files again.
 
-More: [installing](docs/install.md).
+More: [installing](docs/install.md), [the launcher](docs/launcher.md).
 
 ## Requirements
 
@@ -120,12 +126,14 @@ and controller layouts: [controls](docs/controls.md).
 | | |
 |---|---|
 | [Installing](docs/install.md) | Setup, the folder layout, reinstalling |
+| [The launcher](docs/launcher.md) | Installing from a disc image and its error messages, settings, controls, uninstalling |
 | [Linux and Steam Deck](docs/linux.md) | Playing through Proton (community guide) |
 | [Settings](docs/settings.md) | Window, graphics, frame rate, developer options |
 | [Controls](docs/controls.md) | Keyboard, mouse and controllers |
 | [Co-op](docs/coop.md) | Two players in the story missions: how to play, settings, known issues |
 | [Heroes vs Villains](docs/research/heroes-vs-villains.md#playing-it) | The team mode: setting up a match, what's on screen |
 | [Battlefront](docs/battlefront.md) | The conquest mode: command posts, tickets, heroes |
+| [Missions and modes](docs/modding/missions.md) | Missions of your own: install, play from the main menu, write your own |
 | [Debug menu](docs/debug-menu.md) | The game's console, variables and debug displays |
 | [Modding](docs/modding/README.md) | Loose-file mods, dumping assets, textures, character swaps |
 | [How it works](docs/architecture.md) | The port's design, for the curious and for contributors |
@@ -233,5 +241,11 @@ The game itself is not included and is not distributed by this project; you must
   ([#2](../../issues/2), [#3](../../issues/3)), [weapon modding](docs/modding/replacing-weapons.md) (the
   guide, the weapon mesh layout and the tools in `tools/weapons/`) and
   [music modding](docs/modding/replacing-music.md) (the guide and `tools/audio/hwx.py`).
+- [@firestar300](https://github.com/firestar300): custom character fixes found while building a character pack
+  ([#60](../../pull/60)): any number of custom voice lines, a pack's own dialogue archive and saber hilts, and live
+  swaps to a mod's character; and custom maps' own collision, sky and deadly falls, more Versus slots for custom
+  characters and Vader's breathing off for his class ([#61](../../pull/61)); and characters set up late coming
+  alive, Battlefront comebacks at clear places and raised command posts on custom maps, `Modes=`, and player 2's own
+  body and voice in a custom character mirror ([#66](../../pull/66)).
 - [@QTG128](https://github.com/QTG128): the first bug report, which found the missing sound at startup
   ([#1](../../issues/1)).

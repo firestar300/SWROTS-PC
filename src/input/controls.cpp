@@ -77,11 +77,11 @@ std::atomic<LONG> g_MouseDx = 0, g_MouseDy = 0;
 float g_StickX = 0.0f, g_StickY = 0.0f;
 ULONGLONG g_LastMouseRead = 0;
 
-struct KeyName {
+struct NamedKey {
     const char* name;
     int vk;
 };
-const KeyName kKeyNames[] = {
+const NamedKey kKeyNames[] = {
     { "Space", VK_SPACE }, { "Enter", VK_RETURN }, { "Escape", VK_ESCAPE }, { "Tab", VK_TAB },
     { "Backspace", VK_BACK }, { "Shift", VK_SHIFT }, { "LShift", VK_LSHIFT }, { "RShift", VK_RSHIFT },
     { "Ctrl", VK_CONTROL }, { "LCtrl", VK_LCONTROL }, { "RCtrl", VK_RCONTROL }, { "Alt", VK_MENU },
@@ -105,7 +105,7 @@ int ParseKey(std::string name)
         if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
             return c;
     }
-    for (const KeyName& k : kKeyNames)
+    for (const NamedKey& k : kKeyNames)
         if (_stricmp(k.name, name.c_str()) == 0)
             return k.vk;
     if ((name[0] == 'F' || name[0] == 'f') && name.size() <= 3) {
@@ -200,6 +200,30 @@ std::vector<int> ActionKeys(const wchar_t* action)
 }
 
 bool MouseIsRightStick() { return g_MouseRightStick; }
+
+std::vector<ActionInfo> ActionList()
+{
+    std::vector<ActionInfo> list;
+    for (const Action& a : g_Actions)
+        list.push_back({ a.name, a.defaults });
+    return list;
+}
+
+std::string KeyName(int vk)
+{
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9'))
+        return std::string(1, char(vk));
+    for (const NamedKey& k : kKeyNames)
+        if (k.vk == vk)
+            return k.name;
+    if (vk >= VK_F1 && vk <= VK_F24)
+        return "F" + std::to_string(vk - VK_F1 + 1);
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9)
+        return "Numpad" + std::to_string(vk - VK_NUMPAD0);
+    return {};
+}
+
+std::vector<int> ParseKeyList(const std::string& list) { return ParseKeys(list); }
 
 void AddMouseMotion(LONG dx, LONG dy)
 {
