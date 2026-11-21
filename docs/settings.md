@@ -14,7 +14,13 @@ Stretch=0           ; 1: fill the window (no black bars, the picture may look sq
 
 [Graphics]
 ResolutionScale=0   ; internal resolution = 640x480 x this (1-8); 0 = auto (fits the window/screen)
-Widescreen=1        ; 1: 16:9 (the game renders anamorphic widescreen); 0: 4:3 with side bars
+Widescreen=1        ; 1: 16:9 (the game renders anamorphic widescreen); 0: 4:3 with side bars;
+                    ; 2: true widescreen at any shape (16:9, 21:9, 32:9...), see below (experimental)
+AspectRatio=Auto    ; Widescreen=2: the picture's shape (21:9, 32:9, 3440x1440, 2.39...); Auto: the screen's
+                    ; in fullscreen, else the window's (Width x Height)
+HudAnchor=1         ; Widescreen=2: 1: HUD pieces near the sides go to the screen's edges; 0: the whole HUD in the middle
+HudAspect=Auto      ; Widescreen=2: the HUD keeps within this shape in the middle (e.g. 16:9 on a 32:9 screen);
+                    ; Auto: the whole width
 Anisotropy=16       ; texture filtering quality, 1 (off) to 16
 Bloom=1             ; the game's full-screen bloom; 0 turns it off
 
@@ -51,6 +57,19 @@ Notes:
   `Stretch=1` fills any window instead.
 - `ResolutionScale`: 1 is the original Xbox resolution; auto picks 2 for 720p, 3 for 1080p and 1440p,
   5 for 4K.
+- `Widescreen=2` (experimental) is a true widescreen: no stretching at any shape. The game draws its
+  usual 4:3 picture, which stays in the middle exactly as on a 4:3 screen, and the 3D scene continues at
+  the sides (more is seen to the left and right, nothing is cut at the top or bottom). The HUD keeps its
+  shape: pieces near a side (the health and Force bars, player 2's) move to that edge of the screen, or of
+  the `HudAspect` area; pieces reaching the middle stay there. Whole-screen effects (bloom, fades, the
+  cutscenes' letterbox bars) cover the whole width; menus, loading screens and movies stay 4:3 in the
+  middle. Known limits:
+  - The game decides what to draw for its 4:3 view: objects wholly outside it (beside the middle) can
+    appear late at the far sides.
+  - HUD pieces are placed by where each one is drawn; a piece the game draws together with others in the
+    middle stays in the middle. `HudAnchor=0` keeps the whole HUD in the middle, as on a 4:3 screen.
+  - A tester's report helps: F11 writes one frame's draws to the log, each screen-space draw with where it
+    was placed (`widescreen: x ... at the left edge`).
 - `Bloom`: many levels add a blurred copy of the scene (about 35%) for a soft glow around bright
   areas, as on the Xbox. Set it to 0 for a sharper, flatter image. Lightsaber glows are part of the
   blades and are unaffected.

@@ -64,6 +64,7 @@ static int FvfTexcoords(DWORD fvf, WORD offsets[8], BYTE sizes[8])
 
 struct DrawStats {
     DWORD draws, programmable, fixed, pixelShader, skipped;
+    DWORD world; // depth-tested vertex program draws into a wide target (the 3D scene), this frame
 };
 static DrawStats g_Stats;
 
@@ -103,15 +104,126 @@ static float ScaleScreen(float x)
     return x * k + (k - 1.0f) * 0.5f;
 }
 
-static void ScaleScreenPositions(uint8_t* vertices, UINT count, UINT stride, UINT positionOffset)
+// Pre-transformed positions on the current target, x placed for true widescreen (see Place).
+static void ScaleScreenPositions(uint8_t* vertices, UINT count, UINT stride, UINT positionOffset,
+    const SurfaceMap& map, Placement placement)
 {
-    if (RenderScale() == 1)
+    if (RenderScale() == 1 && !map.wide)
         return;
     for (UINT v = 0; v < count; ++v) {
         float* xy = reinterpret_cast<float*>(vertices + size_t(v) * stride + positionOffset);
-        xy[0] = ScaleScreen(xy[0]);
+        xy[0] = MapScreenX(map, xy[0], placement);
         xy[1] = ScaleScreen(xy[1]);
     }
+}
+
+// --- True widescreen: where a screen-space draw goes ------------------------------------------------
+// On a wide target (d3d.h) the game's 640x480 frame sits in the middle. A pre-transformed draw is:
+//  - spread over the whole width (Stretch) when it covers the frame's whole width and is a screen
+//    effect: untextured (fades, letterbox bars, darkening) or reading a render target (bloom, glow,
+//    the frame's own copies, which are as wide);
+//  - kept in the middle (Centre) when it is a picture covering the width (menus' backgrounds, loading
+//    screens, movies), when it is part of the 3D scene (depth-tested, with depth), or before the
+//    frame has drawn its 3D scene (front-end menus);
+//  - otherwise a HUD piece: kept at the left or the right edge when it lies wholly near that side,
+//    in the middle when it reaches the middle (Settings::hudAnchor; off: everything in the middle).
+// The decision is per draw: a piece drawn in one call moves as one, never torn apart.
+
+// How many 3D draws a frame must have had before its screen-space draws count as a HUD over it.
+constexpr DWORD kWorldDrawsForHud = 16;
+// A HUD piece is at a side when it lies wholly within this fraction of the frame from that side.
+constexpr float kHudSide = 0.45f;
+
+struct ScreenBounds {
+    float minX = 1e30f, maxX = -1e30f, maxZ = 0.0f;
+    bool any = false;
+};
+
+static void AddBounds(ScreenBounds& b, const uint8_t* data, UINT stride, UINT offset, int components,
+    const uint32_t* indices, size_t count)
+{
+    if (!data)
+        return;
+    for (size_t i = 0; i < count; ++i) {
+        const float* p = reinterpret_cast<const float*>(data + size_t(indices[i]) * stride + offset);
+        b.minX = std::min(b.minX, p[0]);
+        b.maxX = std::max(b.maxX, p[0]);
+        if (components >= 3)
+            b.maxZ = std::max(b.maxZ, p[2]);
+        b.any = true;
+    }
+}
+
+static bool SamplesNothingOrTarget()
+{
+    bool textured = false;
+    for (int i = 0; i < 4; ++i) {
+        const BaseTexture* t = State().textures[i];
+        if (!t)
+            continue;
+        textured = true;
+        if (IsRenderTargetData(t->Data) || IsWideData(t->Data))
+            return true;
+    }
+    return !textured;
+}
+
+static const char* PlacementName(Placement p)
+{
+    switch (p) {
+    case Placement::Stretch: return "spread over the width";
+    case Placement::Left: return "at the left edge";
+    case Placement::Right: return "at the right edge";
+    case Placement::Centre: break;
+    }
+    return "in the middle";
+}
+
+static Placement Decide(const SurfaceMap& map, const ScreenBounds& b);
+
+// Where a screen-space draw goes; in the per-draw log (F11) with its extent, for tuning.
+static Placement Place(const SurfaceMap& map, const ScreenBounds& b)
+{
+    const Placement p = Decide(map, b);
+    if (g_DrawLog && map.wide && b.any)
+        LOG_INFO("  widescreen: x %.1f-%.1f, %s", b.minX, b.maxX, PlacementName(p));
+    return p;
+}
+
+static Placement Decide(const SurfaceMap& map, const ScreenBounds& b)
+{
+    if (!map.wide || !b.any)
+        return Placement::Centre;
+    const float width = float(map.xboxWidth);
+    if (b.minX <= 1.0f && b.maxX >= width - 1.0f)
+        return SamplesNothingOrTarget() ? Placement::Stretch : Placement::Centre;
+    if (!GetSettings().hudAnchor || g_Stats.world < kWorldDrawsForHud)
+        return Placement::Centre;
+    const DWORD* rs = XboxRenderStates();
+    const bool depthTested = State().depthStencil && rs[RS_ZENABLE] && (rs[RS_ZFUNC] & 0xF) != 7; // not ALWAYS
+    if (depthTested && b.maxZ > 1e-4f)
+        return Placement::Centre; // a sprite of the 3D scene (projected by the game itself)
+    if (b.maxX <= width * kHudSide)
+        return Placement::Left;
+    if (b.minX >= width * (1.0f - kHudSide))
+        return Placement::Right;
+    return Placement::Centre;
+}
+
+// A pre-transformed draw reading a wide render target at screen positions (texel coordinates of the
+// game's frame) reads the same place of the host surface: the frame is in its middle there too.
+// Returns false when the stage's texture is not wide or the draw is spread over the width anyway.
+static bool WideTexcoordMap(int stage, Placement placement, float& scale, float& offset)
+{
+    const BaseTexture* t = stage >= 0 && stage < 4 ? State().textures[stage] : nullptr;
+    if (!t || placement == Placement::Stretch || !IsWideData(t->Data))
+        return false;
+    const SurfaceMap m = MapFor(t);
+    if (!m.wide)
+        return false;
+    scale = float(m.xboxWidth * RenderScale()) / float(m.hostWidth);
+    offset = m.centre / float(m.hostWidth);
+    return true;
 }
 
 // --- Dynamic ring buffers -------------------------------------------------------------------
@@ -456,6 +568,9 @@ static void DrawVertices(DWORD xprim, const std::vector<uint32_t>& vertices, con
     if (!GetSettings().bloom && IsBloomComposite(mode))
         return Skipped(); // player setting: bloom off
     if (mode == VertexMode::Program) ++g_Stats.programmable; else ++g_Stats.fixed;
+    const SurfaceMap targetMap = MapFor(State().renderTarget);
+    if (mode == VertexMode::Program && targetMap.wide && State().depthStencil && XboxRenderStates()[RS_ZENABLE])
+        ++g_Stats.world;
     if (State().pixelShader) ++g_Stats.pixelShader;
 
     D3DPRIMITIVETYPE type;
@@ -576,7 +691,10 @@ static void DrawVertices(DWORD xprim, const std::vector<uint32_t>& vertices, con
         if (!dst) { Skipped(); return; }
         std::memcpy(dst, s.data + size_t(lo) * s.stride, size_t(count) * s.stride);
         if (pretransformed) {
-            ScaleScreenPositions(dst, count, s.stride, 0);
+            ScreenBounds bounds;
+            AddBounds(bounds, s.data, s.stride, 0, 4, vertices.data(), vertices.size());
+            const Placement placement = Place(targetMap, bounds);
+            ScaleScreenPositions(dst, count, s.stride, 0, targetMap, placement);
             WORD offs[8];
             BYTE sizes[8];
             int sets = FvfTexcoords(State().vertexShader, offs, sizes);
@@ -584,10 +702,12 @@ static void DrawVertices(DWORD xprim, const std::vector<uint32_t>& vertices, con
                 int stage = StageForTexcoord(t);
                 if (stage < 0) continue;
                 const float* sc = TextureScale(stage);
-                if (sc[0] == 1.0f && sc[1] == 1.0f) continue;
+                float wideScale = 1.0f, wideOffset = 0.0f;
+                const bool wide = WideTexcoordMap(stage, placement, wideScale, wideOffset);
+                if (sc[0] == 1.0f && sc[1] == 1.0f && !wide) continue;
                 for (UINT v = 0; v < count; ++v) {
                     float* tc = reinterpret_cast<float*>(dst + size_t(v) * s.stride + offs[t]);
-                    tc[0] /= sc[0];
+                    tc[0] = tc[0] / sc[0] * wideScale + wideOffset;
                     if (sizes[t] > 1) tc[1] /= sc[1];
                 }
             }
@@ -596,6 +716,19 @@ static void DrawVertices(DWORD xprim, const std::vector<uint32_t>& vertices, con
         dev->SetStreamSource(0, g_RingVB, offset, s.stride);
     } else {
         dev->SetVertexDeclaration(layout->decl);
+        // Pass-through programs take screen positions: placed as pre-transformed vertices are.
+        Placement placement = Placement::Centre;
+        if (mode == VertexMode::Passthrough && targetMap.wide) {
+            ScreenBounds bounds;
+            for (const StreamLayout& sl : layout->streams)
+                for (const Element& e : sl.elements)
+                    if (e.reg == VSDE_POSITION && (e.xboxType == VSDT_FLOAT2 || e.xboxType == VSDT_FLOAT3 ||
+                                                   e.xboxType == VSDT_FLOAT4))
+                        AddBounds(bounds, sources[sl.xboxStream].data, sources[sl.xboxStream].stride, e.xboxOffset,
+                            e.xboxType == VSDT_FLOAT2 ? 2 : e.xboxType == VSDT_FLOAT3 ? 3 : 4, vertices.data(),
+                            vertices.size());
+            placement = Place(targetMap, bounds);
+        }
         UINT needed = 0;
         for (const StreamLayout& sl : layout->streams) {
             UINT stride = sl.convert ? sl.hostStride : sources[sl.xboxStream].stride;
@@ -634,7 +767,7 @@ static void DrawVertices(DWORD xprim, const std::vector<uint32_t>& vertices, con
                     BYTE t = e.hostType;
                     if (e.reg == VSDE_POSITION && (t == D3DDECLTYPE_FLOAT2 || t == D3DDECLTYPE_FLOAT3 ||
                                                    t == D3DDECLTYPE_FLOAT4))
-                        ScaleScreenPositions(first, count, stride, e.hostOffset);
+                        ScaleScreenPositions(first, count, stride, e.hostOffset, targetMap, placement);
                 }
             }
             g_RingVB->Unlock();
@@ -786,6 +919,17 @@ static void EndFixedFunction(UINT n)
         Skipped();
         return;
     }
+    const SurfaceMap map = MapFor(State().renderTarget);
+    Placement placement = Placement::Centre;
+    float wideScale[4] = { 1, 1, 1, 1 }, wideOffset[4] = {};
+    if (pretransformed && map.wide) {
+        ScreenBounds bounds;
+        AddBounds(bounds, reinterpret_cast<const uint8_t*>(g_ImmVertices.data()), 256, VSDE_POSITION * 16, 4, v.data(),
+            v.size());
+        placement = Place(map, bounds);
+        for (int stage = 0; stage < 4; ++stage)
+            WideTexcoordMap(stage, placement, wideScale[stage], wideOffset[stage]);
+    }
     UINT vbOffset;
     uint8_t* dst = AllocVertices(n * stride, stride, vbOffset);
     if (!dst)
@@ -802,14 +946,15 @@ static void EndFixedFunction(UINT n)
                 std::memcpy(out, c, f.reg == VSDE_POSITION && !pretransformed ? 12 : 16);
                 if (f.reg == VSDE_POSITION && pretransformed) {
                     float* xy = reinterpret_cast<float*>(out);
-                    xy[0] = ScaleScreen(xy[0]);
+                    xy[0] = MapScreenX(map, xy[0], placement);
                     xy[1] = ScaleScreen(xy[1]);
                 }
                 int stage = f.reg >= VSDE_TEXCOORD0 ? StageForTexcoord(f.reg - VSDE_TEXCOORD0) : -1;
                 if (pretransformed && stage >= 0) {
                     const float* sc = TextureScale(stage);
-                    reinterpret_cast<float*>(out)[0] /= sc[0];
-                    reinterpret_cast<float*>(out)[1] /= sc[1];
+                    float* tc = reinterpret_cast<float*>(out);
+                    tc[0] = tc[0] / sc[0] * wideScale[stage] + wideOffset[stage];
+                    tc[1] /= sc[1];
                 }
             }
         }
@@ -897,13 +1042,15 @@ static void __stdcall XbSetVertexData4f(int reg, float a, float b, float c, floa
 void DrawClearQuad(DWORD channels, D3DCOLOR color)
 {
     IDirect3DDevice9* dev = Device();
-    const Viewport& v = State().viewport;
     struct V {
         float x, y, z, rhw;
         D3DCOLOR c;
     };
-    const float x0 = ScaleScreen(float(v.X) - 0.5f), y0 = ScaleScreen(float(v.Y) - 0.5f);
-    const float x1 = ScaleScreen(float(v.X + v.Width) - 0.5f), y1 = ScaleScreen(float(v.Y + v.Height) - 0.5f);
+    // The host viewport the clear set (device.cpp): the Xbox viewport, placed on a wide target too.
+    D3DVIEWPORT9 hv;
+    dev->GetViewport(&hv);
+    const float x0 = float(hv.X) - 0.5f, y0 = float(hv.Y) - 0.5f;
+    const float x1 = float(hv.X + hv.Width) - 0.5f, y1 = float(hv.Y + hv.Height) - 0.5f;
     V quad[4] = {
         { x0, y0, 0, 1, color },
         { x1, y0, 0, 1, color },
